@@ -1,0 +1,617 @@
+import { useEffect, useMemo, useState, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import { Alert, Button, Card, Col, Form, Input, Row, Select, Space, Statistic, Tabs, Tag, Typography } from "antd";
+
+import {
+  claimTaskInstance,
+  createTaskInstance,
+  createTaskTemplate,
+  listAudienceRuleSets,
+  listPlatformSites,
+  listPlatformUsers,
+  listTaskInstances,
+  listTaskTemplates,
+  type AudienceRuleSet,
+  type PlatformSite,
+  type PlatformUser,
+  type TaskInstance,
+  type TaskInstanceCreatePayload,
+  type TaskTemplate,
+  type TaskTemplateCreatePayload,
+} from "../services/api";
+import {
+  listPlatformUserMemberStatusIndex,
+  type PlatformUserMemberStatusSummary,
+} from "../services/operations";
+import { useAppStore } from "../stores/appStore";
+
+function formatTemplateStatus(status: string): string {
+  if (status === "draft") return "���";
+  if (status === "active") return "����?;
+  if (status === "paused") return "已暂�?;
+  if (status === "expired") return "已过�?;
+  if (status === "archived") return "已归�?;
+  return status;
+}
+
+function formatInstanceStatus(status: string): string {
+  if (status === "available") return "��?;
+  if (status === "claimed") return "����?;
+  if (status === "submitted") return "已提�?;
+  if (status === "under_review" || status === "pending_review") return "审核�?;
+  if (status === "changes_requested") return "待补�?;
+  if (status === "approved") return "���€����";
+  if (status === "rejected") return "已驳�?;
+  if (status === "appealing") return "申诉�?;
+  if (status === "completed") return "已完�?;
+  if (status === "expired") return "已过�?;
+  if (status === "abandoned") return "已放�?;
+  if (status === "cancelled") return "已ȡ�?;
+  return status;
+}
+
+function formatTaskType(value: string): string {
+  if (value === "shopping") return "��������";
+  if (value === "invite") return "�€������?;
+  if (value === "ladder") return "��������";
+  if (value === "daily") return "ÿ������";
+  return value;
+}
+
+function formatTimestamp(value: string | null): string {
+  return value ? new Date(value).toLocaleString("zh-CN") : "����";
+}
+
+function getVerificationStatusColor(status: string): string {
+  if (status === "approved") return "success";
+  if (status === "rejected") return "error";
+  if (status === "submitted" || status === "under_review") return "processing";
+  return "default";
+}
+
+function getBindingStatusColor(status: string): string {
+  if (status === "bound" || status === "approved") return "success";
+  if (status === "failed" || status === "rejected") return "error";
+  if (status === "submitted" || status === "pending" || status === "verifying") return "processing";
+  return "default";
+}
+
+export function TasksPage(): JSX.Element {
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+  const openCustomersPage = useAppStore((state) => state.openCustomersPage);
+
+  const [templates, setTemplates] = useState<TaskTemplate[]>([]);
+  const [instances, setInstances] = useState<TaskInstance[]>([]);
+  const [users, setUsers] = useState<PlatformUser[]>([]);
+  const [sites, setSites] = useState<PlatformSite[]>([]);
+  const [audienceRules, setAudienceRules] = useState<AudienceRuleSet[]>([]);
+  const [taskInstanceMemberStatusIndex, setTaskInstanceMemberStatusIndex] = useState<
+    Record<string, PlatformUserMemberStatusSummary>
+  >({});
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (accountFilter === "ALL" && actorAccountIds.length === 1) {
+      setAccountFilter(actorAccountIds[0]);
+    }
+  }, [actorAccountIds, accountFilter]);
+
+  useEffect(() => {
+    void loadData();
+  }, [accountFilter]);
+
+  async function loadData(): Promise<void> {
+    setLoading(true);
+    setError(null);
+    try {
+      const [nextTemplates, nextInstances, nextUsers, nextSites, nextAudienceRules] = await Promise.all([
+        listTaskTemplates(accountFilter !== "ALL" ? { account_id: accountFilter } : undefined),
+        listTaskInstances(accountFilter !== "ALL" ? { account_id: accountFilter } : undefined),
+        listPlatformUsers(),
+        listPlatformSites(),
+        listAudienceRuleSets(),
+      ]);
+      const nextStatusIndex = await listPlatformUserMemberStatusIndex(
+        nextUsers.filter((item) => (accountFilter !== "ALL" ? item.account_id === accountFilter : true)),
+        accountFilter !== "ALL" ? accountFilter : undefined
+      );
+      setTemplates(nextTemplates);
+      setInstances(nextInstances);
+      setUsers(nextUsers);
+      setSites(nextSites);
+      setAudienceRules(nextAudienceRules);
+      setTaskInstanceMemberStatusIndex(nextStatusIndex);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "任务ҳ加载ʧ�?);
+    } finally {
+      setLoading(false);
+      setPendingAction(null);
+    }
+  }
+
+  async function handleCreateTemplate(values: TaskTemplateCreatePayload): Promise<void> {
+    setPendingAction("create-template");
+    setError(null);
+    try {
+      const created = await createTaskTemplate(values);
+      setNotice(`����ģ����������${created.name}`);
+      await loadData();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "��������ģ��ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleCreateInstance(values: TaskInstanceCreatePayload): Promise<void> {
+    setPendingAction("create-instance");
+    setError(null);
+    try {
+      const created = await createTaskInstance(values);
+      setNotice(`����ʵ����������${created.template_task_key} -> ${created.public_user_id}`);
+      await loadData();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "��������ʵ��ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleClaim(instanceId: string): Promise<void> {
+    setPendingAction(`claim:${instanceId}`);
+    setError(null);
+    try {
+      const claimed = await claimTaskInstance(instanceId);
+      setNotice(`�������������${claimed.id}`);
+      await loadData();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "��ȡ����ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  const accountOptions = useMemo(() => {
+    const values = new Set<string>();
+    actorAccountIds.forEach((item) => item && values.add(item));
+    templates.forEach((item) => item.account_id && values.add(item.account_id));
+    instances.forEach((item) => item.account_id && values.add(item.account_id));
+    sites.forEach((item) => item.account_id && values.add(item.account_id));
+    return Array.from(values).sort();
+  }, [actorAccountIds, instances, sites, templates]);
+
+  const templateColumns: ProColumns<TaskTemplate>[] = [
+    {
+      title: "ģ��",
+      key: "template",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.name}</Typography.Text>
+          <Typography.Text type="secondary">{record.task_key}</Typography.Text>
+        </Space>
+      ),
+    },
+    { title: "����", render: (_, record) => record.account_id ?? "����" },
+    { title: "����", render: (_, record) => formatTaskType(record.task_type) },
+    { title: "���€?, render: (_, record) => <Tag color={record.status === "active" ? "success" : "default"}>{formatTemplateStatus(record.status)}</Tag> },
+    { title: "��ȡʱ��", render: (_, record) => `${record.claim_timeout_seconds}s` },
+    { title: "��������", dataIndex: "reward_points" },
+  ];
+
+  /* const taskInstanceMemberStatusColumns: ProColumns<TaskInstance>[] = [
+    {
+      title: "会员认证",
+      key: "member_verification",
+      render: (_, record) => {
+        const summary = taskInstanceMemberStatusIndex[record.user_id];
+        if (!summary?.latestVerificationStatus) {
+          return <Typography.Text type="secondary">鏆傛�?/Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getVerificationStatusColor(summary.latestVerificationStatus)}>
+              {summary.latestVerificationStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.verificationCount} �?/Typography.Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: "WhatsApp 缁戝�?,
+      key: "member_whatsapp_binding",
+      render: (_, record) => {
+        const summary = taskInstanceMemberStatusIndex[record.user_id];
+        if (!summary?.latestBindingStatus) {
+          return <Typography.Text type="secondary">鏆傛�?/Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getBindingStatusColor(summary.latestBindingStatus)}>
+              {summary.latestBindingStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.bindingCount} �?/Typography.Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: "瀹㈡�?,
+      render: (_, record) => (
+        <Button
+          size="small"
+          onClick={() =>
+            openCustomersPage({
+              account_id: record.account_id ?? undefined,
+              selected_profile_id: record.user_id,
+              query: record.public_user_id,
+            })
+          }
+        >
+          瀹㈡�?        </Button>
+      ),
+    },
+    {
+      title: "瀹㈡�?,
+      render: (_, record) => (
+        <Button
+          size="small"
+          onClick={() =>
+            openCustomersPage({
+              account_id: record.account_id ?? undefined,
+              selected_profile_id: record.user_id,
+              query: record.public_user_id,
+            })
+          }
+        >
+          瀹㈡�?        </Button>
+      ),
+    },
+  ];
+
+  ];
+  */
+  /* const taskInstanceMemberStatusColumns: ProColumns<TaskInstance>[] = [
+    {
+      title: "会员认证",
+      key: "member_verification",
+      render: (_, record) => {
+        const summary = taskInstanceMemberStatusIndex[record.user_id];
+        if (!summary?.latestVerificationStatus) {
+          return <Typography.Text type="secondary">����</Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getVerificationStatusColor(summary.latestVerificationStatus)}>
+              {summary.latestVerificationStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.verificationCount} �?/Typography.Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: "WhatsApp 缁戝�?,
+      key: "member_whatsapp_binding",
+      render: (_, record) => {
+        const summary = taskInstanceMemberStatusIndex[record.user_id];
+        if (!summary?.latestBindingStatus) {
+          return <Typography.Text type="secondary">����</Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getBindingStatusColor(summary.latestBindingStatus)}>
+              {summary.latestBindingStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.bindingCount} �?/Typography.Text>
+          </Space>
+        );
+      },
+    },
+  ];
+
+  ];
+  */
+  const taskInstanceMemberStatusColumns: ProColumns<TaskInstance>[] = [
+    {
+      title: "Verification",
+      key: "member_verification",
+      render: (_, record) => {
+        const summary = taskInstanceMemberStatusIndex[record.user_id];
+        if (!summary?.latestVerificationStatus) {
+          return <Typography.Text type="secondary">N/A</Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getVerificationStatusColor(summary.latestVerificationStatus)}>
+              {summary.latestVerificationStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.verificationCount}x</Typography.Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: "Binding",
+      key: "member_whatsapp_binding",
+      render: (_, record) => {
+        const summary = taskInstanceMemberStatusIndex[record.user_id];
+        if (!summary?.latestBindingStatus) {
+          return <Typography.Text type="secondary">N/A</Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getBindingStatusColor(summary.latestBindingStatus)}>
+              {summary.latestBindingStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.bindingCount}x</Typography.Text>
+          </Space>
+        );
+      },
+    },
+  ];
+
+  const instanceColumns: ProColumns<TaskInstance>[] = [
+    ...taskInstanceMemberStatusColumns,
+    {
+      title: "ʵ��",
+      key: "instance",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.template_name}</Typography.Text>
+          <Typography.Text type="secondary">{record.public_user_id}</Typography.Text>
+        </Space>
+      ),
+    },
+    { title: "����", render: (_, record) => record.account_id ?? "����" },
+    { title: "վ��", render: (_, record) => record.site_key ?? "����" },
+    { title: "���€?, render: (_, record) => <Tag color={record.status === "available" ? "success" : "processing"}>{formatInstanceStatus(record.status)}</Tag> },
+    { title: "�����", render: (_, record) => (record.review_required ? "�€�? : "�����") },
+    { title: "�������?, render: (_, record) => formatTimestamp(record.available_at) },
+    {
+      title: "����",
+      render: (_, record) =>
+        record.status === "available" ? (
+          <Button
+            size="small"
+            loading={pendingAction === `claim:${record.id}`}
+            onClick={() => void handleClaim(record.id)}
+          >
+            ��ȡ
+          </Button>
+        ) : (
+          <Typography.Text type="secondary">�</Typography.Text>
+        ),
+    },
+    {
+      title: "瀹㈡�?,
+      render: (_, record) => (
+        <Button
+          size="small"
+          onClick={() =>
+            openCustomersPage({
+              account_id: record.account_id ?? undefined,
+              selected_profile_id: record.user_id,
+              query: record.public_user_id,
+            })
+          }
+        >
+          瀹㈡�?        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+                    <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={[
+              { label: "ȫ������", value: "ALL" },
+              ...accountOptions.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={setAccountFilter}
+          />
+          <Button loading={loading} onClick={() => void loadData()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="ģ板�? value={templates.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="ʵ例�? value={instances.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��? value={instances.filter((item) => item.status === "available").length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="����? value={instances.filter((item) => item.status === "pending_review" || item.status === "under_review").length} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Tabs
+        items={[
+          {
+            key: "templates",
+            label: "����ģ��",
+            children: (
+              <Row gutter={[16, 16]}>
+                <Col lg={14} xs={24}>
+                  <ProTable<TaskTemplate>
+                    columns={templateColumns}
+                    dataSource={templates}
+                    loading={loading}
+                    options={false}
+                    pagination={{ pageSize: 8 }}
+                    rowKey="id"
+                    search={false}
+                    toolBarRender={false}
+                  />
+                </Col>
+                <Col lg={10} xs={24}>
+                  <Card title="��������ģ��">
+                    <Form
+                      layout="vertical"
+                      initialValues={{
+                        account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+                        task_type: "shopping",
+                        status: "draft",
+                        claim_timeout_seconds: 86400,
+                        reward_points: 0,
+                        auto_review_enabled: true,
+                      }}
+                      onFinish={(values) => void handleCreateTemplate(values)}
+                    >
+                      <Form.Item label="����" name="account_id">
+                        <Select allowClear options={accountOptions.map((item) => ({ label: item, value: item }))} />
+                      </Form.Item>
+                      <Form.Item label="task_key" name="task_key" rules={[{ required: true }]}>
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="����" name="name" rules={[{ required: true }]}>
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="���" name="title" rules={[{ required: true }]}>
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="˵��" name="description">
+                        <Input.TextArea rows={3} />
+                      </Form.Item>
+                      <Form.Item label="����" name="task_type">
+                        <Select
+                          options={[
+                            { label: "��������", value: "shopping" },
+                            { label: "�€������?, value: "invite" },
+                            { label: "��������", value: "ladder" },
+                            { label: "ÿ������", value: "daily" },
+                          ]}
+                        />
+                      </Form.Item>
+                      <Form.Item label="���€? name="status">
+                        <Select
+                          options={[
+                            { label: "���", value: "draft" },
+                            { label: "����?, value: "active" },
+                            { label: "已暂�?, value: "paused" },
+                            { label: "已过�?, value: "expired" },
+                            { label: "已归�?, value: "archived" },
+                          ]}
+                        />
+                      </Form.Item>
+                      <Form.Item label="受众规则�? name="audience_rule_set_id">
+                        <Select
+                          allowClear
+                          options={audienceRules.map((rule) => ({ label: rule.name, value: rule.id }))}
+                        />
+                      </Form.Item>
+                      <Form.Item label="��������������? name="claim_timeout_seconds">
+                        <Input type="number" />
+                      </Form.Item>
+                      <Form.Item label="��������" name="reward_points">
+                        <Input type="number" />
+                      </Form.Item>
+                      <Form.Item label="��������" name="auto_review_enabled">
+                        <Select
+                          options={[
+                            { label: "�?, value: true },
+                            { label: "�?, value: false },
+                          ]}
+                        />
+                      </Form.Item>
+                      <Button htmlType="submit" loading={pendingAction === "create-template"} type="primary" block>
+                        ��������ģ��
+                      </Button>
+                    </Form>
+                  </Card>
+                </Col>
+              </Row>
+            ),
+          },
+          {
+            key: "instances",
+            label: "����ʵ��",
+            children: (
+              <Row gutter={[16, 16]}>
+                <Col lg={14} xs={24}>
+                  <ProTable<TaskInstance>
+                    columns={instanceColumns}
+                    dataSource={instances}
+                    loading={loading}
+                    options={false}
+                    pagination={{ pageSize: 8 }}
+                    rowKey="id"
+                    search={false}
+                    toolBarRender={false}
+                  />
+                </Col>
+                <Col lg={10} xs={24}>
+                  <Card title="��������ʵ��">
+                    <Form
+                      layout="vertical"
+                      initialValues={{
+                        account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+                        review_required: false,
+                      }}
+                      onFinish={(values) => void handleCreateInstance(values)}
+                    >
+                      <Form.Item label="����" name="account_id">
+                        <Select allowClear options={accountOptions.map((item) => ({ label: item, value: item }))} />
+                      </Form.Item>
+                      <Form.Item label="����ģ��" name="template_id" rules={[{ required: true }]}>
+                        <Select options={templates.map((item) => ({ label: item.name, value: item.id }))} />
+                      </Form.Item>
+                      <Form.Item label="����" name="user_id" rules={[{ required: true }]}>
+                        <Select
+                          showSearch
+                          optionFilterProp="label"
+                          options={users.map((item) => ({
+                            label: item.display_name || item.public_user_id,
+                            value: item.id,
+                          }))}
+                        />
+                      </Form.Item>
+                      <Form.Item label="վ��" name="site_id">
+                        <Select allowClear options={sites.map((item) => ({ label: item.brand_name, value: item.id }))} />
+                      </Form.Item>
+                      <Form.Item label="�€����? name="review_required">
+                        <Select
+                          options={[
+                            { label: "�?, value: false },
+                            { label: "�?, value: true },
+                          ]}
+                        />
+                      </Form.Item>
+                      <Button htmlType="submit" loading={pendingAction === "create-instance"} type="primary" block>
+                        ��������ʵ��
+                      </Button>
+                    </Form>
+                  </Card>
+                </Col>
+              </Row>
+            ),
+          },
+        ]}
+      />
+    </Space>
+  );
+}
+

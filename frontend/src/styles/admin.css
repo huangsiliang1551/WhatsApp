@@ -1,0 +1,375 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&display=swap");
+
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  background: #f5f7fa;
+  color: #1f2937;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: #f5f7fa;
+  color: #1f2937;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+code,
+pre {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+pre {
+  margin: 0;
+  overflow: auto;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.list li + li {
+  margin-top: 8px;
+}
+
+.monitoring-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-layout .ant-layout,
+.admin-layout .ant-pro-page-container {
+  background: transparent;
+}
+
+/* === Native antd Layout dark sider styling === */
+.ant-layout {
+  overscroll-behavior: contain;
+}
+
+.admin-layout .ant-layout-sider {
+  box-shadow: inset -1px 0 0 rgba(148, 163, 184, 0.12);
+}
+
+.admin-layout .ant-layout-sider .ant-menu.ant-menu-dark {
+  border-inline-end: none;
+}
+
+.admin-layout .ant-layout-sider .ant-menu-item-selected {
+  background: rgba(22, 119, 255, 0.15) !important;
+}
+
+.admin-layout .ant-layout-sider .ant-menu-submenu-title:hover,
+.admin-layout .ant-layout-sider .ant-menu-item:not(.ant-menu-item-selected):hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.admin-layout .ant-layout-header {
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.admin-route-page .ant-typography h4 {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.admin-route-page .ant-typography-secondary {
+  color: #94a3b8;
+}
+
+.admin-panel.ant-pro-card,
+.admin-layout .ant-card {
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.admin-panel.ant-pro-card {
+  margin-bottom: 20px;
+}
+
+.admin-layout .ant-card,
+.admin-layout .ant-page-header,
+.admin-layout .ant-pro-card,
+.admin-layout .ant-table-wrapper,
+.admin-layout .ant-tabs-nav {
+  border-color: #e2e8f0;
+}
+
+.admin-layout .ant-statistic {
+  min-height: 72px;
+}
+
+.admin-layout .ant-tag {
+  border-radius: 999px;
+}
+
+.admin-panel .ant-pro-card-header {
+  padding: 16px 20px;
+}
+
+.admin-panel .ant-pro-card-body {
+  padding: 20px;
+}
+
+.admin-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.admin-sider-footer {
+  width: 100%;
+  padding: 12px 16px 18px;
+}
+
+.admin-sider-footer .ant-typography {
+  color: #cbd5e1;
+}
+
+.admin-menu-button {
+  display: block;
+  width: 100%;
+  color: inherit;
+  text-decoration: none;
+}
+
+.admin-menu-button:hover {
+  color: inherit;
+}
+
+.admin-menu-button .ant-pro-base-menu-item-content,
+.admin-menu-button .ant-pro-base-menu-item-content > div {
+  width: 100%;
+}
+
+.admin-layout .ant-menu-item .admin-menu-button {
+  padding: 0;
+}
+
+@media (max-width: 1280px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-layout .ant-page-header {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .admin-layout .ant-pro-page-container-children-container {
+    padding-bottom: 20px;
+  }
+}
+
+/* ===== Dark Sider Menu - Modernized ===== */
+
+/* 菜单项基础样式 */
+.ant-menu-dark .ant-menu-item {
+  margin: 2px 8px !important;
+  width: auto !important;
+  border-radius: 6px !important;
+  transition: all 0.2s ease !important;
+  padding-left: 16px !important;
+}
+
+/* hover 态 */
+.ant-menu-dark .ant-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 选中态 - 左侧蓝色竖条 + 背景 */
+.ant-menu-dark .ant-menu-item.ant-menu-item-selected {
+  background: rgba(24, 144, 255, 0.18) !important;
+  border-left: 3px solid #1677ff !important;
+  padding-left: 13px !important;
+}
+
+/* 子菜单展开区域 - 略微深色背景区分层级 */
+.ant-menu-dark .ant-menu-sub {
+  background: rgba(0, 0, 0, 0.2) !important;
+}
+
+/* 子菜单项 */
+.ant-menu-dark .ant-menu-sub .ant-menu-item {
+  margin: 1px 6px !important;
+  padding-left: 28px !important;
+}
+
+.ant-menu-dark .ant-menu-sub .ant-menu-item.ant-menu-item-selected {
+  padding-left: 25px !important;
+}
+
+/* 分组标题 - 加粗 + 留白 + 上分隔 */
+.ant-menu-dark .ant-menu-submenu-title {
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
+  font-size: 13px !important;
+  margin: 6px 8px 2px !important;
+  border-radius: 6px !important;
+  transition: all 0.2s ease !important;
+}
+
+.ant-menu-dark .ant-menu-submenu-title:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* 分组间的微妙分隔（第一个除外） */
+.ant-menu-dark > .ant-menu-submenu:not(:first-child) {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 2px;
+}
+
+/* 折叠箭头更柔和 */
+.ant-menu-dark .ant-menu-submenu-arrow {
+  opacity: 0.45;
+}
+
+/* 展开态箭头更亮 */
+.ant-menu-dark .ant-menu-submenu-open > .ant-menu-submenu-title > .ant-menu-submenu-arrow {
+  opacity: 0.75;
+}
+
+/* 搜索框内的 Input 深色主题适配 */
+.ant-layout-sider-dark .ant-input-affix-wrapper {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.ant-layout-sider-dark .ant-input-affix-wrapper:hover {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.ant-layout-sider-dark .ant-input-affix-wrapper-focused {
+  border-color: #1677ff !important;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2) !important;
+}
+
+.ant-layout-sider-dark .ant-input {
+  background: transparent !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.ant-layout-sider-dark .ant-input::placeholder {
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+
+.ant-layout-sider-dark .ant-input-clear-icon {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
+/* ===== Dark Sider Menu - Modernized ===== */
+
+/* 菜单项基础样式 */
+.ant-menu-dark .ant-menu-item {
+  margin: 2px 8px !important;
+  width: auto !important;
+  border-radius: 6px !important;
+  transition: all 0.2s ease !important;
+  padding-left: 16px !important;
+}
+
+/* hover 态 */
+.ant-menu-dark .ant-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 选中态 - 左侧蓝色竖条 + 背景 */
+.ant-menu-dark .ant-menu-item.ant-menu-item-selected {
+  background: rgba(24, 144, 255, 0.18) !important;
+  border-left: 3px solid #1677ff !important;
+  padding-left: 13px !important;
+}
+
+/* 子菜单展开区域 - 略微深色背景区分层级 */
+.ant-menu-dark .ant-menu-sub {
+  background: rgba(0, 0, 0, 0.2) !important;
+}
+
+/* 子菜单项 */
+.ant-menu-dark .ant-menu-sub .ant-menu-item {
+  margin: 1px 6px !important;
+  padding-left: 28px !important;
+}
+
+.ant-menu-dark .ant-menu-sub .ant-menu-item.ant-menu-item-selected {
+  padding-left: 25px !important;
+}
+
+/* 分组标题 - 加粗 + 留白 */
+.ant-menu-dark .ant-menu-submenu-title {
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
+  font-size: 13px !important;
+  margin: 6px 8px 2px !important;
+  border-radius: 6px !important;
+  transition: all 0.2s ease !important;
+}
+
+.ant-menu-dark .ant-menu-submenu-title:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* 分组间微妙分隔 */
+.ant-menu-dark > .ant-menu-submenu:not(:first-child) {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 2px;
+}
+
+/* 搜索框深色适配 */
+.ant-layout-sider-dark .ant-input-affix-wrapper {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.ant-layout-sider-dark .ant-input-affix-wrapper:hover {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.ant-layout-sider-dark .ant-input-affix-wrapper-focused {
+  border-color: #1677ff !important;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2) !important;
+}
+
+.ant-layout-sider-dark .ant-input {
+  background: transparent !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.ant-layout-sider-dark .ant-input::placeholder {
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+
+.ant-layout-sider-dark .ant-input-clear-icon {
+  color: rgba(255, 255, 255, 0.4) !important;
+}

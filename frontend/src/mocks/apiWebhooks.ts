@@ -1,0 +1,43 @@
+import type { ApiWebhookPolicyItem } from "../types/apiWebhooks";
+
+export const mockApiWebhookPolicies: ApiWebhookPolicyItem[] = [
+  {
+    policy_id: "policy-webhook-global",
+    account_id: null,
+    policy_name: "全局签名基线",
+    signature_mode: "strict",
+    replay_limit_per_minute: 120,
+    ip_allowlist_enabled: false,
+    secret_rotation_state: "ready",
+    effective_result: "partial",
+    effective_reason: "全局签名已强制，IP 白名单待账号细化",
+    updated_at: "2026-06-11T09:20:00Z",
+    source: "mock",
+  },
+  {
+    policy_id: "policy-webhook-cn",
+    account_id: "brand-demo-cn",
+    policy_name: "品牌 CN 回调策略",
+    signature_mode: "strict",
+    replay_limit_per_minute: 60,
+    ip_allowlist_enabled: true,
+    secret_rotation_state: "ready",
+    effective_result: "enforced",
+    effective_reason: "签名强制 + 白名单已启用",
+    updated_at: "2026-06-11T09:05:00Z",
+    source: "mock",
+  },
+  {
+    policy_id: "policy-webhook-es",
+    account_id: "brand-demo-es",
+    policy_name: "品牌 ES 兼容策略",
+    signature_mode: "compat",
+    replay_limit_per_minute: 90,
+    ip_allowlist_enabled: false,
+    secret_rotation_state: "overdue",
+    effective_result: "review",
+    effective_reason: "旧签名链路仍在迁移",
+    updated_at: "2026-06-11T08:40:00Z",
+    source: "mock",
+  },
+];

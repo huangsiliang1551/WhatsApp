@@ -1,0 +1,15 @@
+{
+  "export_id": "exp-abec36d506c4",
+  "type": "conversations",
+  "filters": {
+    "status": "open"
+  },
+  "columns": [],
+  "status": "completed",
+  "estimated_rows": 1,
+  "created_at": "2026-06-13T11:05:40.507882+00:00",
+  "expires_at": "2026-06-14T11:05:40.507894+00:00",
+  "file_size_bytes": 4,
+  "row_count": 0,
+  "download_url": "/api/exports/exp-abec36d506c4/download"
+}

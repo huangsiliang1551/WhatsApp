@@ -1,0 +1,241 @@
+import { useEffect, useState, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Input,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
+} from "antd";
+
+import {
+  getImportExportCenterSnapshot,
+  runSupportKnowledgeExport,
+  runSupportKnowledgeImport,
+} from "../services/operations";
+import { useAppStore } from "../stores/appStore";
+import type { ImportExportCenterSnapshot, KnowledgeEntrySummary } from "../types/operations";
+import type { SupportKnowledgeImportResult } from "../services/api";
+
+export function ImportExportPage(): JSX.Element {
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [snapshot, setSnapshot] = useState<ImportExportCenterSnapshot | null>(null);
+  const [payload, setPayload] = useState("");
+  const [importResult, setImportResult] = useState<SupportKnowledgeImportResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (accountFilter === "ALL" && actorAccountIds.length === 1) {
+      setAccountFilter(actorAccountIds[0]);
+    }
+  }, [accountFilter, actorAccountIds]);
+
+  useEffect(() => {
+    void loadSnapshot();
+  }, [accountFilter]);
+
+  async function loadSnapshot(): Promise<void> {
+    setLoading(true);
+    setError(null);
+    try {
+      setSnapshot(
+        await getImportExportCenterSnapshot(accountFilter !== "ALL" ? accountFilter : undefined)
+      );
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "���뵼�����ļ���ʧ��");
+    } finally {
+      setLoading(false);
+      setPendingAction(null);
+    }
+  }
+
+  async function handleExport(): Promise<void> {
+    setPendingAction("export");
+    setError(null);
+    setNotice(null);
+    try {
+      const bundle = await runSupportKnowledgeExport(
+        accountFilter !== "ALL" ? accountFilter : undefined
+      );
+      setPayload(JSON.stringify(bundle, null, 2));
+      setNotice(`�ѵ��� ${bundle.total_entries} ��֪ʶ���¼`);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "����ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleImport(): Promise<void> {
+    if (!payload.trim()) return;
+    setPendingAction("import");
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await runSupportKnowledgeImport(
+        payload,
+        accountFilter !== "ALL" ? accountFilter : undefined,
+        true
+      );
+      setImportResult(result);
+      setNotice(`������ɣ����� ${result.created_count} / ���� ${result.updated_count}`);
+      await loadSnapshot();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "����ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  const columns: ProColumns<KnowledgeEntrySummary>[] = [
+    { title: "�˺�", render: (_, record) => record.account_id ?? "����" },
+    { title: "����", dataIndex: "article_id" },
+    { title: "·��", dataIndex: "route_name" },
+    { title: "����", dataIndex: "category" },
+    { title: "����", dataIndex: "title" },
+    { title: "����", dataIndex: "source_language" },
+    {
+      title: "״̬",
+      render: (_, record) => (
+        <Space size={[6, 6]} wrap>
+          <Tag color={record.is_active ? "success" : "default"}>
+            {record.is_active ? "����" : "ͣ��"}
+          </Tag>
+          <Tag>{record.source_type}</Tag>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+          <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={[
+              { label: "ȫ���˺�", value: "ALL" },
+              ...actorAccountIds.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={setAccountFilter}
+          />
+          <Button loading={loading} onClick={() => void loadSnapshot()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="����Ŀ" value={snapshot?.total_entries ?? 0} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="������Ŀ" value={snapshot?.active_entries ?? 0} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="������Ŀ" value={snapshot?.builtin_entries ?? 0} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="���ݿ���Ŀ" value={snapshot?.database_entries ?? 0} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<KnowledgeEntrySummary>
+            columns={columns}
+            dataSource={snapshot?.entries ?? []}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 8 }}
+            rowKey={(record) => `${record.account_id ?? "builtin"}:${record.article_id}`}
+            search={false}
+            toolBarRender={false}
+          />
+        </Col>
+        <Col lg={10} xs={24}>
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <Card title="�������">
+              <Table
+                columns={[
+                  { title: "����", dataIndex: "category" },
+                  { title: "����", dataIndex: "total_count" },
+                  { title: "����", dataIndex: "active_count" },
+                  { title: "����", dataIndex: "builtin_count" },
+                  { title: "���ݿ�", dataIndex: "database_count" },
+                ]}
+                dataSource={snapshot?.categories ?? []}
+                pagination={false}
+                rowKey={(record) => record.category}
+                size="small"
+              />
+            </Card>
+            <Card title="���� / ����">
+              <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                <Space>
+                  <Button
+                    loading={pendingAction === "export"}
+                    onClick={() => void handleExport()}
+                    type="primary"
+                  >
+                    ����֪ʶ��
+                  </Button>
+                  <Button loading={pendingAction === "import"} onClick={() => void handleImport()}>
+                    ����֪ʶ��
+                  </Button>
+                </Space>
+                <Input.TextArea
+                  rows={14}
+                  placeholder="ճ�������� JSON ���ݻ����������"
+                  value={payload}
+                  onChange={(event) => setPayload(event.target.value)}
+                />
+              </Space>
+            </Card>
+          </Space>
+        </Col>
+      </Row>
+
+      {importResult ? (
+        <Card title="������">
+          <Table
+            columns={[
+              { title: "�˺�", dataIndex: "account_id" },
+              { title: "����", dataIndex: "article_id" },
+              { title: "·��", dataIndex: "route_name" },
+              { title: "״̬", dataIndex: "status" },
+              { title: "����", dataIndex: "detail" },
+            ]}
+            dataSource={importResult.items}
+            pagination={false}
+            rowKey={(record) => `${record.account_id}:${record.article_id}`}
+            size="small"
+          />
+        </Card>
+      ) : null}
+    </Space>
+  );
+}

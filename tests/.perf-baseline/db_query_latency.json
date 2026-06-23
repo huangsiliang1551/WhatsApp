@@ -1,0 +1,46 @@
+{
+  "test": "test_perf_db_query_latency",
+  "description": "常用 DB 查询接口 P95 延迟 (SQLite in test mode)",
+  "queries": {
+    "list_conversations": {
+      "avg_ms": 6.98,
+      "p50_ms": 6.94,
+      "p95_ms": 8.36,
+      "p99_ms": 11.02,
+      "min_ms": 5.75,
+      "max_ms": 11.68
+    },
+    "list_messages": {
+      "avg_ms": 5.84,
+      "p50_ms": 5.81,
+      "p95_ms": 6.66,
+      "p99_ms": 6.73,
+      "min_ms": 4.85,
+      "max_ms": 6.75
+    },
+    "list_meta_accounts": {
+      "avg_ms": 5.33,
+      "p50_ms": 5.1,
+      "p95_ms": 6.13,
+      "p99_ms": 10.31,
+      "min_ms": 4.13,
+      "max_ms": 11.35
+    },
+    "runtime_state": {
+      "avg_ms": 7.34,
+      "p50_ms": 5.3,
+      "p95_ms": 8.96,
+      "p99_ms": 38.31,
+      "min_ms": 4.37,
+      "max_ms": 45.65
+    },
+    "conversation_timeline": {
+      "avg_ms": 7.43,
+      "p50_ms": 7.19,
+      "p95_ms": 8.18,
+      "p99_ms": 11.41,
+      "min_ms": 6.47,
+      "max_ms": 12.21
+    }
+  }
+}

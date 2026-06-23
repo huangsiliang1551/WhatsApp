@@ -1,0 +1,538 @@
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Form,
+  Input,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Tag,
+  Typography,
+} from "antd";
+
+import {
+  createMemberDirectoryEntry,
+  listMemberDirectory,
+  updateMemberDirectoryStatus,
+} from "../services/operations";
+import { useAppStore, type OperatorStatus } from "../stores/appStore";
+import type { MemberDirectoryItem } from "../types/operations";
+
+type MemberFormValues = {
+  account_id?: string;
+  agent_id: string;
+  display_name: string;
+  email?: string;
+  status: OperatorStatus;
+  is_active: boolean;
+};
+
+type ActiveFilterValue = "ALL" | "active" | "inactive";
+
+const STATUS_OPTIONS: Array<{ label: string; value: OperatorStatus }> = [
+  { label: "����", value: "online" },
+  { label: "���", value: "busy" },
+  { label: "����", value: "away" },
+  { label: "����", value: "offline" },
+];
+
+const ACTIVE_FILTER_OPTIONS: Array<{ label: string; value: ActiveFilterValue }> = [
+  { label: "�����������€?, value: "ALL" },
+  { label: "已启�?, value: "active" },
+  { label: "已ͣ�?, value: "inactive" },
+];
+
+function getStatusColor(status: OperatorStatus): string {
+  if (status === "online") return "success";
+  if (status === "busy") return "warning";
+  if (status === "away") return "processing";
+  return "default";
+}
+
+function getStatusLabel(status: OperatorStatus): string {
+  if (status === "online") return "����";
+  if (status === "busy") return "���";
+  if (status === "away") return "����";
+  return "����";
+}
+
+function getMemberKey(member: Pick<MemberDirectoryItem, "account_id" | "agent_id">): string {
+  return `${member.account_id ?? "global"}:${member.agent_id}`;
+}
+
+function getActiveFilterValue(isActive?: boolean): ActiveFilterValue {
+  if (isActive === true) return "active";
+  if (isActive === false) return "inactive";
+  return "ALL";
+}
+
+function getPrefillIsActive(value: ActiveFilterValue): boolean | undefined {
+  if (value === "active") return true;
+  if (value === "inactive") return false;
+  return undefined;
+}
+
+export function MembersPage(): JSX.Element {
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+  const openMemberAccessPage = useAppStore((state) => state.openMemberAccessPage);
+  const membersPagePrefill = useAppStore((state) => state.membersPagePrefill);
+  const clearMembersPagePrefill = useAppStore((state) => state.clearMembersPagePrefill);
+  const setMembersPagePrefill = useAppStore((state) => state.setMembersPagePrefill);
+  const [form] = Form.useForm<MemberFormValues>();
+  const lastAppliedPrefillNonce = useRef<number | null>(null);
+
+  const [members, setMembers] = useState<MemberDirectoryItem[]>([]);
+  const [selectedMemberKey, setSelectedMemberKey] = useState<string>("");
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [statusFilter, setStatusFilter] = useState<OperatorStatus | "ALL">("ALL");
+  const [activeFilter, setActiveFilter] = useState<ActiveFilterValue>("ALL");
+  const [selectionLocked, setSelectionLocked] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [selectionWarning, setSelectionWarning] = useState<string | null>(null);
+
+  const accountOptions = useMemo(() => {
+    const values = new Set<string>();
+    actorAccountIds.forEach((item) => item && values.add(item));
+    members.forEach((item) => item.account_id && values.add(item.account_id));
+    return Array.from(values).sort();
+  }, [actorAccountIds, members]);
+
+  useEffect(() => {
+    if (accountFilter === "ALL" && actorAccountIds.length === 1) {
+      setAccountFilter(actorAccountIds[0]);
+    }
+  }, [actorAccountIds, accountFilter]);
+
+  useEffect(() => {
+    if (!membersPagePrefill) {
+      return;
+    }
+    if (lastAppliedPrefillNonce.current === membersPagePrefill.nonce) {
+      return;
+    }
+    lastAppliedPrefillNonce.current = membersPagePrefill.nonce;
+    setAccountFilter(membersPagePrefill.account_id ?? "ALL");
+    setStatusFilter(membersPagePrefill.status ?? "ALL");
+    setActiveFilter(getActiveFilterValue(membersPagePrefill.is_active));
+    setSelectedMemberKey(membersPagePrefill.selected_member_key ?? "");
+    setSelectionLocked(Boolean(membersPagePrefill.selected_member_key));
+    setSelectionWarning(null);
+    clearMembersPagePrefill();
+  }, [clearMembersPagePrefill, membersPagePrefill]);
+
+  useEffect(() => {
+    form.setFieldsValue({
+      account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+      status: "online",
+      is_active: true,
+      agent_id: "",
+      display_name: "",
+      email: "",
+    });
+  }, [accountFilter, form]);
+
+  useEffect(() => {
+    void loadMembers();
+  }, [accountFilter]);
+
+  const filteredMembers = useMemo(
+    () =>
+      members.filter((member) => {
+        if (statusFilter !== "ALL" && member.status !== statusFilter) {
+          return false;
+        }
+        if (activeFilter === "active" && !member.is_active) {
+          return false;
+        }
+        if (activeFilter === "inactive" && member.is_active) {
+          return false;
+        }
+        return true;
+      }),
+    [activeFilter, members, statusFilter]
+  );
+
+  useEffect(() => {
+    if (!filteredMembers.length) {
+      setSelectedMemberKey("");
+      if (selectionLocked) {
+        setSelectionLocked(false);
+      }
+      return;
+    }
+
+    if (selectedMemberKey && filteredMembers.some((member) => getMemberKey(member) === selectedMemberKey)) {
+      return;
+    }
+
+    if (selectionLocked && selectedMemberKey) {
+      setSelectionWarning("��������������������������€�����?);
+      setSelectionLocked(false);
+      return;
+    }
+
+    setSelectionWarning(null);
+    setSelectedMemberKey(getMemberKey(filteredMembers[0]));
+  }, [filteredMembers, selectedMemberKey, selectionLocked]);
+
+  useEffect(() => {
+    setMembersPagePrefill({
+      account_id: accountFilter,
+      status: statusFilter,
+      is_active: getPrefillIsActive(activeFilter),
+      selected_member_key: selectedMemberKey || undefined,
+    });
+  }, [accountFilter, activeFilter, selectedMemberKey, setMembersPagePrefill, statusFilter]);
+
+  const selectedMember = useMemo(
+    () => filteredMembers.find((member) => getMemberKey(member) === selectedMemberKey) ?? null,
+    [filteredMembers, selectedMemberKey]
+  );
+
+  async function loadMembers(): Promise<void> {
+    setLoading(true);
+    setError(null);
+    try {
+      const nextMembers = await listMemberDirectory(accountFilter !== "ALL" ? accountFilter : undefined);
+      setMembers(nextMembers);
+      setNotice(`已ˢ�?${new Date().toLocaleString("zh-CN")}`);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "��Ա��������ʧ��");
+    } finally {
+      setLoading(false);
+      setPendingAction(null);
+    }
+  }
+
+  async function handleCreateMember(values: MemberFormValues): Promise<void> {
+    setPendingAction("create-member");
+    setError(null);
+    setNotice(null);
+    try {
+      const created = await createMemberDirectoryEntry({
+        account_id: values.account_id?.trim() || null,
+        agent_id: values.agent_id.trim(),
+        display_name: values.display_name.trim(),
+        email: values.email?.trim() || null,
+        status: values.status,
+        is_active: values.is_active,
+      });
+      setSelectionLocked(false);
+      setSelectedMemberKey(getMemberKey(created));
+      setNotice(`��Ա��ע����${created.display_name}`);
+      await loadMembers();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "��Աע��ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleStatusChange(member: MemberDirectoryItem, status: OperatorStatus): Promise<void> {
+    setPendingAction(`status:${getMemberKey(member)}:${status}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await updateMemberDirectoryStatus(
+        member.agent_id,
+        status,
+        member.account_id ?? undefined
+      );
+      setMembers((current) =>
+        current.map((item) => (getMemberKey(item) === getMemberKey(updated) ? updated : item))
+      );
+      setNotice(`��������€����������?{updated.display_name}`);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "��������€����������?);
+      setPendingAction(null);
+    }
+  }
+
+  const columns: ProColumns<MemberDirectoryItem>[] = [
+    {
+      title: "��Ա",
+      key: "member",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.display_name}</Typography.Text>
+          <Typography.Text type="secondary">{record.agent_id}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "������Χ",
+      render: (_, record) => record.account_id ?? "ȫ��",
+    },
+    {
+      title: "���€?,
+      render: (_, record) => (
+        <Space size={[6, 6]} wrap>
+          <Tag color={getStatusColor(record.status)}>{getStatusLabel(record.status)}</Tag>
+          <Tag color={record.is_active ? "success" : "default"}>
+            {record.is_active ? "���" : "�����"}
+          </Tag>
+        </Space>
+      ),
+    },
+    {
+      title: "��ɫ",
+      render: (_, record) => (
+        <Space size={[6, 6]} wrap>
+          {record.role_labels.map((role) => (
+            <Tag key={`${getMemberKey(record)}:${role}`}>{role}</Tag>
+          ))}
+        </Space>
+      ),
+    },
+    {
+      title: "��������",
+      render: (_, record) => `${record.assigned_open_conversations} / ${record.assigned_total_conversations}`,
+    },
+  ];
+
+  const accountCount = new Set(filteredMembers.map((item) => item.account_id ?? "global")).size;
+  const activeMemberCount = filteredMembers.filter((item) => item.is_active).length;
+  const onlineMemberCount = filteredMembers.filter((item) => item.status === "online").length;
+  const openConversationCount = filteredMembers.reduce(
+    (sum, item) => sum + item.assigned_open_conversations,
+    0
+  );
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {selectionWarning ? <Alert message={selectionWarning} showIcon type="warning" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+                    <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={[
+              { label: "ȫ������", value: "ALL" },
+              ...accountOptions.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={(value) => {
+              setSelectionLocked(false);
+              setSelectionWarning(null);
+              setAccountFilter(value);
+            }}
+          />
+          <Select
+            style={{ width: 160 }}
+            value={statusFilter}
+            options={[{ label: "��������€?, value: "ALL" }, ...STATUS_OPTIONS]}
+            onChange={(value) => {
+              setSelectionLocked(false);
+              setSelectionWarning(null);
+              setStatusFilter(value);
+            }}
+          />
+          <Select
+            style={{ width: 160 }}
+            value={activeFilter}
+            options={ACTIVE_FILTER_OPTIONS}
+            onChange={(value) => {
+              setSelectionLocked(false);
+              setSelectionWarning(null);
+              setActiveFilter(value);
+            }}
+          />
+          <Button
+            onClick={() =>
+              openMemberAccessPage({
+                account_id: selectedMember?.account_id ?? (accountFilter !== "ALL" ? accountFilter : undefined),
+                search: selectedMember?.agent_id,
+              })
+            }
+          >
+            ��Ա��Ȩ
+          </Button>
+          <Button loading={loading} onClick={() => void loadMembers()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��Ա����" value={filteredMembers.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="������Ա" value={onlineMemberCount} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��������" value={activeMemberCount} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��������" value={openConversationCount} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<MemberDirectoryItem>
+            columns={columns}
+            dataSource={filteredMembers}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 8 }}
+            rowKey={getMemberKey}
+            search={false}
+            toolBarRender={false}
+            onRow={(record) => ({
+              onClick: () => {
+                setSelectionLocked(false);
+                setSelectionWarning(null);
+                setSelectedMemberKey(getMemberKey(record));
+              },
+            })}
+          />
+        </Col>
+
+        <Col lg={10} xs={24}>
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <Card title="��Ա����">
+              {selectedMember ? (
+                <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                  <Descriptions bordered column={1} size="small">
+                    <Descriptions.Item label="��Ա">{selectedMember.display_name}</Descriptions.Item>
+                    <Descriptions.Item label="��ϯ ID">{selectedMember.agent_id}</Descriptions.Item>
+                    <Descriptions.Item label="�">
+                      {selectedMember.email ?? "����"}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="������Χ">
+                      {selectedMember.account_id ?? "ȫ��"}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="��������€?>
+                      <Tag color={getStatusColor(selectedMember.status)}>
+                        {getStatusLabel(selectedMember.status)}
+                      </Tag>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="������€?>
+                      <Tag color={selectedMember.is_active ? "success" : "default"}>
+                        {selectedMember.is_active ? "���" : "�����"}
+                      </Tag>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="��������">
+                      {selectedMember.assigned_open_conversations}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="ȫ������">
+                      {selectedMember.assigned_total_conversations}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="��������">
+                      {selectedMember.assigned_account_count}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="账号�?>
+                      {accountCount}
+                    </Descriptions.Item>
+                  </Descriptions>
+                  <Space size={[8, 8]} wrap>
+                    {STATUS_OPTIONS.map((item) => (
+                      <Button
+                        key={`${getMemberKey(selectedMember)}:${item.value}`}
+                        loading={pendingAction === `status:${getMemberKey(selectedMember)}:${item.value}`}
+                        onClick={() => void handleStatusChange(selectedMember, item.value)}
+                        size="small"
+                      >
+                        ����{item.label}
+                      </Button>
+                    ))}
+                    <Button
+                      size="small"
+                      onClick={() =>
+                        openMemberAccessPage({
+                          account_id: selectedMember.account_id ?? undefined,
+                          search: selectedMember.agent_id,
+                        })
+                      }
+                    >
+                      ��Ȩ����
+                    </Button>
+                  </Space>
+                </Space>
+              ) : (
+                <Typography.Text type="secondary">������Ա</Typography.Text>
+              )}
+            </Card>
+
+            <Card title="��������">
+              <Form<MemberFormValues>
+                form={form}
+                layout="vertical"
+                initialValues={{
+                  status: "online",
+                  is_active: true,
+                }}
+                onFinish={(values) => void handleCreateMember(values)}
+              >
+                <Row gutter={12}>
+                  <Col span={12}>
+                    <Form.Item label="����" name="account_id">
+                      <Select
+                        allowClear
+                        options={accountOptions.map((item) => ({ label: item, value: item }))}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item label="��ϯ ID" name="agent_id" rules={[{ required: true }]}>
+                      <Input />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item label="��Ա����" name="display_name" rules={[{ required: true }]}>
+                      <Input />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item label="�" name="email">
+                      <Input />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item label="���€? name="status" rules={[{ required: true }]}>
+                      <Select options={STATUS_OPTIONS} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item label="���" name="is_active">
+                      <Select
+                        options={[
+                          { label: "�?, value: true },
+                          { label: "�?, value: false },
+                        ]}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <Button htmlType="submit" loading={pendingAction === "create-member"} type="primary" block>
+                  ע����Ա
+                </Button>
+              </Form>
+            </Card>
+          </Space>
+        </Col>
+      </Row>
+    </Space>
+  );
+}
+

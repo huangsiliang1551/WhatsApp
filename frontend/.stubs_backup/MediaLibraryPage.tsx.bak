@@ -1,0 +1,934 @@
+import { useEffect, useMemo, useState, type ChangeEvent, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Form,
+  Input,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Tag,
+  Tabs,
+  Timeline,
+  Typography,
+} from "antd";
+
+import { useAppStore } from "../stores/appStore";
+import {
+  createMediaAsset,
+  getMediaAssetDetail,
+  isApiFeatureUnavailable,
+  listMediaAssets,
+  listMetaAccounts,
+  sendConversationMediaMessage,
+  syncMediaAsset,
+  updateMediaAsset,
+  uploadMediaAsset,
+  type MediaAssetDetailResponse,
+  type MediaAssetSendResponse,
+  type MediaAssetSyncResponse,
+  type MediaAssetType,
+  type MediaAssetView,
+  type MetaWabaAccount,
+} from "../services/api";
+
+type MediaFilters = {
+  account_id: string;
+  waba_id: string;
+  phone_number_id: string;
+  asset_type: "ALL" | MediaAssetType;
+  is_active: "all" | "true" | "false";
+  query: string;
+  tag: string;
+};
+
+type CreateFormValues = {
+  account_id: string;
+  waba_id?: string;
+  phone_number_id?: string;
+  name: string;
+  asset_type: MediaAssetType;
+  mime_type: string;
+  storage_key?: string;
+  storage_url?: string;
+  provider_media_id?: string;
+  tags_text?: string;
+};
+
+type UploadFormValues = {
+  account_id: string;
+  waba_id?: string;
+  phone_number_id?: string;
+  name?: string;
+  source?: string;
+  tags_text?: string;
+};
+
+type EditFormValues = {
+  name: string;
+  waba_id?: string;
+  phone_number_id?: string;
+  tags_text?: string;
+  is_active: boolean;
+};
+
+type SyncFormValues = {
+  phone_number_id?: string;
+  force_resync?: boolean;
+};
+
+type SendFormValues = {
+  account_id: string;
+  conversation_id: string;
+  caption?: string;
+  file_name?: string;
+  agent_id?: string;
+};
+
+const INITIAL_FILTERS: MediaFilters = {
+  account_id: "ALL",
+  waba_id: "ALL",
+  phone_number_id: "ALL",
+  asset_type: "ALL",
+  is_active: "true",
+  query: "",
+  tag: "",
+};
+
+function formatTimestamp(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleString("zh-CN") : "����";
+}
+
+function formatOptional(value: string | null | undefined, fallback = "����"): string {
+  return value?.trim() ? value : fallback;
+}
+
+function formatAssetType(value: MediaAssetType): string {
+  if (value === "image") return "ͼƬ";
+  if (value === "audio") return "��Ƶ";
+  if (value === "video") return "��Ƶ";
+  return "�ĵ�";
+}
+
+function formatSyncStatus(value: string): string {
+  if (value === "synced") return "��ͬ��";
+  if (value === "reused") return "����";
+  if (value === "linked") return "�Ѱ�";
+  if (value === "failed") return "ʧ��";
+  return value;
+}
+
+function getSyncColor(value: string): string {
+  if (value === "synced" || value === "linked" || value === "reused") return "success";
+  if (value === "failed") return "error";
+  return "default";
+}
+
+function parseTags(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toOptional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim() ?? "";
+  return trimmed ? trimmed : undefined;
+}
+
+function inferAssetType(file: File): MediaAssetType {
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("audio/")) return "audio";
+  if (file.type.startsWith("video/")) return "video";
+  return "document";
+}
+
+function buildListParams(filters: MediaFilters) {
+  return {
+    ...(filters.account_id !== "ALL" ? { account_id: filters.account_id } : {}),
+    ...(filters.waba_id !== "ALL" ? { waba_id: filters.waba_id } : {}),
+    ...(filters.phone_number_id !== "ALL" ? { phone_number_id: filters.phone_number_id } : {}),
+    ...(filters.asset_type !== "ALL" ? { asset_type: filters.asset_type } : {}),
+    ...(filters.is_active === "true"
+      ? { is_active: true }
+      : filters.is_active === "false"
+        ? { is_active: false }
+        : {}),
+    ...(filters.query.trim() ? { query: filters.query.trim() } : {}),
+    ...(filters.tag.trim() ? { tag: filters.tag.trim() } : {}),
+  };
+}
+
+function getPhoneOptions(accounts: MetaWabaAccount[], accountId: string, wabaId: string): string[] {
+  const values = new Set<string>();
+  accounts.forEach((account) => {
+    if (accountId !== "ALL" && account.account_id !== accountId) return;
+    if (wabaId !== "ALL" && account.waba_id !== wabaId) return;
+    account.phone_numbers.forEach((phone) => values.add(phone.phone_number_id));
+  });
+  return Array.from(values).sort();
+}
+
+function renderPreview(detail: MediaAssetDetailResponse | null): JSX.Element {
+  const asset = detail?.asset;
+  if (!asset?.storage_url) {
+    return <Typography.Text type="secondary">����Ԥ��</Typography.Text>;
+  }
+  if (asset.asset_type === "image") {
+    return (
+      <img
+        alt={asset.name}
+        src={asset.storage_url}
+        style={{ width: "100%", maxHeight: 260, objectFit: "contain", borderRadius: 8 }}
+      />
+    );
+  }
+  if (asset.asset_type === "audio") {
+    return <audio controls src={asset.storage_url} style={{ width: "100%" }} />;
+  }
+  if (asset.asset_type === "video") {
+    return <video controls src={asset.storage_url} style={{ width: "100%", maxHeight: 260, borderRadius: 8 }} />;
+  }
+  return (
+    <a href={asset.storage_url} rel="noreferrer" target="_blank">
+      ��ԭʼ�ļ�
+    </a>
+  );
+}
+
+export function MediaLibraryPage(): JSX.Element {
+  const openWorkspacePage = useAppStore((state) => state.openWorkspacePage);
+
+  const [accounts, setAccounts] = useState<MetaWabaAccount[]>([]);
+  const [assets, setAssets] = useState<MediaAssetView[]>([]);
+  const [selectedAssetId, setSelectedAssetId] = useState<string>("");
+  const [detail, setDetail] = useState<MediaAssetDetailResponse | null>(null);
+  const [filters, setFilters] = useState<MediaFilters>(INITIAL_FILTERS);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [lastSendResult, setLastSendResult] = useState<MediaAssetSendResponse | null>(null);
+  const [lastSyncResult, setLastSyncResult] = useState<MediaAssetSyncResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+
+  const selectedAsset = useMemo(
+    () => assets.find((item) => item.asset_id === selectedAssetId) ?? null,
+    [assets, selectedAssetId]
+  );
+
+  const accountOptions = useMemo(
+    () => Array.from(new Set(accounts.map((item) => item.account_id))).sort(),
+    [accounts]
+  );
+
+  const wabaOptions = useMemo(() => {
+    const values = new Set<string>();
+    accounts.forEach((account) => {
+      if (filters.account_id === "ALL" || account.account_id === filters.account_id) {
+        values.add(account.waba_id);
+      }
+    });
+    return Array.from(values).sort();
+  }, [accounts, filters.account_id]);
+
+  const phoneOptions = useMemo(
+    () => getPhoneOptions(accounts, filters.account_id, filters.waba_id),
+    [accounts, filters.account_id, filters.waba_id]
+  );
+
+  const selectedPhoneOptions = useMemo(
+    () => getPhoneOptions(accounts, selectedAsset?.account_id ?? "ALL", selectedAsset?.waba_id ?? "ALL"),
+    [accounts, selectedAsset?.account_id, selectedAsset?.waba_id]
+  );
+
+  useEffect(() => {
+    void loadAssets();
+  }, [
+    filters.account_id,
+    filters.waba_id,
+    filters.phone_number_id,
+    filters.asset_type,
+    filters.is_active,
+    filters.query,
+    filters.tag,
+  ]);
+
+  useEffect(() => {
+    if (!assets.length) {
+      setSelectedAssetId("");
+      return;
+    }
+    if (selectedAssetId && assets.some((item) => item.asset_id === selectedAssetId)) return;
+    setSelectedAssetId(assets[0].asset_id);
+  }, [assets, selectedAssetId]);
+
+  useEffect(() => {
+    if (!selectedAssetId) {
+      setDetail(null);
+      return;
+    }
+    void loadDetail(selectedAssetId);
+  }, [selectedAssetId]);
+
+  async function loadAssets(): Promise<void> {
+    setLoading(true);
+    setError(null);
+    setWarnings([]);
+    try {
+      const [nextAccounts, nextAssets] = await Promise.all([
+        listMetaAccounts(),
+        listMediaAssets(buildListParams(filters)),
+      ]);
+      setAccounts(nextAccounts);
+      setAssets(nextAssets);
+    } catch (loadError) {
+      if (isApiFeatureUnavailable(loadError)) {
+        setError("ý���ӿ���δ������");
+      } else {
+        setError(loadError instanceof Error ? loadError.message : "ý������ʧ��");
+      }
+    } finally {
+      setLoading(false);
+      setPendingAction(null);
+    }
+  }
+
+  async function loadDetail(assetId: string): Promise<void> {
+    try {
+      const nextDetail = await getMediaAssetDetail(assetId);
+      setDetail(nextDetail);
+    } catch (loadError) {
+      setDetail(null);
+      setWarnings((current) =>
+        Array.from(
+          new Set([
+            ...current,
+            isApiFeatureUnavailable(loadError) ? "ý������ӿ���δ����" : "ý���������ʧ��",
+          ])
+        )
+      );
+    }
+  }
+
+  async function handleCreateAsset(values: CreateFormValues): Promise<void> {
+    setPendingAction("create");
+    setError(null);
+    try {
+      const created = await createMediaAsset({
+        account_id: values.account_id.trim(),
+        waba_id: toOptional(values.waba_id),
+        phone_number_id: toOptional(values.phone_number_id),
+        name: values.name.trim(),
+        asset_type: values.asset_type,
+        mime_type: values.mime_type.trim(),
+        storage_key: toOptional(values.storage_key),
+        storage_url: toOptional(values.storage_url),
+        provider_media_id: toOptional(values.provider_media_id),
+        tags: parseTags(values.tags_text ?? ""),
+        source: "manual",
+      });
+      setNotice(`ý����Դ�Ѵ�����${created.name}`);
+      setSelectedAssetId(created.asset_id);
+      await loadAssets();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "����ý����Դʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleUploadAsset(values: UploadFormValues): Promise<void> {
+    if (!uploadFile) {
+      setError("����ѡ���ϴ��ļ�");
+      return;
+    }
+    setPendingAction("upload");
+    setError(null);
+    try {
+      const uploaded = await uploadMediaAsset({
+        account_id: values.account_id.trim(),
+        waba_id: toOptional(values.waba_id),
+        phone_number_id: toOptional(values.phone_number_id),
+        name: toOptional(values.name),
+        source: toOptional(values.source),
+        tags: parseTags(values.tags_text ?? ""),
+        file: uploadFile,
+        asset_type: inferAssetType(uploadFile),
+        mime_type: uploadFile.type || undefined,
+      });
+      setNotice(`ý����Դ���ϴ���${uploaded.name}`);
+      setUploadFile(null);
+      setSelectedAssetId(uploaded.asset_id);
+      await loadAssets();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "�ϴ�ý����Դʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleUpdateAsset(values: EditFormValues): Promise<void> {
+    if (!selectedAsset) return;
+    setPendingAction("update");
+    setError(null);
+    try {
+      const updated = await updateMediaAsset(selectedAsset.asset_id, {
+        name: values.name.trim(),
+        waba_id: toOptional(values.waba_id) ?? null,
+        phone_number_id: toOptional(values.phone_number_id) ?? null,
+        tags: parseTags(values.tags_text ?? ""),
+        is_active: values.is_active,
+      });
+      setNotice(`ý����Դ�Ѹ��£�${updated.name}`);
+      await loadAssets();
+      await loadDetail(updated.asset_id);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "����ý����Դʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleSyncAsset(values: SyncFormValues): Promise<void> {
+    if (!selectedAsset) return;
+    setPendingAction("sync");
+    setError(null);
+    try {
+      const result = await syncMediaAsset(selectedAsset.asset_id, {
+        phone_number_id: toOptional(values.phone_number_id),
+        force_resync: values.force_resync,
+      });
+      setLastSyncResult(result);
+      setNotice(`ý��ͬ����ɣ�${formatSyncStatus(result.sync_status)}`);
+      await loadAssets();
+      await loadDetail(selectedAsset.asset_id);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "ͬ��ý����Դʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleSendAsset(values: SendFormValues): Promise<void> {
+    if (!selectedAsset) return;
+    setPendingAction("send");
+    setError(null);
+    try {
+      const result = await sendConversationMediaMessage(values.account_id.trim(), values.conversation_id.trim(), {
+        asset_id: selectedAsset.asset_id,
+        caption: toOptional(values.caption),
+        file_name: toOptional(values.file_name),
+        agent_id: toOptional(values.agent_id),
+      });
+      setLastSendResult(result);
+      setNotice(`ý����Ϣ�ѷ��ͣ�${result.message_id}`);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "����ý����Ϣʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>): void {
+    setUploadFile(event.target.files?.[0] ?? null);
+  }
+
+  const columns: ProColumns<MediaAssetView>[] = [
+    {
+      title: "��Դ",
+      key: "asset",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.name}</Typography.Text>
+          <Typography.Text type="secondary">{record.asset_id}</Typography.Text>
+        </Space>
+      ),
+    },
+    { title: "�˺�", dataIndex: "account_id" },
+    {
+      title: "��Χ",
+      render: (_, record) => `${record.waba_id ?? "�� WABA"} / ${record.phone_number_id ?? "ͨ��"}`,
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space size={[6, 6]} wrap>
+          <Tag>{formatAssetType(record.asset_type)}</Tag>
+          <Tag color={record.is_active ? "success" : "default"}>{record.is_active ? "����" : "ͣ��"}</Tag>
+        </Space>
+      ),
+    },
+    {
+      title: "ͬ������",
+      render: (_, record) => record.provider_references.length,
+    },
+    {
+      title: "����ʱ��",
+      render: (_, record) => formatTimestamp(record.updated_at),
+    },
+  ];
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+      {warnings.map((warning) => (
+        <Alert key={warning} message={warning} showIcon type="warning" />
+      ))}
+
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+          <Select
+            style={{ width: 180 }}
+            value={filters.account_id}
+            options={[
+              { label: "ȫ���˺�", value: "ALL" },
+              ...accountOptions.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={(value) => setFilters((current) => ({ ...current, account_id: value, waba_id: "ALL", phone_number_id: "ALL" }))}
+          />
+          <Select
+            style={{ width: 180 }}
+            value={filters.waba_id}
+            options={[
+              { label: "ȫ�� WABA", value: "ALL" },
+              ...wabaOptions.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={(value) => setFilters((current) => ({ ...current, waba_id: value, phone_number_id: "ALL" }))}
+          />
+          <Select
+            style={{ width: 180 }}
+            value={filters.phone_number_id}
+            options={[
+              { label: "ȫ������", value: "ALL" },
+              ...phoneOptions.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={(value) => setFilters((current) => ({ ...current, phone_number_id: value }))}
+          />
+          <Select
+            style={{ width: 140 }}
+            value={filters.asset_type}
+            options={[
+              { label: "ȫ������", value: "ALL" },
+              { label: "ͼƬ", value: "image" },
+              { label: "��Ƶ", value: "audio" },
+              { label: "��Ƶ", value: "video" },
+              { label: "�ĵ�", value: "document" },
+            ]}
+            onChange={(value) => setFilters((current) => ({ ...current, asset_type: value }))}
+          />
+          <Input
+            style={{ width: 180 }}
+            placeholder="��������"
+            value={filters.query}
+            onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
+          />
+          <Button loading={loading} onClick={() => void loadAssets()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��Դ��" value={assets.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="������Դ" value={assets.filter((item) => item.is_active).length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��ͬ������" value={assets.reduce((sum, item) => sum + item.provider_references.length, 0)} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��ǰѡ��" value={selectedAsset?.name ?? "����"} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<MediaAssetView>
+            columns={columns}
+            dataSource={assets}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 8 }}
+            rowKey="asset_id"
+            search={false}
+            toolBarRender={false}
+            onRow={(record) => ({
+              onClick: () => setSelectedAssetId(record.asset_id),
+            })}
+          />
+        </Col>
+
+        <Col lg={10} xs={24}>
+          <Card title="��Դ����">
+            {selectedAsset ? (
+              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                {renderPreview(detail)}
+                <Descriptions bordered column={1} size="small">
+                  <Descriptions.Item label="��Դ����">{selectedAsset.name}</Descriptions.Item>
+                  <Descriptions.Item label="�˺�">{selectedAsset.account_id}</Descriptions.Item>
+                  <Descriptions.Item label="WABA / Phone">
+                    {`${selectedAsset.waba_id ?? "�� WABA"} / ${selectedAsset.phone_number_id ?? "ͨ��"}`}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="����">{formatAssetType(selectedAsset.asset_type)}</Descriptions.Item>
+                  <Descriptions.Item label="MIME">{selectedAsset.mime_type}</Descriptions.Item>
+                  <Descriptions.Item label="storage_key">{formatOptional(selectedAsset.storage_key)}</Descriptions.Item>
+                  <Descriptions.Item label="storage_url">{formatOptional(selectedAsset.storage_url)}</Descriptions.Item>
+                  <Descriptions.Item label="legacy_meta_media_id">{formatOptional(selectedAsset.legacy_meta_media_id)}</Descriptions.Item>
+                </Descriptions>
+                {detail ? (
+                  <Row gutter={[12, 12]}>
+                    <Col span={8}>
+                      <Card size="small">
+                        <Statistic title="�¼�����" value={detail.usage.total_events} />
+                      </Card>
+                    </Col>
+                    <Col span={8}>
+                      <Card size="small">
+                        <Statistic title="ͬ������" value={detail.usage.sync_count} />
+                      </Card>
+                    </Col>
+                    <Col span={8}>
+                      <Card size="small">
+                        <Statistic title="���ʹ���" value={detail.usage.send_count} />
+                      </Card>
+                    </Col>
+                  </Row>
+                ) : null}
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">����ѡ����Դ��</Typography.Text>
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      <Tabs
+        items={[
+          {
+            key: "create-upload",
+            label: "���� / �ϴ�",
+            children: (
+              <Row gutter={[16, 16]}>
+                <Col lg={12} xs={24}>
+                  <Card title="�ֹ�������Դ">
+                    <Form
+                      layout="vertical"
+                      initialValues={{
+                        account_id: accountOptions[0] ?? "demo-account-cn",
+                        asset_type: "image",
+                        mime_type: "image/jpeg",
+                      }}
+                      onFinish={(values) => void handleCreateAsset(values)}
+                    >
+                      <Form.Item label="�˺�" name="account_id" rules={[{ required: true }]}>
+                        <Select options={accountOptions.map((item) => ({ label: item, value: item }))} />
+                      </Form.Item>
+                      <Form.Item label="WABA ID" name="waba_id">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="���� ID" name="phone_number_id">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="��Դ����" name="name" rules={[{ required: true }]}>
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="��Դ����" name="asset_type" rules={[{ required: true }]}>
+                        <Select
+                          options={[
+                            { label: "ͼƬ", value: "image" },
+                            { label: "��Ƶ", value: "audio" },
+                            { label: "��Ƶ", value: "video" },
+                            { label: "�ĵ�", value: "document" },
+                          ]}
+                        />
+                      </Form.Item>
+                      <Form.Item label="MIME ����" name="mime_type" rules={[{ required: true }]}>
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="storage_key" name="storage_key">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="storage_url" name="storage_url">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="provider_media_id" name="provider_media_id">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="tags" name="tags_text">
+                        <Input.TextArea rows={3} placeholder="shipping,banner" />
+                      </Form.Item>
+                      <Button htmlType="submit" loading={pendingAction === "create"} type="primary" block>
+                        ������Դ
+                      </Button>
+                    </Form>
+                  </Card>
+                </Col>
+
+                <Col lg={12} xs={24}>
+                  <Card title="�ϴ��ļ�">
+                    <Form
+                      layout="vertical"
+                      initialValues={{
+                        account_id: accountOptions[0] ?? "demo-account-cn",
+                        source: "upload",
+                      }}
+                      onFinish={(values) => void handleUploadAsset(values)}
+                    >
+                      <Form.Item label="�˺�" name="account_id" rules={[{ required: true }]}>
+                        <Select options={accountOptions.map((item) => ({ label: item, value: item }))} />
+                      </Form.Item>
+                      <Form.Item label="WABA ID" name="waba_id">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="���� ID" name="phone_number_id">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="��Դ����" name="name">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="source" name="source">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="tags" name="tags_text">
+                        <Input.TextArea rows={3} />
+                      </Form.Item>
+                      <Form.Item label="�ļ�">
+                        <input onChange={handleFileChange} type="file" />
+                      </Form.Item>
+                      <Button htmlType="submit" loading={pendingAction === "upload"} type="primary" block>
+                        �ϴ���Դ
+                      </Button>
+                    </Form>
+                  </Card>
+                </Col>
+              </Row>
+            ),
+          },
+          {
+            key: "operations",
+            label: "��Դ����",
+            children: (
+              <Row gutter={[16, 16]}>
+                <Col lg={8} xs={24}>
+                  <Card title="������Դ">
+                    {selectedAsset ? (
+                      <Form
+                        layout="vertical"
+                        initialValues={{
+                          name: selectedAsset.name,
+                          waba_id: selectedAsset.waba_id ?? "",
+                          phone_number_id: selectedAsset.phone_number_id ?? "",
+                          tags_text: selectedAsset.tags.join(","),
+                          is_active: selectedAsset.is_active,
+                        }}
+                        key={`edit:${selectedAsset.asset_id}`}
+                        onFinish={(values) => void handleUpdateAsset(values)}
+                      >
+                        <Form.Item label="��Դ����" name="name" rules={[{ required: true }]}>
+                          <Input />
+                        </Form.Item>
+                        <Form.Item label="WABA ID" name="waba_id">
+                          <Input />
+                        </Form.Item>
+                        <Form.Item label="���� ID" name="phone_number_id">
+                          <Input />
+                        </Form.Item>
+                        <Form.Item label="tags" name="tags_text">
+                          <Input.TextArea rows={3} />
+                        </Form.Item>
+                        <Form.Item label="����״̬" name="is_active">
+                          <Select
+                            options={[
+                              { label: "����", value: true },
+                              { label: "ͣ��", value: false },
+                            ]}
+                          />
+                        </Form.Item>
+                        <Button htmlType="submit" loading={pendingAction === "update"} type="primary" block>
+                          �������
+                        </Button>
+                      </Form>
+                    ) : (
+                      <Typography.Text type="secondary">δѡ����Դ</Typography.Text>
+                    )}
+                  </Card>
+                </Col>
+
+                <Col lg={8} xs={24}>
+                  <Card title="ͬ����ͨ��">
+                    {selectedAsset ? (
+                      <Form
+                        layout="vertical"
+                        initialValues={{
+                          phone_number_id: selectedAsset.phone_number_id ?? "",
+                          force_resync: false,
+                        }}
+                        key={`sync:${selectedAsset.asset_id}`}
+                        onFinish={(values) => void handleSyncAsset(values)}
+                      >
+                        <Form.Item label="���� ID" name="phone_number_id">
+                          <Select
+                            allowClear
+                            options={selectedPhoneOptions.map((item) => ({ label: item, value: item }))}
+                          />
+                        </Form.Item>
+                        <Form.Item label="ǿ����ͬ��" name="force_resync">
+                          <Select
+                            options={[
+                              { label: "��", value: false },
+                              { label: "��", value: true },
+                            ]}
+                          />
+                        </Form.Item>
+                        <Button htmlType="submit" loading={pendingAction === "sync"} type="primary" block>
+                          ִ��ͬ��
+                        </Button>
+                        {lastSyncResult ? (
+                          <Descriptions bordered column={1} size="small" style={{ marginTop: 16 }}>
+                            <Descriptions.Item label="״̬">{formatSyncStatus(lastSyncResult.sync_status)}</Descriptions.Item>
+                            <Descriptions.Item label="ͨ��">{lastSyncResult.provider_name}</Descriptions.Item>
+                            <Descriptions.Item label="���� ID">{formatOptional(lastSyncResult.phone_number_id)}</Descriptions.Item>
+                            <Descriptions.Item label="ͨ������">{formatOptional(lastSyncResult.provider_media_id)}</Descriptions.Item>
+                          </Descriptions>
+                        ) : null}
+                      </Form>
+                    ) : (
+                      <Typography.Text type="secondary">δѡ����Դ</Typography.Text>
+                    )}
+                  </Card>
+                </Col>
+
+                <Col lg={8} xs={24}>
+                  <Card title="���͵��Ự">
+                    {selectedAsset ? (
+                      <Form
+                        layout="vertical"
+                        initialValues={{
+                          account_id: selectedAsset.account_id,
+                          agent_id: "",
+                          caption: "",
+                          file_name: "",
+                        }}
+                        key={`send:${selectedAsset.asset_id}`}
+                        onFinish={(values) => void handleSendAsset(values)}
+                      >
+                        <Form.Item label="�˺�" name="account_id" rules={[{ required: true }]}>
+                          <Input />
+                        </Form.Item>
+                        <Form.Item label="�ⲿ�Ự ID" name="conversation_id" rules={[{ required: true }]}>
+                          <Input />
+                        </Form.Item>
+                        <Form.Item label="˵��" name="caption">
+                          <Input />
+                        </Form.Item>
+                        <Form.Item label="�ļ���" name="file_name">
+                          <Input />
+                        </Form.Item>
+                        <Form.Item label="��ϯ ID" name="agent_id">
+                          <Input />
+                        </Form.Item>
+                        <Button htmlType="submit" loading={pendingAction === "send"} type="primary" block>
+                          ����ý��
+                        </Button>
+                        {lastSendResult ? (
+                          <Space direction="vertical" size={8} style={{ width: "100%", marginTop: 16 }}>
+                            <Descriptions bordered column={1} size="small">
+                              <Descriptions.Item label="��Ϣ����">{formatAssetType(lastSendResult.message_type)}</Descriptions.Item>
+                              <Descriptions.Item label="ͨ��">{lastSendResult.provider}</Descriptions.Item>
+                              <Descriptions.Item label="�ⲿ�Ự ID">{lastSendResult.external_conversation_id}</Descriptions.Item>
+                              <Descriptions.Item label="�ڲ��Ự ID">{lastSendResult.internal_conversation_id}</Descriptions.Item>
+                              <Descriptions.Item label="���� ID">{formatOptional(lastSendResult.phone_number_id)}</Descriptions.Item>
+                            </Descriptions>
+                            <Button
+                              onClick={() =>
+                                openWorkspacePage({
+                                  accountId: lastSendResult.account_id,
+                                  conversationKey: `${lastSendResult.account_id}:${lastSendResult.external_conversation_id}`,
+                                })
+                              }
+                            >
+                              �򿪻Ự
+                            </Button>
+                          </Space>
+                        ) : null}
+                      </Form>
+                    ) : (
+                      <Typography.Text type="secondary">δѡ����Դ</Typography.Text>
+                    )}
+                  </Card>
+                </Col>
+              </Row>
+            ),
+          },
+          {
+            key: "events",
+            label: "ͬ����¼ / �¼�",
+            children: (
+              <Row gutter={[16, 16]}>
+                <Col lg={12} xs={24}>
+                  <Card title="ͨ��ͬ����¼">
+                    {detail?.provider_syncs.length ? (
+                      <Timeline
+                        items={detail.provider_syncs.map((sync) => ({
+                          children: (
+                            <Space direction="vertical" size={2}>
+                              <Space size={[8, 8]} wrap>
+                                <Typography.Text strong>{sync.provider_name}</Typography.Text>
+                                <Tag color={getSyncColor(sync.sync_status)}>{formatSyncStatus(sync.sync_status)}</Tag>
+                              </Space>
+                              <Typography.Text>{`${formatOptional(sync.waba_id)} / ${formatOptional(sync.phone_number_id)}`}</Typography.Text>
+                              <Typography.Text type="secondary">
+                                {`${formatTimestamp(sync.last_synced_at)} / ${formatOptional(sync.provider_media_id)}`}
+                              </Typography.Text>
+                            </Space>
+                          ),
+                        }))}
+                      />
+                    ) : (
+                      <Typography.Text type="secondary">����ͬ����¼</Typography.Text>
+                    )}
+                  </Card>
+                </Col>
+                <Col lg={12} xs={24}>
+                  <Card title="��Դ�¼�">
+                    {detail?.events.length ? (
+                      <Timeline
+                        items={detail.events.slice(0, 20).map((event) => ({
+                          children: (
+                            <Space direction="vertical" size={2}>
+                              <Typography.Text strong>{event.event_type}</Typography.Text>
+                              <Typography.Text>{`${event.account_id} / ${formatOptional(event.phone_number_id)}`}</Typography.Text>
+                              <Typography.Text type="secondary">
+                                {`${formatTimestamp(event.created_at)} / ${event.created_by ?? "system"}`}
+                              </Typography.Text>
+                            </Space>
+                          ),
+                        }))}
+                      />
+                    ) : (
+                      <Typography.Text type="secondary">�����¼���¼</Typography.Text>
+                    )}
+                  </Card>
+                </Col>
+              </Row>
+            ),
+          },
+        ]}
+      />
+    </Space>
+  );
+}

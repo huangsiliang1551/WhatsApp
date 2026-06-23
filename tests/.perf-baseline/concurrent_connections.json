@@ -1,0 +1,14 @@
+{
+  "test": "test_perf_concurrent_connections",
+  "description": "10 个并发 worker (每个 5 条消息) 处理",
+  "workers": 10,
+  "total_requests": 50,
+  "errors": 0,
+  "latency_ms": {
+    "avg": 468.73,
+    "p95": 628.81,
+    "p99": 686.17,
+    "min": 261.19,
+    "max": 719.07
+  }
+}

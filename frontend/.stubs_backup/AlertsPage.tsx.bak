@@ -1,0 +1,407 @@
+import { lazy, useEffect, useMemo, useRef, useState, type ComponentType, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Table,
+  Tabs,
+  Tag,
+  Typography,
+} from "antd";
+
+const LazyNotificationsContent = lazy(() =>
+  import("./NotificationsPage").then((m) => ({ default: m.NotificationsPage }))
+);
+
+import { replayProviderStatusBuffer } from "../services/api";
+import { getAlertCenterSnapshot, listAlertRules } from "../services/operations";
+import { useAppStore } from "../stores/appStore";
+import type {
+  AlertCenterItem,
+  AlertCenterSnapshot,
+  AlertRuleDefinition,
+} from "../types/operations";
+
+function formatTimestamp(value: string): string {
+  return new Date(value).toLocaleString("zh-CN");
+}
+
+function getSeverityColor(severity: AlertCenterItem["severity"]): string {
+  if (severity === "critical") return "error";
+  if (severity === "warning") return "warning";
+  return "processing";
+}
+
+function getHealthColor(health: AlertCenterSnapshot["service_health"]): string {
+  if (health === "critical") return "error";
+  if (health === "warning") return "warning";
+  return "success";
+}
+
+export function AlertsContent(): JSX.Element {
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+  const openProviderEventsPage = useAppStore((state) => state.openProviderEventsPage);
+  const openAuditPage = useAppStore((state) => state.openAuditPage);
+  const alertsPagePrefill = useAppStore((state) => state.alertsPagePrefill);
+  const clearAlertsPagePrefill = useAppStore((state) => state.clearAlertsPagePrefill);
+  const setAlertsPagePrefill = useAppStore((state) => state.setAlertsPagePrefill);
+  const lastAppliedPrefillNonce = useRef<number | null>(null);
+  const loadRequestIdRef = useRef(0);
+
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [snapshot, setSnapshot] = useState<AlertCenterSnapshot | null>(null);
+  const [rules, setRules] = useState<AlertRuleDefinition[]>([]);
+  const [selectedAlertId, setSelectedAlertId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const selectedAlert = useMemo(
+    () => snapshot?.items.find((item) => item.id === selectedAlertId) ?? null,
+    [selectedAlertId, snapshot]
+  );
+
+  const accountOptions = useMemo(() => {
+    const values = new Set<string>(actorAccountIds);
+    snapshot?.items.forEach((item) => {
+      if (item.account_id) values.add(item.account_id);
+    });
+    rules.forEach((item) => {
+      if (item.account_id) values.add(item.account_id);
+    });
+    return [
+      { label: "ȫ������", value: "ALL" },
+      ...Array.from(values)
+        .sort((left, right) => left.localeCompare(right, "zh-CN"))
+        .map((item) => ({ label: item, value: item })),
+    ];
+  }, [actorAccountIds, rules, snapshot]);
+
+  useEffect(() => {
+    if (accountFilter === "ALL" && actorAccountIds.length === 1) {
+      setAccountFilter(actorAccountIds[0]);
+    }
+  }, [accountFilter, actorAccountIds]);
+
+  useEffect(() => {
+    if (!alertsPagePrefill) {
+      return;
+    }
+    if (lastAppliedPrefillNonce.current === alertsPagePrefill.nonce) {
+      return;
+    }
+    lastAppliedPrefillNonce.current = alertsPagePrefill.nonce;
+    setAccountFilter(alertsPagePrefill.account_id ?? "ALL");
+    setSelectedAlertId(alertsPagePrefill.selected_alert_id ?? "");
+    clearAlertsPagePrefill();
+  }, [alertsPagePrefill, clearAlertsPagePrefill, lastAppliedPrefillNonce]);
+
+  useEffect(() => {
+    void loadPage();
+  }, [accountFilter]);
+
+  useEffect(() => {
+    if (!snapshot?.items.length) {
+      setSelectedAlertId("");
+      return;
+    }
+    if (selectedAlertId && snapshot.items.some((item) => item.id === selectedAlertId)) {
+      return;
+    }
+    setSelectedAlertId(snapshot.items[0].id);
+  }, [selectedAlertId, snapshot]);
+
+  useEffect(() => {
+    setAlertsPagePrefill({
+      account_id: accountFilter,
+      selected_alert_id: selectedAlertId || undefined,
+    });
+  }, [accountFilter, selectedAlertId, setAlertsPagePrefill]);
+
+  async function loadPage(): Promise<void> {
+    const requestId = ++loadRequestIdRef.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const [nextSnapshot, nextRules] = await Promise.all([
+        getAlertCenterSnapshot(accountFilter !== "ALL" ? accountFilter : undefined),
+        listAlertRules(accountFilter !== "ALL" ? accountFilter : undefined),
+      ]);
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setSnapshot(nextSnapshot);
+      setRules(nextRules);
+      setNotice(
+        nextSnapshot.metrics_generated_at
+          ? `������ ${formatTimestamp(nextSnapshot.generated_at)}`
+          : "������������?
+      );
+    } catch (loadError) {
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setError(loadError instanceof Error ? loadError.message : "֪ͨ与告警加载ʧ�?);
+    } finally {
+      if (requestId === loadRequestIdRef.current) {
+        setLoading(false);
+        setPendingAction(null);
+      }
+    }
+  }
+
+  async function handleReplay(): Promise<void> {
+    if (!selectedAlert?.replay_payload) return;
+    setPendingAction(`replay:${selectedAlert.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await replayProviderStatusBuffer(selectedAlert.replay_payload);
+      setNotice(`已回�?${result.replayed_count} 条״̬`);
+      await loadPage();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "���€����������?);
+      setPendingAction(null);
+    }
+  }
+
+  function openSelectedProviderEvents(): void {
+    if (!selectedAlert?.replay_payload) return;
+    openProviderEventsPage({
+      account_id: selectedAlert.replay_payload.account_id,
+      provider_name: selectedAlert.replay_payload.provider_name,
+      provider_message_id: selectedAlert.replay_payload.provider_message_id,
+      external_status: selectedAlert.replay_payload.external_status,
+      waba_id: selectedAlert.replay_payload.waba_id,
+      phone_number_id: selectedAlert.replay_payload.phone_number_id,
+      replay_state: "pending",
+    });
+  }
+
+  const alertColumns: ProColumns<AlertCenterItem>[] = [
+    {
+      title: "���",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.title}</Typography.Text>
+          <Typography.Text type="secondary">{record.summary}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "����",
+      render: (_, record) => record.account_id ?? "ȫ��",
+    },
+    {
+      title: "����",
+      render: (_, record) => <Tag color={getSeverityColor(record.severity)}>{record.severity}</Tag>,
+    },
+    {
+      title: "����",
+      dataIndex: "category",
+    },
+    {
+      title: "��Դ",
+      render: (_, record) => (
+        <Tag color={record.source === "api" ? "blue" : "cyan"}>{record.source}</Tag>
+      ),
+    },
+  ];
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+                    <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={accountOptions}
+            onChange={setAccountFilter}
+          />
+          <Button loading={loading} onClick={() => void loadPage()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic
+              title="��������€?
+              value={snapshot?.service_health ?? "����"}
+              suffix={
+                snapshot ? (
+                  <Tag color={getHealthColor(snapshot.service_health)}>
+                    {snapshot.service_health}
+                  </Tag>
+                ) : null
+              }
+            />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��������" value={snapshot?.queue_backlog ?? 0} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="ʧ������" value={snapshot?.failed_jobs ?? 0} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="待回放״�? value={snapshot?.provider_pending ?? 0} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<AlertCenterItem>
+            columns={alertColumns}
+            dataSource={snapshot?.items ?? []}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 8 }}
+            rowKey="id"
+            search={false}
+            toolBarRender={false}
+            onRow={(record) => ({
+              onClick: () => setSelectedAlertId(record.id),
+            })}
+          />
+        </Col>
+        <Col lg={10} xs={24}>
+          <Card title="��������">
+            {selectedAlert ? (
+              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                <Descriptions bordered column={1} size="small">
+                  <Descriptions.Item label="���">{selectedAlert.title}</Descriptions.Item>
+                  <Descriptions.Item label="����">
+                    {selectedAlert.account_id ?? "ȫ��"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="���">{selectedAlert.summary}</Descriptions.Item>
+                  <Descriptions.Item label="����">
+                    <Tag color={getSeverityColor(selectedAlert.severity)}>
+                      {selectedAlert.severity}
+                    </Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="����">{selectedAlert.category}</Descriptions.Item>
+                  <Descriptions.Item label="���€?>{selectedAlert.status}</Descriptions.Item>
+                  <Descriptions.Item label="����ʱ��">
+                    {formatTimestamp(selectedAlert.occurred_at)}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="������Դ">
+                    <Tag color={selectedAlert.source === "api" ? "blue" : "cyan"}>
+                      {selectedAlert.source === "api" ? "API" : "����"}
+                    </Tag>
+                  </Descriptions.Item>
+                </Descriptions>
+                <Space wrap>
+                  {selectedAlert.replay_payload ? (
+                    <Button
+                      loading={pendingAction === `replay:${selectedAlert.id}`}
+                      onClick={() => void handleReplay()}
+                      type="primary"
+                    >
+                      {selectedAlert.action_label ?? "����"}
+                    </Button>
+                  ) : null}
+                  {selectedAlert.replay_payload ? (
+                    <Button onClick={openSelectedProviderEvents}>��������</Button>
+                  ) : null}
+                  <Button
+                    onClick={() =>
+                      openAuditPage({
+                        account_id: selectedAlert.account_id ?? undefined,
+                        limit: 50,
+                      })
+                    }
+                  >
+                    ���
+                  </Button>
+                </Space>
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">��������</Typography.Text>
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      <Card title="��������">
+        <Table<AlertRuleDefinition>
+          columns={[
+            {
+              title: "����",
+              render: (_, record) => (
+                <Space direction="vertical" size={0}>
+                  <Typography.Text strong>{record.name}</Typography.Text>
+                  <Typography.Text type="secondary">{record.rule_id}</Typography.Text>
+                </Space>
+              ),
+            },
+            {
+              title: "����",
+              render: (_, record) => record.account_id ?? "ȫ��",
+            },
+            {
+              title: "����",
+              render: (_, record) => <Tag color={getSeverityColor(record.severity)}>{record.severity}</Tag>,
+            },
+            {
+              title: "���€?,
+              render: (_, record) => (
+                <Tag color={record.status === "active" ? "success" : "default"}>
+                  {record.status}
+                </Tag>
+              ),
+            },
+            {
+              title: "��������",
+              dataIndex: "condition_summary",
+            },
+            {
+              title: "֪ͨ����",
+              render: (_, record) => record.notify_channels.join(" / "),
+            },
+            {
+              title: "��Դ",
+              render: (_, record) => <Tag color="gold">{record.source === "mock" ? "ģ��" : record.source}</Tag>,
+            },
+          ]}
+          dataSource={rules}
+          loading={loading}
+          pagination={false}
+          rowKey="rule_id"
+        />
+      </Card>
+    </Space>
+  );
+}
+
+export function AlertsPage(): JSX.Element {
+  return (
+    <Tabs
+      defaultActiveKey="alerts"
+      items={[
+        { key: "alerts", label: "��������", children: <AlertsContent /> },
+        { key: "notifications", label: "֪ͨ����", children: <LazyNotificationsContent /> },
+      ]}
+    />
+  );
+}

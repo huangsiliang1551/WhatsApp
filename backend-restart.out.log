@@ -1,0 +1,30 @@
+{"app_name": "WhatsApp Support Platform", "environment": "development", "ai_provider": "openai", "test_mode": false, "event": "app_startup", "level": "info", "timestamp": "2026-06-22T23:37:29.994013Z"}
+{"database_url": "postgresql://whatsapp_user:****@localhost:5432/whatsapp_bot", "event": "db_startup_probe_beginning", "level": "info", "timestamp": "2026-06-22T23:37:30.226792Z"}
+{"event": "db_startup_probe_success", "level": "info", "timestamp": "2026-06-22T23:37:30.340795Z"}
+{"created": true, "event": "h5_default_template_bootstrap", "level": "info", "timestamp": "2026-06-22T23:37:30.625061Z"}
+{"created": 0, "repaired": 3, "event": "h5_default_sites_bootstrap", "level": "info", "timestamp": "2026-06-22T23:37:30.637186Z"}
+{"created": false, "phone": "13800000000", "site_key": "mall-cn", "event": "h5_demo_user_seed", "level": "info", "timestamp": "2026-06-22T23:37:30.644247Z"}
+{"request_id": "b8395e9b-11a0-4b36-91e6-5bc65d30a3c6", "method": "GET", "path": "/api/platform/sites", "event": "request_started", "level": "info", "timestamp": "2026-06-22T23:38:04.198141Z"}
+{"request_id": "8a44e55d-09db-40bc-a5ea-0f63fd2ae921", "method": "GET", "path": "/api/platform/sites/c07f2ba0-01eb-40cc-a1f2-bf22efdc0ff5/preview", "event": "request_started", "level": "info", "timestamp": "2026-06-22T23:38:05.117015Z"}
+{"request_id": "b8395e9b-11a0-4b36-91e6-5bc65d30a3c6", "method": "GET", "path": "/api/platform/sites", "status_code": 200, "event": "request_completed", "level": "info", "timestamp": "2026-06-22T23:38:05.965655Z"}
+INFO:     127.0.0.1:63866 - "GET /api/platform/sites HTTP/1.1" 200 OK
+{"request_id": "8a44e55d-09db-40bc-a5ea-0f63fd2ae921", "method": "GET", "path": "/api/platform/sites/c07f2ba0-01eb-40cc-a1f2-bf22efdc0ff5/preview", "status_code": 200, "event": "request_completed", "level": "info", "timestamp": "2026-06-22T23:38:06.513308Z"}
+INFO:     127.0.0.1:63874 - "GET /api/platform/sites/c07f2ba0-01eb-40cc-a1f2-bf22efdc0ff5/preview HTTP/1.1" 200 OK
+{"request_id": "8b57b028-79a4-4921-b43c-e893c7b8ef60", "method": "GET", "path": "/api/h5/sites/mall-cn/brand-config", "event": "request_started", "level": "info", "timestamp": "2026-06-22T23:46:10.688869Z"}
+{"request_id": "975155f9-f82e-4f67-9542-57d19ebd94dd", "method": "GET", "path": "/api/platform/sites/c07f2ba0-01eb-40cc-a1f2-bf22efdc0ff5/preview", "event": "request_started", "level": "info", "timestamp": "2026-06-22T23:46:11.108877Z"}
+{"request_id": "8b57b028-79a4-4921-b43c-e893c7b8ef60", "method": "GET", "path": "/api/h5/sites/mall-cn/brand-config", "status_code": 200, "event": "request_completed", "level": "info", "timestamp": "2026-06-22T23:46:11.955496Z"}
+INFO:     127.0.0.1:52523 - "GET /api/h5/sites/mall-cn/brand-config HTTP/1.1" 200 OK
+{"request_id": "975155f9-f82e-4f67-9542-57d19ebd94dd", "method": "GET", "path": "/api/platform/sites/c07f2ba0-01eb-40cc-a1f2-bf22efdc0ff5/preview", "status_code": 200, "event": "request_completed", "level": "info", "timestamp": "2026-06-22T23:46:12.384165Z"}
+INFO:     127.0.0.1:52527 - "GET /api/platform/sites/c07f2ba0-01eb-40cc-a1f2-bf22efdc0ff5/preview HTTP/1.1" 200 OK
+{"request_id": "27ac7687-d635-4c2e-b407-8dca195f0eb5", "method": "GET", "path": "/health", "event": "request_started", "level": "info", "timestamp": "2026-06-22T23:59:03.755498Z"}
+{"request_id": "27ac7687-d635-4c2e-b407-8dca195f0eb5", "method": "GET", "path": "/health", "status_code": 200, "event": "request_completed", "level": "info", "timestamp": "2026-06-22T23:59:03.757834Z"}
+INFO:     127.0.0.1:61296 - "GET /health HTTP/1.1" 200 OK
+{"request_id": "0ae45c92-df6b-42b3-a0bc-7833d34606f2", "method": "GET", "path": "/api/h5/sites/mall-cn/brand-config", "event": "request_started", "level": "info", "timestamp": "2026-06-22T23:59:03.986077Z"}
+{"request_id": "0ae45c92-df6b-42b3-a0bc-7833d34606f2", "method": "GET", "path": "/api/h5/sites/mall-cn/brand-config", "status_code": 200, "event": "request_completed", "level": "info", "timestamp": "2026-06-22T23:59:04.006978Z"}
+INFO:     127.0.0.1:61298 - "GET /api/h5/sites/mall-cn/brand-config HTTP/1.1" 200 OK
+{"request_id": "11a5aaee-a330-4e42-8ab6-4e4e947a4e31", "method": "GET", "path": "/api/health", "event": "request_started", "level": "info", "timestamp": "2026-06-23T00:02:18.154818Z"}
+{"request_id": "11a5aaee-a330-4e42-8ab6-4e4e947a4e31", "method": "GET", "path": "/api/health", "status_code": 404, "event": "request_completed", "level": "info", "timestamp": "2026-06-23T00:02:18.647160Z"}
+INFO:     127.0.0.1:55680 - "GET /api/health HTTP/1.1" 404 Not Found
+{"request_id": "84723ff4-1194-4777-a1e7-80d26a43b270", "method": "GET", "path": "/api/h5/sites/mall-cn/brand-config", "event": "request_started", "level": "info", "timestamp": "2026-06-23T00:02:30.642997Z"}
+{"request_id": "84723ff4-1194-4777-a1e7-80d26a43b270", "method": "GET", "path": "/api/h5/sites/mall-cn/brand-config", "status_code": 200, "event": "request_completed", "level": "info", "timestamp": "2026-06-23T00:02:30.663493Z"}
+INFO:     127.0.0.1:61081 - "GET /api/h5/sites/mall-cn/brand-config HTTP/1.1" 200 OK

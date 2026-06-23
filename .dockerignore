@@ -1,0 +1,45 @@
+# --- Python environments ---
+.venv
+.venv_backup_*
+.venv_rebuild_backup_*
+.venv_system_base_backup_*
+.python
+*.pyc
+__pycache__
+.pytest_cache
+.mypy_cache
+*.egg-info
+whatsapp_support_platform.egg-info
+
+# --- Test artifacts ---
+.tmp_pytest
+tests
+
+# --- Frontend (built separately, not needed in backend image) ---
+frontend
+
+# --- IDE / editor / agent docs ---
+.codex-run
+.qoder
+agents
+.vscode
+.idea
+
+# --- Database / storage / monitoring config ---
+storage
+tmp_restore
+tmp_media_debug*.db
+*.db
+
+# --- Monitoring stack (uses own images) ---
+monitoring
+
+# --- CI / scripts not needed at runtime ---
+.github
+
+# --- Docker itself ---
+docker-compose.yml
+.dockerignore
+.env.example
+.gitignore
+.git

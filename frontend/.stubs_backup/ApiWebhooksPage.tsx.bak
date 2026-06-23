@@ -1,0 +1,660 @@
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Form,
+  Input,
+  InputNumber,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Switch,
+  Tag,
+  Typography,
+} from "antd";
+
+import type { MetaWabaAccount, MetaWebhookSubscriptionView } from "../services/api";
+import {
+  createApiWebhookPolicy,
+  getApiWebhookSnapshot,
+  rotateWebhookSecret,
+} from "../services/apiWebhookCenter";
+import { useAppStore } from "../stores/appStore";
+import type {
+  ApiWebhookPolicyCreatePayload,
+  ApiWebhookPolicyItem,
+  ApiWebhookSnapshot,
+} from "../types/apiWebhooks";
+
+type PolicyFormValues = ApiWebhookPolicyCreatePayload;
+
+function formatTimestamp(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleString("zh-CN") : "����";
+}
+
+function getRuntimeTag(status: string | null | undefined): JSX.Element {
+  if (status === "healthy") return <Tag color="success">����</Tag>;
+  if (status === "verification_pending" || status === "pending") {
+    return <Tag color="warning">����֤</Tag>;
+  }
+  if (!status) return <Tag>����</Tag>;
+  return <Tag color="error">{status}</Tag>;
+}
+
+function getPolicyResultTag(result: ApiWebhookPolicyItem["effective_result"]): JSX.Element {
+  if (result === "enforced") return <Tag color="success">����Ч</Tag>;
+  if (result === "partial") return <Tag color="processing">������Ч</Tag>;
+  return <Tag color="warning">������</Tag>;
+}
+
+function getRotationTag(state: ApiWebhookPolicyItem["secret_rotation_state"]): JSX.Element {
+  if (state === "ready") return <Tag color="success">�Ѿ���</Tag>;
+  if (state === "pending") return <Tag color="warning">���ֻ�</Tag>;
+  return <Tag color="error">�ѳ���</Tag>;
+}
+
+function getSelectedAccountKey(
+  accounts: MetaWabaAccount[],
+  subscription: MetaWebhookSubscriptionView | null,
+  accountId: string | null | undefined
+): string | undefined {
+  const resolvedAccountId = subscription?.account_id ?? accountId ?? undefined;
+  const resolvedWabaId = subscription?.waba_id ?? undefined;
+  const matched = accounts.find((item) => {
+    if (resolvedAccountId && item.account_id !== resolvedAccountId) {
+      return false;
+    }
+    if (resolvedWabaId && item.waba_id !== resolvedWabaId) {
+      return false;
+    }
+    return true;
+  });
+
+  return matched ? `${matched.account_id}:${matched.waba_id}` : undefined;
+}
+
+export function ApiWebhooksPage(): JSX.Element {
+  const [form] = Form.useForm<PolicyFormValues>();
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+  const openIntegrationsPage = useAppStore((state) => state.openIntegrationsPage);
+  const openMetaAccountsPage = useAppStore((state) => state.openMetaAccountsPage);
+  const openProviderEventsPage = useAppStore((state) => state.openProviderEventsPage);
+  const apiWebhooksPagePrefill = useAppStore((state) => state.apiWebhooksPagePrefill);
+  const clearApiWebhooksPagePrefill = useAppStore((state) => state.clearApiWebhooksPagePrefill);
+  const setApiWebhooksPagePrefill = useAppStore((state) => state.setApiWebhooksPagePrefill);
+  const lastAppliedPrefillNonce = useRef<number | null>(null);
+
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [snapshot, setSnapshot] = useState<ApiWebhookSnapshot | null>(null);
+  const [selectedSubscriptionId, setSelectedSubscriptionId] = useState<string>("");
+  const [selectedPolicyId, setSelectedPolicyId] = useState<string>("");
+  const [selectionLocked, setSelectionLocked] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [selectionWarning, setSelectionWarning] = useState<string | null>(null);
+
+  const selectedSubscription = useMemo(
+    () => snapshot?.subscriptions.find((item) => item.id === selectedSubscriptionId) ?? null,
+    [selectedSubscriptionId, snapshot]
+  );
+  const selectedPolicy = useMemo(
+    () => snapshot?.policies.find((item) => item.policy_id === selectedPolicyId) ?? null,
+    [selectedPolicyId, snapshot]
+  );
+  const selectedAccountKey = useMemo(
+    () =>
+      getSelectedAccountKey(
+        snapshot?.accounts ?? [],
+        selectedSubscription,
+        accountFilter !== "ALL" ? accountFilter : selectedPolicy?.account_id
+      ),
+    [accountFilter, selectedPolicy?.account_id, selectedSubscription, snapshot?.accounts]
+  );
+
+  useEffect(() => {
+    if (!apiWebhooksPagePrefill) {
+      return;
+    }
+    if (lastAppliedPrefillNonce.current === apiWebhooksPagePrefill.nonce) {
+      return;
+    }
+
+    lastAppliedPrefillNonce.current = apiWebhooksPagePrefill.nonce;
+    setAccountFilter(apiWebhooksPagePrefill.account_id ?? "ALL");
+    setSelectedSubscriptionId(apiWebhooksPagePrefill.selected_subscription_id ?? "");
+    setSelectedPolicyId(apiWebhooksPagePrefill.selected_policy_id ?? "");
+    setSelectionLocked(
+      Boolean(
+        apiWebhooksPagePrefill.selected_subscription_id || apiWebhooksPagePrefill.selected_policy_id
+      )
+    );
+    setSelectionWarning(null);
+    clearApiWebhooksPagePrefill();
+  }, [apiWebhooksPagePrefill, clearApiWebhooksPagePrefill]);
+
+  useEffect(() => {
+    void loadPage();
+  }, [accountFilter]);
+
+  useEffect(() => {
+    if (!snapshot?.subscriptions.length) {
+      setSelectedSubscriptionId("");
+    } else if (snapshot.subscriptions.some((item) => item.id === selectedSubscriptionId)) {
+      return;
+    } else if (selectionLocked && selectedSubscriptionId) {
+      setSelectionWarning("Ŀ�궩�Ĳ����ڣ��ѻ��˵���ǰ�б���");
+      setSelectionLocked(false);
+      setSelectedSubscriptionId(snapshot.subscriptions[0].id);
+    } else {
+      setSelectedSubscriptionId(snapshot.subscriptions[0].id);
+    }
+  }, [selectedSubscriptionId, selectionLocked, snapshot?.subscriptions]);
+
+  useEffect(() => {
+    if (!snapshot?.policies.length) {
+      setSelectedPolicyId("");
+    } else if (snapshot.policies.some((item) => item.policy_id === selectedPolicyId)) {
+      return;
+    } else if (selectionLocked && selectedPolicyId) {
+      setSelectionWarning("Ŀ����Բ����ڣ��ѻ��˵���ǰ�б���");
+      setSelectionLocked(false);
+      setSelectedPolicyId(snapshot.policies[0].policy_id);
+    } else {
+      setSelectedPolicyId(snapshot.policies[0].policy_id);
+    }
+  }, [selectedPolicyId, selectionLocked, snapshot?.policies]);
+
+  useEffect(() => {
+    setApiWebhooksPagePrefill({
+      account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+      selected_subscription_id: selectedSubscriptionId || undefined,
+      selected_policy_id: selectedPolicyId || undefined,
+    });
+  }, [
+    accountFilter,
+    selectedPolicyId,
+    selectedSubscriptionId,
+    setApiWebhooksPagePrefill,
+  ]);
+
+  async function loadPage(): Promise<void> {
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const nextSnapshot = await getApiWebhookSnapshot(
+        accountFilter !== "ALL" ? accountFilter : undefined
+      );
+      setSnapshot(nextSnapshot);
+      setNotice(`��ˢ�� ${formatTimestamp(nextSnapshot.generated_at)}`);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "API / Webhook ҳ�����ʧ��");
+    } finally {
+      setLoading(false);
+      setPendingAction(null);
+    }
+  }
+
+  async function handleCreatePolicy(values: PolicyFormValues): Promise<void> {
+    setPendingAction("create-policy");
+    setError(null);
+    setNotice(null);
+    try {
+      const created = await createApiWebhookPolicy(values);
+      setSelectionLocked(false);
+      setSelectionWarning(null);
+      setNotice(`���������ԣ�${created.policy_name}`);
+      form.resetFields();
+      await loadPage();
+      setSelectedPolicyId(created.policy_id);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "�½�����ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleRotate(policy: ApiWebhookPolicyItem): Promise<void> {
+    setPendingAction(`rotate:${policy.policy_id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await rotateWebhookSecret(policy.policy_id);
+      setNotice(`���ֻ���${updated.policy_name}`);
+      await loadPage();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "�ֻ�ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  const accountOptions = useMemo(
+    () => [
+      { label: "ȫ���˺�", value: "ALL" },
+      ...actorAccountIds.map((item) => ({ label: item, value: item })),
+    ],
+    [actorAccountIds]
+  );
+
+  const subscriptions = snapshot?.subscriptions ?? [];
+  const policies = snapshot?.policies ?? [];
+  const accounts = snapshot?.accounts ?? [];
+  const providerPending = snapshot?.provider_pending ?? [];
+  const signatureFailureTotal = subscriptions.reduce(
+    (total, item) => total + item.webhook_signature_failure_count,
+    0
+  );
+  const verifyTokenPresentCount = subscriptions.filter((item) => item.verify_token_present).length;
+
+  const subscriptionColumns: ProColumns<MetaWebhookSubscriptionView>[] = [
+    {
+      title: "�˺�",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.account_display_name}</Typography.Text>
+          <Typography.Text type="secondary">{record.account_id}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "WABA",
+      dataIndex: "waba_id",
+      ellipsis: true,
+    },
+    {
+      title: "����״̬",
+      render: (_, record) => getRuntimeTag(record.webhook_runtime_status),
+    },
+    {
+      title: "��֤״̬",
+      render: (_, record) => <Tag>{record.webhook_verification_status}</Tag>,
+    },
+    {
+      title: "ǩ��ʧ��",
+      dataIndex: "webhook_signature_failure_count",
+    },
+  ];
+
+  const policyColumns: ProColumns<ApiWebhookPolicyItem>[] = [
+    {
+      title: "������",
+      render: (_, record) => record.account_id ?? "ȫ��",
+    },
+    {
+      title: "����",
+      dataIndex: "policy_name",
+    },
+    {
+      title: "ǩ��ģʽ",
+      render: (_, record) => <Tag>{record.signature_mode === "strict" ? "�ϸ�" : "����"}</Tag>,
+    },
+    {
+      title: "�ֻ�",
+      render: (_, record) => getRotationTag(record.secret_rotation_state),
+    },
+    {
+      title: "��Ч���",
+      render: (_, record) => getPolicyResultTag(record.effective_result),
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Button
+          loading={pendingAction === `rotate:${record.policy_id}`}
+          onClick={() => void handleRotate(record)}
+          size="small"
+        >
+          �ֻ�
+        </Button>
+      ),
+    },
+  ];
+
+  const accountCards = useMemo(
+    () =>
+      accounts.slice(0, 3).map((item) => ({
+        key: `${item.account_id}:${item.waba_id}`,
+        title: item.display_name,
+        summary: `${item.account_id} / ${item.waba_id}`,
+        tags: [
+          item.has_access_token ? "Access Token" : "ȱ Access Token",
+          item.has_verify_token ? "Verify Token" : "ȱ Verify Token",
+          item.has_app_secret ? "App Secret" : "ȱ App Secret",
+        ],
+      })),
+    [accounts]
+  );
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {selectionWarning ? <Alert message={selectionWarning} showIcon type="warning" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+      {snapshot?.warnings.map((item) => (
+        <Alert key={item} message={item} showIcon type="warning" />
+      ))}
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+          <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={accountOptions}
+            onChange={(value) => {
+              setSelectionLocked(false);
+              setSelectionWarning(null);
+              setAccountFilter(value);
+            }}
+          />
+          <Button
+            onClick={() =>
+              openIntegrationsPage({
+                account_id:
+                  selectedSubscription?.account_id ?? (accountFilter !== "ALL" ? accountFilter : undefined),
+                selected_account_key: selectedAccountKey,
+              })
+            }
+          >
+            ����
+          </Button>
+          <Button
+            onClick={() =>
+              openProviderEventsPage({
+                account_id:
+                  selectedSubscription?.account_id ?? (accountFilter !== "ALL" ? accountFilter : undefined),
+                provider_name: providerPending[0]?.provider_name,
+                replay_state: "pending",
+                waba_id: selectedSubscription?.waba_id,
+              })
+            }
+          >
+            �¼�
+          </Button>
+          <Button
+            onClick={() =>
+              openMetaAccountsPage({
+                focused_account_id:
+                  selectedSubscription?.account_id ?? (accountFilter !== "ALL" ? accountFilter : undefined),
+                selected_account_key: selectedAccountKey,
+                active_tab: "webhooks",
+              })
+            }
+          >
+            Meta
+          </Button>
+          <Button loading={loading} onClick={() => void loadPage()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="������" value={subscriptions.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="ǩ��ʧ��" value={signatureFailureTotal} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="���ط�" value={providerPending.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="Verify Token ����" value={verifyTokenPresentCount} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<MetaWebhookSubscriptionView>
+            columns={subscriptionColumns}
+            dataSource={subscriptions}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 6 }}
+            rowKey="id"
+            search={false}
+            toolBarRender={false}
+            onRow={(record) => ({
+              onClick: () => {
+                setSelectionLocked(false);
+                setSelectionWarning(null);
+                setSelectedSubscriptionId(record.id);
+              },
+            })}
+          />
+        </Col>
+        <Col lg={10} xs={24}>
+          <Card
+            extra={<Tag color={snapshot?.source === "hybrid" ? "gold" : "blue"}>{snapshot?.source ?? "hybrid"}</Tag>}
+            title="��ǰ����"
+          >
+            {selectedSubscription ? (
+              <Descriptions bordered column={1} size="small">
+                <Descriptions.Item label="�˺�">{selectedSubscription.account_id}</Descriptions.Item>
+                <Descriptions.Item label="�ص���ַ">{selectedSubscription.callback_url}</Descriptions.Item>
+                <Descriptions.Item label="��֤·��">
+                  {selectedSubscription.webhook_verify_path}
+                </Descriptions.Item>
+                <Descriptions.Item label="����֤·��">
+                  {selectedSubscription.webhook_root_verify_path}
+                </Descriptions.Item>
+                <Descriptions.Item label="����·��">
+                  {selectedSubscription.webhook_receive_path}
+                </Descriptions.Item>
+                <Descriptions.Item label="����״̬">
+                  <Space size={[8, 8]} wrap>
+                    {getRuntimeTag(selectedSubscription.webhook_runtime_status)}
+                    <Tag>{selectedSubscription.status}</Tag>
+                  </Space>
+                </Descriptions.Item>
+                <Descriptions.Item label="Verify Token">
+                  {selectedSubscription.verify_token_present ? "������" : "δ����"}
+                </Descriptions.Item>
+                <Descriptions.Item label="App ID">
+                  {selectedSubscription.app_id ?? "����"}
+                </Descriptions.Item>
+                <Descriptions.Item label="�����֤">
+                  {formatTimestamp(selectedSubscription.webhook_last_verified_at)}
+                </Descriptions.Item>
+                <Descriptions.Item label="ǩ��ʧ��">
+                  {selectedSubscription.webhook_signature_failure_count}
+                </Descriptions.Item>
+                <Descriptions.Item label="���д���">
+                  {selectedSubscription.webhook_runtime_error ?? "����"}
+                </Descriptions.Item>
+              </Descriptions>
+            ) : (
+              <Typography.Text type="secondary">���޶���</Typography.Text>
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<ApiWebhookPolicyItem>
+            columns={policyColumns}
+            dataSource={policies}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 5 }}
+            rowKey="policy_id"
+            search={false}
+            toolBarRender={false}
+            onRow={(record) => ({
+              onClick: () => {
+                setSelectionLocked(false);
+                setSelectionWarning(null);
+                setSelectedPolicyId(record.policy_id);
+              },
+            })}
+          />
+        </Col>
+        <Col lg={10} xs={24}>
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <Card title="��ǰ����">
+              {selectedPolicy ? (
+                <Descriptions bordered column={1} size="small">
+                  <Descriptions.Item label="�˺�">{selectedPolicy.account_id ?? "ȫ��"}</Descriptions.Item>
+                  <Descriptions.Item label="ǩ��ģʽ">
+                    {selectedPolicy.signature_mode === "strict" ? "�ϸ�" : "����"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="�ط�����">
+                    {selectedPolicy.replay_limit_per_minute} / ����
+                  </Descriptions.Item>
+                  <Descriptions.Item label="IP ������">
+                    {selectedPolicy.ip_allowlist_enabled ? "����" : "�ر�"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="��Կ�ֻ�">
+                    {getRotationTag(selectedPolicy.secret_rotation_state)}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="���ս��">
+                    <Space direction="vertical" size={4}>
+                      {getPolicyResultTag(selectedPolicy.effective_result)}
+                      <Typography.Text type="secondary">
+                        {selectedPolicy.effective_reason}
+                      </Typography.Text>
+                    </Space>
+                  </Descriptions.Item>
+                </Descriptions>
+              ) : (
+                <Typography.Text type="secondary">���޲���</Typography.Text>
+              )}
+            </Card>
+
+            <Card extra={<Tag color="gold">ģ��</Tag>} title="�½�����">
+              <Form<PolicyFormValues>
+                form={form}
+                initialValues={{
+                  signature_mode: "strict",
+                  replay_limit_per_minute: 60,
+                  ip_allowlist_enabled: false,
+                  effective_reason: "",
+                }}
+                layout="vertical"
+                onFinish={(values) => void handleCreatePolicy(values)}
+              >
+                <Form.Item label="�˺�" name="account_id">
+                  <Select
+                    allowClear
+                    options={accountOptions.filter((item) => item.value !== "ALL")}
+                  />
+                </Form.Item>
+                <Form.Item label="������" name="policy_name" rules={[{ required: true }]}>
+                  <Input />
+                </Form.Item>
+                <Form.Item label="ǩ��ģʽ" name="signature_mode" rules={[{ required: true }]}>
+                  <Select
+                    options={[
+                      { label: "�ϸ�", value: "strict" },
+                      { label: "����", value: "compat" },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="�ط�����"
+                  name="replay_limit_per_minute"
+                  rules={[{ required: true }]}
+                >
+                  <InputNumber min={1} step={10} style={{ width: "100%" }} />
+                </Form.Item>
+                <Form.Item label="��Чԭ��" name="effective_reason" rules={[{ required: true }]}>
+                  <Input />
+                </Form.Item>
+                <Form.Item label="IP ������" name="ip_allowlist_enabled" valuePropName="checked">
+                  <Switch />
+                </Form.Item>
+                <Button
+                  block
+                  htmlType="submit"
+                  loading={pendingAction === "create-policy"}
+                  type="primary"
+                >
+                  �½�����
+                </Button>
+              </Form>
+            </Card>
+          </Space>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={12} xs={24}>
+          <Card title="���ط�״̬">
+            <Space direction="vertical" size={12} style={{ width: "100%" }}>
+              {providerPending.length > 0 ? (
+                providerPending.slice(0, 5).map((item) => (
+                  <Card key={item.id} size="small">
+                    <Space direction="vertical" size={4}>
+                      <Space size={[8, 8]} wrap>
+                        <Tag color="warning">{item.external_status}</Tag>
+                        <Tag>{item.provider_name}</Tag>
+                      </Space>
+                      <Typography.Text>{`${item.account_id} / ${item.provider_message_id}`}</Typography.Text>
+                      <Typography.Text type="secondary">
+                        {formatTimestamp(item.occurred_at ?? item.last_seen_at)}
+                      </Typography.Text>
+                      <Button
+                        size="small"
+                        type="link"
+                        onClick={() =>
+                          openProviderEventsPage({
+                            account_id: item.account_id,
+                            provider_name: item.provider_name,
+                            provider_message_id: item.provider_message_id,
+                            replay_state: "pending",
+                          })
+                        }
+                      >
+                        ��
+                      </Button>
+                    </Space>
+                  </Card>
+                ))
+              ) : (
+                <Typography.Text type="secondary">���޻�ѹ</Typography.Text>
+              )}
+            </Space>
+          </Card>
+        </Col>
+        <Col lg={12} xs={24}>
+          <Card title="����ƾ��">
+            <Space direction="vertical" size={12} style={{ width: "100%" }}>
+              {accountCards.length > 0 ? (
+                accountCards.map((item) => (
+                  <Card key={item.key} size="small">
+                    <Space direction="vertical" size={4}>
+                      <Typography.Text strong>{item.title}</Typography.Text>
+                      <Typography.Text type="secondary">{item.summary}</Typography.Text>
+                      <Space size={[8, 8]} wrap>
+                        {item.tags.map((tag) => (
+                          <Tag key={`${item.key}:${tag}`}>{tag}</Tag>
+                        ))}
+                      </Space>
+                    </Space>
+                  </Card>
+                ))
+              ) : (
+                <Typography.Text type="secondary">�����˺�</Typography.Text>
+              )}
+            </Space>
+          </Card>
+        </Col>
+      </Row>
+    </Space>
+  );
+}

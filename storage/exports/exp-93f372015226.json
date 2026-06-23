@@ -1,0 +1,17 @@
+{
+  "export_id": "exp-93f372015226",
+  "type": "templates",
+  "filters": {},
+  "columns": [
+    "template_id",
+    "name",
+    "status"
+  ],
+  "status": "completed",
+  "estimated_rows": 1,
+  "created_at": "2026-06-13T10:36:59.889040+00:00",
+  "expires_at": "2026-06-14T10:36:59.889046+00:00",
+  "file_size_bytes": 25,
+  "row_count": 0,
+  "download_url": "/api/exports/exp-93f372015226/download"
+}

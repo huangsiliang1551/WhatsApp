@@ -1,0 +1,707 @@
+import { lazy, useEffect, useMemo, useRef, useState, type ComponentType, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Form,
+  InputNumber,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Switch,
+  Tabs,
+  Tag,
+  Typography,
+} from "antd";
+
+const LazyIdentitySyncContent = lazy(() =>
+  import("./IdentitySyncPage").then((m) => ({ default: m.IdentitySyncPage }))
+);
+const LazyMemberAccessContent = lazy(() =>
+  import("./MemberAccessPage").then((m) => ({ default: m.MemberAccessPage }))
+);
+const LazyAccessControlContent = lazy(() =>
+  import("./AccessControlPage").then((m) => ({ default: m.AccessControlPage }))
+);
+const LazyRiskContent = lazy(() =>
+  import("./RiskCenterPage").then((m) => ({ default: m.RiskCenterPage }))
+);
+
+import {
+  getSecuritySettingsSnapshot,
+  toggleSsoProvider,
+  updateSecuritySessionPolicy,
+} from "../services/securityCenter";
+import { useAppStore } from "../stores/appStore";
+import type {
+  SecurityPolicyUpdatePayload,
+  SecuritySessionPolicy,
+  SecuritySettingsSnapshot,
+  SecuritySsoProvider,
+} from "../types/securitySettings";
+
+type PolicyFormValues = SecurityPolicyUpdatePayload;
+
+function formatTimestamp(value: string | null): string {
+  return value ? new Date(value).toLocaleString("zh-CN") : "����";
+}
+
+function getSourceTag(source: "hybrid" | "mock"): JSX.Element {
+  return <Tag color={source === "hybrid" ? "cyan" : "gold"}>{source === "hybrid" ? "����" : "ģ��"}</Tag>;
+}
+
+function getLoginModeLabel(mode: SecuritySessionPolicy["login_mode"]): string {
+  if (mode === "sso_first") return "�������������";
+  if (mode === "sso") return "������€���";
+  if (mode === "password") return "仅密�?;
+  return "����";
+}
+
+function getPolicyTag(policy: SecuritySessionPolicy): JSX.Element {
+  return (
+    <Space size={[8, 8]} wrap>
+      <Tag>{getLoginModeLabel(policy.login_mode)}</Tag>
+      <Tag color={policy.mfa_required ? "success" : "default"}>
+        {policy.mfa_required ? "����������" : "����?}
+      </Tag>
+      {policy.webhook_signature_enforced ? <Tag color="processing">ǩ��У��</Tag> : null}
+      {getSourceTag(policy.source)}
+    </Space>
+  );
+}
+
+function getPolicyResultTag(policy: SecuritySessionPolicy): JSX.Element {
+  if (policy.effective_result === "enforced") {
+    return <Tag color="success">已生�?/Tag>;
+  }
+  if (policy.effective_result === "partial") {
+    return <Tag color="processing">������Ч</Tag>;
+  }
+  return <Tag color="warning">����?/Tag>;
+}
+
+function getBindingTag(status: SecuritySsoProvider["account_binding_status"]): JSX.Element {
+  if (status === "linked") {
+    return <Tag color="success">已绑�?/Tag>;
+  }
+  if (status === "limited") {
+    return <Tag color="processing">����</Tag>;
+  }
+  return <Tag color="warning">ȱʧ</Tag>;
+}
+
+function getSsoResultTag(provider: SecuritySsoProvider): JSX.Element {
+  if (provider.effective_result === "enforced") return <Tag color="success">已生�?/Tag>;
+  if (provider.effective_result === "partial") return <Tag color="processing">������Ч</Tag>;
+  return <Tag color="warning">����?/Tag>;
+}
+
+function getWebhookRuntimeTag(runtimeStatus: SecuritySsoProvider["webhook_runtime_status"]): JSX.Element {
+  if (runtimeStatus === "healthy") return <Tag color="success">����</Tag>;
+  if (runtimeStatus === "signature_failed" || runtimeStatus === "payload_invalid") {
+    return <Tag color="error">{runtimeStatus === "signature_failed" ? "ǩ��ʧ��" : "��������"}</Tag>;
+  }
+  if (runtimeStatus === "verification_pending" || runtimeStatus === "pending") {
+    return <Tag color="processing">待验�?/Tag>;
+  }
+  return <Tag>{runtimeStatus ?? "无״�?}</Tag>;
+}
+
+function getWebhookVerificationTag(
+  verificationStatus: SecuritySsoProvider["webhook_verification_status"]
+): JSX.Element {
+  if (verificationStatus === "verified") return <Tag color="success">已验�?/Tag>;
+  if (verificationStatus === "failed") return <Tag color="error">��֤ʧ��</Tag>;
+  if (verificationStatus === "pending") return <Tag color="processing">待验�?/Tag>;
+  return <Tag>����?/Tag>;
+}
+
+function getWebhookDeliveryTag(
+  deliveryState: SecuritySsoProvider["webhook_delivery_state"]
+): JSX.Element | null {
+  if (deliveryState === "ready") return <Tag color="success">已就�?/Tag>;
+  if (deliveryState === "error") return <Tag color="error">����</Tag>;
+  if (deliveryState === "stale") return <Tag color="warning">����</Tag>;
+  if (deliveryState === "silent") return <Tag color="default">无事�?/Tag>;
+  if (deliveryState === "unverified") return <Tag color="processing">待验�?/Tag>;
+  return null;
+}
+
+export function SecuritySettingsContent(): JSX.Element {
+  const [form] = Form.useForm<PolicyFormValues>();
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+  const openRolesPage = useAppStore((state) => state.openRolesPage);
+  const openAccessControlPage = useAppStore((state) => state.openAccessControlPage);
+  const openIdentitySyncPage = useAppStore((state) => state.openIdentitySyncPage);
+  const openAuditPage = useAppStore((state) => state.openAuditPage);
+  const openEvidencePage = useAppStore((state) => state.openEvidencePage);
+  const openMembersPage = useAppStore((state) => state.openMembersPage);
+  const securitySettingsPagePrefill = useAppStore((state) => state.securitySettingsPagePrefill);
+  const clearSecuritySettingsPagePrefill = useAppStore((state) => state.clearSecuritySettingsPagePrefill);
+  const setSecuritySettingsPagePrefill = useAppStore((state) => state.setSecuritySettingsPagePrefill);
+  const lastAppliedPrefillNonce = useRef<number | null>(null);
+  const loadRequestIdRef = useRef(0);
+
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [snapshot, setSnapshot] = useState<SecuritySettingsSnapshot | null>(null);
+  const [selectedPolicyAccount, setSelectedPolicyAccount] = useState<string>("global");
+  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const selectedPolicy = useMemo(
+    () =>
+      snapshot?.session_policies.find(
+        (item) => (item.account_id ?? "global") === selectedPolicyAccount
+      ) ?? null,
+    [selectedPolicyAccount, snapshot]
+  );
+
+  const accountOptions = useMemo(() => {
+    const values = new Set<string>(actorAccountIds);
+    snapshot?.session_policies.forEach((item) => {
+      if (item.account_id) values.add(item.account_id);
+    });
+    snapshot?.sso_providers.forEach((item) => {
+      if (item.account_id) values.add(item.account_id);
+    });
+    return Array.from(values).sort((left, right) => left.localeCompare(right, "zh-CN"));
+  }, [actorAccountIds, snapshot]);
+
+  useEffect(() => {
+    if (accountFilter === "ALL" && actorAccountIds.length === 1) {
+      setAccountFilter(actorAccountIds[0]);
+    }
+  }, [accountFilter, actorAccountIds]);
+
+  useEffect(() => {
+    if (!securitySettingsPagePrefill) {
+      return;
+    }
+    if (lastAppliedPrefillNonce.current === securitySettingsPagePrefill.nonce) {
+      return;
+    }
+    lastAppliedPrefillNonce.current = securitySettingsPagePrefill.nonce;
+    setAccountFilter(securitySettingsPagePrefill.account_id ?? "ALL");
+    setSelectedPolicyAccount(securitySettingsPagePrefill.selected_policy_account ?? "global");
+    clearSecuritySettingsPagePrefill();
+  }, [clearSecuritySettingsPagePrefill, securitySettingsPagePrefill]);
+
+  useEffect(() => {
+    void loadPage();
+  }, [accountFilter]);
+
+  useEffect(() => {
+    if (!snapshot?.session_policies.length) {
+      setSelectedPolicyAccount("global");
+      return;
+    }
+    if (accountFilter !== "ALL") {
+      const matchedAccountPolicy = snapshot.session_policies.find(
+        (item) => item.account_id === accountFilter
+      );
+      if (
+        matchedAccountPolicy &&
+        (!selectedPolicyAccount || selectedPolicyAccount === "global")
+      ) {
+        setSelectedPolicyAccount(matchedAccountPolicy.account_id ?? "global");
+        return;
+      }
+    }
+    if (
+      snapshot.session_policies.some(
+        (item) => (item.account_id ?? "global") === selectedPolicyAccount
+      )
+    ) {
+      return;
+    }
+    setSelectedPolicyAccount(snapshot.session_policies[0].account_id ?? "global");
+  }, [accountFilter, selectedPolicyAccount, snapshot]);
+
+  useEffect(() => {
+    if (!selectedPolicy) {
+      return;
+    }
+    form.setFieldsValue({
+      account_id: selectedPolicy.account_id ?? undefined,
+      login_mode: selectedPolicy.login_mode,
+      mfa_required: selectedPolicy.mfa_required,
+      session_timeout_minutes: selectedPolicy.session_timeout_minutes,
+      max_parallel_sessions: selectedPolicy.max_parallel_sessions,
+      suspicious_login_review: selectedPolicy.suspicious_login_review,
+      audit_retention_days: selectedPolicy.audit_retention_days,
+    });
+  }, [form, selectedPolicy]);
+
+  useEffect(() => {
+    setSecuritySettingsPagePrefill({
+      account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+      selected_policy_account: selectedPolicyAccount || undefined,
+    });
+  }, [accountFilter, selectedPolicyAccount, setSecuritySettingsPagePrefill]);
+
+  async function loadPage(): Promise<void> {
+    const requestId = ++loadRequestIdRef.current;
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const nextSnapshot = await getSecuritySettingsSnapshot(
+        accountFilter !== "ALL" ? accountFilter : undefined
+      );
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setSnapshot(nextSnapshot);
+      setNotice(`已ˢ�?${new Date(nextSnapshot.generated_at).toLocaleString("zh-CN")}`);
+    } catch (loadError) {
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setError(loadError instanceof Error ? loadError.message : "��ȫ��������ʧ��");
+    } finally {
+      if (requestId === loadRequestIdRef.current) {
+        setLoading(false);
+        setPendingAction(null);
+      }
+    }
+  }
+
+  async function handleSavePolicy(values: PolicyFormValues): Promise<void> {
+    setPendingAction("save-policy");
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await updateSecuritySessionPolicy(values);
+      setNotice(`已保�?${updated.account_id ?? "ȫ局"}`);
+      await loadPage();
+      setSelectedPolicyAccount(updated.account_id ?? "global");
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "��������ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleToggleProvider(providerId: string): Promise<void> {
+    setPendingAction(`sso:${providerId}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await toggleSsoProvider(providerId);
+      setNotice(`${updated.provider_name} ${updated.enabled ? "已启�? : "已暂�?}`);
+      await loadPage();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "������������������");
+      setPendingAction(null);
+    }
+  }
+
+  const sessionPolicies = snapshot?.session_policies ?? [];
+  const ssoProviders = snapshot?.sso_providers ?? [];
+  const summary = snapshot?.summary ?? {
+    member_count: 0,
+    active_session_count: 0,
+    linked_provider_count: 0,
+    review_policy_count: 0,
+    webhook_protected_policy_count: 0,
+    webhook_signature_failure_count: 0,
+  };
+
+  const sessionColumns: ProColumns<SecuritySessionPolicy>[] = [
+    {
+      title: "����",
+      render: (_, record) => record.account_id ?? "ȫ��",
+    },
+    {
+      title: "����",
+      render: (_, record) => getPolicyTag(record),
+    },
+    {
+      title: "����",
+      render: (_, record) => `${record.session_timeout_minutes} ����`,
+    },
+    {
+      title: "���",
+      dataIndex: "max_parallel_sessions",
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          {getPolicyResultTag(record)}
+          <Typography.Text type="secondary">{record.effective_reason ?? "����"}</Typography.Text>
+        </Space>
+      ),
+    },
+  ];
+
+  const ssoColumns: ProColumns<SecuritySsoProvider>[] = [
+    {
+      title: "提供�?,
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Space size={[8, 8]} wrap>
+            <Typography.Text strong>{record.provider_name}</Typography.Text>
+            {getSourceTag(record.source)}
+          </Space>
+          <Typography.Text type="secondary">{record.account_id ?? "ȫ��"}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "��ɫӳ��",
+      render: (_, record) => `${record.mapped_role_count} / ${record.member_count ?? 0}`,
+    },
+    {
+      title: "Webhook",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Space size={[8, 8]} wrap>
+            <Typography.Text>{record.webhook_subscription_count ?? 0}</Typography.Text>
+            {getWebhookRuntimeTag(record.webhook_runtime_status)}
+            {getWebhookVerificationTag(record.webhook_verification_status)}
+            {getWebhookDeliveryTag(record.webhook_delivery_state)}
+          </Space>
+          <Typography.Text type="secondary">
+            {record.webhook_delivery_reason ?? `ǩ��ʧ�� ${record.webhook_signature_failure_count ?? 0}`}
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            ���� {formatTimestamp(record.webhook_last_event_received_at ?? record.webhook_last_message_received_at ?? null)}
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            ʧ�� {formatTimestamp(record.webhook_last_signature_failed_at ?? null)}
+          </Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          {getBindingTag(record.account_binding_status)}
+          <Typography.Text type="secondary">{record.account_binding_reason ?? "����"}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          {getSsoResultTag(record)}
+          <Typography.Text type="secondary">{record.effective_reason}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "�€������?,
+      render: (_, record) => formatTimestamp(record.last_sync_at),
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Button
+          loading={pendingAction === `sso:${record.provider_id}`}
+          onClick={() => void handleToggleProvider(record.provider_id)}
+          size="small"
+        >
+          {record.enabled ? "�����" : "���"}
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+      {snapshot?.warnings.map((item) => (
+        <Alert key={item} message={item} showIcon type="warning" />
+      ))}
+
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+                    <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={[
+              { label: "ȫ������", value: "ALL" },
+              ...accountOptions.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={setAccountFilter}
+          />
+          <Button
+            onClick={() =>
+              openMembersPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+              })
+            }
+          >
+            ��Ա
+          </Button>
+          <Button
+            onClick={() =>
+              openAccessControlPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+              })
+            }
+          >
+            ��������
+          </Button>
+          <Button
+            onClick={() =>
+              openIdentitySyncPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+              })
+            }
+          >
+            ������
+          </Button>
+          <Button
+            onClick={() =>
+              openRolesPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+              })
+            }
+          >
+            ��ɫȨ��
+          </Button>
+          <Button
+            onClick={() =>
+              openEvidencePage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+                source_kind: "audit",
+              })
+            }
+          >
+            ��������
+          </Button>
+          <Button
+            onClick={() =>
+              openAuditPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+                limit: 50,
+              })
+            }
+          >
+            ���
+          </Button>
+          <Button loading={loading} onClick={() => void loadPage()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={4} md={8} xs={24}>
+          <Card>
+            <Statistic title="��̨��Ա" value={summary.member_count} />
+          </Card>
+        </Col>
+        <Col lg={4} md={8} xs={24}>
+          <Card>
+            <Statistic title="��Ծ����" value={summary.active_session_count} />
+          </Card>
+        </Col>
+        <Col lg={4} md={8} xs={24}>
+          <Card>
+            <Statistic title="�����������€���" value={summary.linked_provider_count} />
+          </Card>
+        </Col>
+        <Col lg={4} md={8} xs={24}>
+          <Card>
+            <Statistic title="���������? value={summary.review_policy_count} />
+          </Card>
+        </Col>
+        <Col lg={4} md={8} xs={24}>
+          <Card>
+            <Statistic title="ǩ����������" value={summary.webhook_protected_policy_count} />
+          </Card>
+        </Col>
+        <Col lg={4} md={8} xs={24}>
+          <Card>
+            <Statistic title="ǩ��ʧ��" value={summary.webhook_signature_failure_count} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<SecuritySessionPolicy>
+            columns={sessionColumns}
+            dataSource={sessionPolicies}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 6 }}
+            rowKey={(record) => record.account_id ?? "global"}
+            search={false}
+            toolBarRender={false}
+            onRow={(record) => ({
+              onClick: () => setSelectedPolicyAccount(record.account_id ?? "global"),
+            })}
+          />
+        </Col>
+
+        <Col lg={10} xs={24}>
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <Card
+              title="��������"
+              extra={snapshot ? getSourceTag(snapshot.password_policy.source) : null}
+            >
+              <Descriptions bordered column={1} size="small">
+                <Descriptions.Item label="�€������?>
+                  {snapshot?.password_policy.min_length ?? 0}
+                </Descriptions.Item>
+                <Descriptions.Item label="��д��ĸ">
+                  {snapshot?.password_policy.require_uppercase ? "�����" : "����?}
+                </Descriptions.Item>
+                <Descriptions.Item label="����">
+                  {snapshot?.password_policy.require_number ? "�����" : "����?}
+                </Descriptions.Item>
+                <Descriptions.Item label="����">
+                  {snapshot?.password_policy.require_symbol ? "�����" : "����?}
+                </Descriptions.Item>
+                <Descriptions.Item label="��������">
+                  {snapshot?.password_policy.password_expiry_days ?? 0} �?                </Descriptions.Item>
+                <Descriptions.Item label="��Դ">
+                  {snapshot ? getSourceTag(snapshot.password_policy.source) : "����"}
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+
+            <Card title="��������" extra={selectedPolicy ? getSourceTag(selectedPolicy.source) : null}>
+              <Form<PolicyFormValues>
+                form={form}
+                initialValues={{
+                  account_id: selectedPolicy?.account_id ?? undefined,
+                  login_mode: selectedPolicy?.login_mode ?? "mixed",
+                  mfa_required: selectedPolicy?.mfa_required ?? true,
+                  session_timeout_minutes: selectedPolicy?.session_timeout_minutes ?? 480,
+                  max_parallel_sessions: selectedPolicy?.max_parallel_sessions ?? 3,
+                  suspicious_login_review: selectedPolicy?.suspicious_login_review ?? true,
+                  audit_retention_days: selectedPolicy?.audit_retention_days ?? 180,
+                }}
+                key={selectedPolicyAccount}
+                layout="vertical"
+                onFinish={(values) => void handleSavePolicy(values)}
+              >
+                <Form.Item label="����" name="account_id">
+                  <Select
+                    allowClear
+                    options={accountOptions.map((item) => ({ label: item, value: item }))}
+                  />
+                </Form.Item>
+                <Form.Item label="��¼ģʽ" name="login_mode" rules={[{ required: true }]}>
+                  <Select
+                    options={[
+                      { label: "����", value: "mixed" },
+                      { label: "�������������", value: "sso_first" },
+                      { label: "������€���", value: "sso" },
+                      { label: "仅密�?, value: "password" },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="����ʱ��"
+                  name="session_timeout_minutes"
+                  rules={[{ required: true }]}
+                >
+                  <InputNumber min={30} step={30} style={{ width: "100%" }} />
+                </Form.Item>
+                <Form.Item
+                  label="�������������"
+                  name="max_parallel_sessions"
+                  rules={[{ required: true }]}
+                >
+                  <InputNumber min={1} max={10} style={{ width: "100%" }} />
+                </Form.Item>
+                <Form.Item
+                  label="��������"
+                  name="audit_retention_days"
+                  rules={[{ required: true }]}
+                >
+                  <InputNumber min={30} step={30} style={{ width: "100%" }} />
+                </Form.Item>
+                <Form.Item label="Webhook ǩ��">
+                  <Space size={[8, 8]} wrap>
+                    <Tag color={selectedPolicy?.webhook_signature_enforced ? "processing" : "default"}>
+                      {selectedPolicy?.webhook_signature_enforced ? "������? : "����?}
+                    </Tag>
+                    <Button
+                      onClick={() =>
+                        openAccessControlPage({
+                          account_id:
+                            selectedPolicy?.account_id ??
+                            (accountFilter !== "ALL" ? accountFilter : undefined),
+                        })
+                      }
+                      type="link"
+                    >
+                      ��������
+                    </Button>
+                  </Space>
+                </Form.Item>
+                <Space size={16} wrap>
+                  <Form.Item label="ǿ��˫����֤" name="mfa_required" valuePropName="checked">
+                    <Switch />
+                  </Form.Item>
+                  <Form.Item
+                    label="������¼����"
+                    name="suspicious_login_review"
+                    valuePropName="checked"
+                  >
+                    <Switch />
+                  </Form.Item>
+                </Space>
+                <Button
+                  block
+                  htmlType="submit"
+                  loading={pendingAction === "save-policy"}
+                  type="primary"
+                >
+                  ��������
+                </Button>
+              </Form>
+            </Card>
+          </Space>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col span={24}>
+          <ProTable<SecuritySsoProvider>
+            columns={ssoColumns}
+            dataSource={ssoProviders}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 6 }}
+            rowKey="provider_id"
+            search={false}
+            toolBarRender={false}
+          />
+        </Col>
+      </Row>
+    </Space>
+  );
+}
+
+export function SecuritySettingsPage(): JSX.Element {
+  return (
+    <Tabs
+      defaultActiveKey="security"
+      items={[
+        { key: "security", label: "��ȫ����", children: <SecuritySettingsContent /> },
+        { key: "identity", label: "������", children: <LazyIdentitySyncContent /> },
+        { key: "authorization", label: "��Ա��Ȩ", children: <LazyMemberAccessContent /> },
+        { key: "access", label: "��������", children: <LazyAccessControlContent /> },
+        { key: "risk", label: "��������", children: <LazyRiskContent /> },
+      ]}
+    />
+  );
+}
+

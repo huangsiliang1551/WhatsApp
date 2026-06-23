@@ -1,0 +1,55 @@
+# 生产环境 Docker Compose 覆盖配置
+#
+# 使用方式：
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Worker 水平扩展（按需调整数量）：
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --scale worker=30
+#
+# 配置自适应：
+#   DB 连接池、uvicorn workers 等参数通过 .env 的
+#   DB_POOL_SIZE / DB_MAX_OVERFLOW / UVICORN_WORKERS 控制，
+#   部署时根据服务器配置修改 .env 即可，无需改代码。
+
+services:
+  postgres:
+    # 移除开发环境的资源限制，让 PostgreSQL 使用服务器全部可用资源
+    deploy: {}
+
+  redis:
+    deploy: {}
+
+  app:
+    environment:
+      # 生产环境标志
+      APP_ENV: production
+    # 移除资源限制 + 使用多 workers
+    deploy: {}
+    command: sh -c "alembic upgrade heads && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers $${UVICORN_WORKERS:-4}"
+
+  frontend:
+    deploy: {}
+
+  worker:
+    environment:
+      APP_ENV: production
+    # 移除资源限制，worker 通过 --scale worker=N 横向扩展
+    deploy: {}
+    # 开发时的热重载挂载在生产环境不适用，移除
+    volumes: []
+
+  prometheus:
+    deploy: {}
+
+  alertmanager:
+    deploy: {}
+
+  grafana:
+    deploy: {}
+
+volumes:
+  # 生产环境使用命名卷持久化数据
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

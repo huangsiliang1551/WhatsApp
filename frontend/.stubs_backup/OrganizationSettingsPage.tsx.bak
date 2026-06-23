@@ -1,0 +1,626 @@
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  List,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
+  type TableColumnsType,
+} from "antd";
+
+import { getOrganizationCenterSnapshot } from "../services/organizationCenter";
+import { useAppStore } from "../stores/appStore";
+import type {
+  OrganizationAccountScope,
+  OrganizationApprovalChain,
+  OrganizationCenterSnapshot,
+  OrganizationInviteDomain,
+  OrganizationUnit,
+} from "../types/organization";
+
+function formatTimestamp(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleString("zh-CN") : "����";
+}
+
+function getStatusTag(active: boolean): JSX.Element {
+  return <Tag color={active ? "success" : "default"}>{active ? "���" : "�����"}</Tag>;
+}
+
+function getSourceTag(source: "api" | "hybrid" | "mock"): JSX.Element {
+  if (source === "api") return <Tag color="blue">API</Tag>;
+  if (source === "hybrid") return <Tag color="cyan">����</Tag>;
+  return <Tag color="gold">ģ��</Tag>;
+}
+
+function getVerificationTag(status: string | null): JSX.Element {
+  if (status === "verified") return <Tag color="success">已验�?/Tag>;
+  if (status === "failed") return <Tag color="error">��֤ʧ��</Tag>;
+  if (status === "pending") return <Tag color="processing">待验�?/Tag>;
+  return <Tag>����?/Tag>;
+}
+
+function getRuntimeTag(status: string | null): JSX.Element {
+  if (status === "healthy") return <Tag color="success">����</Tag>;
+  if (status === "verification_pending" || status === "pending") {
+    return <Tag color="processing">待验�?/Tag>;
+  }
+  if (status === "signature_failed" || status === "payload_invalid") {
+    return <Tag color="error">{status === "signature_failed" ? "ǩ��ʧ��" : "��������"}</Tag>;
+  }
+  return <Tag>{status ?? "无״�?}</Tag>;
+}
+
+function getApprovalTriggerLabel(triggerType: OrganizationApprovalChain["trigger_type"]): string {
+  if (triggerType === "member_invite") return "������€�?;
+  if (triggerType === "permission_change") return "Ȩ������";
+  return "���������?;
+}
+
+function getDomainResultTag(domain: OrganizationInviteDomain): JSX.Element {
+  return <Tag color={domain.effective_result === "active" ? "success" : "warning"}>{domain.effective_result === "active" ? "�����" : "����?}</Tag>;
+}
+
+export function OrganizationSettingsPage(): JSX.Element {
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+  const setActivePageRaw = useAppStore((state) => state.setActivePage);
+  const openUsersPage = useAppStore((state) => state.openUsersPage);
+  const openMembersPage = useAppStore((state) => state.openMembersPage);
+  const openMetaAccountsPage = useAppStore((state) => state.openMetaAccountsPage);
+  const openSitesPage = useAppStore((state) => state.openSitesPage);
+  const openAccessControlPage = useAppStore((state) => state.openAccessControlPage);
+  const openSecuritySettingsPage = useAppStore((state) => state.openSecuritySettingsPage);
+  const openAuditPage = useAppStore((state) => state.openAuditPage);
+  const organizationPagePrefill = useAppStore((state) => state.organizationPagePrefill);
+  const clearOrganizationPagePrefill = useAppStore((state) => state.clearOrganizationPagePrefill);
+  const setOrganizationPagePrefill = useAppStore((state) => state.setOrganizationPagePrefill);
+  const lastAppliedPrefillNonce = useRef<number | null>(null);
+  const loadRequestIdRef = useRef(0);
+
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [snapshot, setSnapshot] = useState<OrganizationCenterSnapshot | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>("");
+  const [scopeBySelection, setScopeBySelection] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const selectedAccount = useMemo(
+    () => snapshot?.account_scopes.find((item) => item.account_id === selectedAccountId) ?? null,
+    [selectedAccountId, snapshot]
+  );
+
+  const setActivePage = (
+    page: "users" | "members" | "sites" | "access_control" | "security_settings" | "audit"
+  ): void => {
+    const targetAccountId =
+      accountFilter !== "ALL" ? accountFilter : scopeBySelection ? selectedAccountId : undefined;
+    if (page === "users") {
+      openUsersPage({ account_id: targetAccountId });
+      return;
+    }
+    if (page === "members") {
+      openMembersPage({ account_id: targetAccountId });
+      return;
+    }
+    if (page === "sites") {
+      openSitesPage({
+        account_id: targetAccountId,
+        selected_site_key: selectedAccount?.primary_site_key ?? undefined,
+      });
+      return;
+    }
+    if (page === "access_control") {
+      openAccessControlPage({ account_id: targetAccountId });
+      return;
+    }
+    if (page === "security_settings") {
+      openSecuritySettingsPage({ account_id: targetAccountId });
+      return;
+    }
+    if (page === "audit") {
+      openAuditPage({ account_id: targetAccountId, limit: 50 });
+      return;
+    }
+    setActivePageRaw(page);
+  };
+
+  useEffect(() => {
+    if (accountFilter === "ALL" && actorAccountIds.length === 1) {
+      setAccountFilter(actorAccountIds[0]);
+    }
+  }, [accountFilter, actorAccountIds]);
+
+  useEffect(() => {
+    if (!organizationPagePrefill) return;
+    if (lastAppliedPrefillNonce.current === organizationPagePrefill.nonce) return;
+    lastAppliedPrefillNonce.current = organizationPagePrefill.nonce;
+    setAccountFilter(organizationPagePrefill.account_id ?? "ALL");
+    setSelectedAccountId(organizationPagePrefill.selected_account_id ?? "");
+    setScopeBySelection(Boolean(organizationPagePrefill.selected_account_id));
+    clearOrganizationPagePrefill();
+  }, [clearOrganizationPagePrefill, organizationPagePrefill]);
+
+  useEffect(() => {
+    void loadPage();
+  }, [accountFilter]);
+
+  useEffect(() => {
+    if (!snapshot?.account_scopes.length) {
+      setSelectedAccountId("");
+      return;
+    }
+    if (
+      selectedAccountId &&
+      snapshot.account_scopes.some((item) => item.account_id === selectedAccountId)
+    ) {
+      return;
+    }
+    setSelectedAccountId(snapshot.account_scopes[0].account_id);
+  }, [selectedAccountId, snapshot]);
+
+  useEffect(() => {
+    setOrganizationPagePrefill({
+      account_id: accountFilter,
+      selected_account_id: selectedAccountId || undefined,
+    });
+  }, [accountFilter, selectedAccountId, setOrganizationPagePrefill]);
+
+  async function loadPage(): Promise<void> {
+    const requestId = ++loadRequestIdRef.current;
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const nextSnapshot = await getOrganizationCenterSnapshot(
+        accountFilter !== "ALL" ? accountFilter : undefined
+      );
+      if (requestId !== loadRequestIdRef.current) return;
+      setSnapshot(nextSnapshot);
+      setNotice(`已ˢ�?${formatTimestamp(nextSnapshot.generated_at)}`);
+    } catch (loadError) {
+      if (requestId !== loadRequestIdRef.current) return;
+      setError(loadError instanceof Error ? loadError.message : "��֯��������ʧ��");
+    } finally {
+      if (requestId === loadRequestIdRef.current) {
+        setLoading(false);
+      }
+    }
+  }
+
+  const accountOptions = useMemo(() => {
+    const values = new Set<string>(actorAccountIds);
+    snapshot?.account_scopes.forEach((item) => values.add(item.account_id));
+    return Array.from(values)
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, "zh-CN"));
+  }, [actorAccountIds, snapshot]);
+
+  const domainColumns: TableColumnsType<OrganizationInviteDomain> = [
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space size={[8, 8]} wrap>
+          <span>{record.domain}</span>
+          {getSourceTag(record.source)}
+        </Space>
+      ),
+    },
+    {
+      title: "����",
+      render: (_, record) => record.account_id ?? "ȫ��",
+    },
+    {
+      title: "��������",
+      dataIndex: "auto_join_role",
+    },
+    {
+      title: "����",
+      render: (_, record) => (record.approval_mode === "auto" ? "���" : "�����"),
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space size={[8, 8]} wrap>
+          {getDomainResultTag(record)}
+          <Tag color={record.sso_enforced ? "processing" : "default"}>
+            {record.sso_enforced ? "��������" : "�����"}
+          </Tag>
+        </Space>
+      ),
+    },
+  ];
+
+  const accountColumns: ProColumns<OrganizationAccountScope>[] = [
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.display_name}</Typography.Text>
+          <Typography.Text type="secondary">{record.account_id}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "���€?,
+      render: (_, record) => (
+        <Space size={[8, 8]} wrap>
+          {getStatusTag(record.is_active)}
+          <Tag color={record.ai_enabled ? "success" : "default"}>
+            {record.ai_enabled ? "AI �€�? : "AI �����"}
+          </Tag>
+          {getSourceTag(record.source)}
+        </Space>
+      ),
+    },
+    {
+      title: "վ��",
+      dataIndex: "site_count",
+    },
+    {
+      title: "��Ա",
+      render: (_, record) => `${record.active_member_count} / ${record.member_count}`,
+    },
+    {
+      title: "WABA",
+      render: (_, record) => `${record.active_waba_count} / ${record.waba_count}`,
+    },
+    {
+      title: "�€�?Webhook",
+      render: (_, record) => formatTimestamp(record.last_webhook_event_at),
+    },
+  ];
+
+  const units = snapshot?.units ?? [];
+  const inviteDomains = snapshot?.invite_domains ?? [];
+  const approvalChains = snapshot?.approval_chains ?? [];
+  const accountScopes = snapshot?.account_scopes ?? [];
+  const governanceScopeAccountId =
+    accountFilter !== "ALL" ? accountFilter : scopeBySelection ? selectedAccountId : undefined;
+  const visibleUnits = governanceScopeAccountId
+    ? units.filter(
+        (item) =>
+          item.account_id === null ||
+          item.account_id === governanceScopeAccountId ||
+          item.account_scope.includes(governanceScopeAccountId)
+      )
+    : units;
+  const visibleInviteDomains = governanceScopeAccountId
+    ? inviteDomains.filter(
+        (item) => item.account_id === null || item.account_id === governanceScopeAccountId
+      )
+    : inviteDomains;
+  const visibleApprovalChains = governanceScopeAccountId
+    ? approvalChains.filter(
+        (item) => item.account_id === null || item.account_id === governanceScopeAccountId
+      )
+    : approvalChains;
+  const activeSeats = accountScopes.reduce((sum, item) => sum + item.active_member_count, 0);
+  const activeWabaCount = accountScopes.reduce((sum, item) => sum + item.active_waba_count, 0);
+  const readyWebhookCount = accountScopes.filter((item) => item.ready_for_webhook_delivery).length;
+  const blockedAccountCount = accountScopes.filter((item) => item.blocking_reasons.length > 0).length;
+  const totalPhoneNumbers = accountScopes.reduce((sum, item) => sum + item.phone_number_count, 0);
+  const totalRegisteredPhones = accountScopes.reduce(
+    (sum, item) => sum + item.registered_phone_number_count,
+    0
+  );
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+      {snapshot?.warnings.map((item) => (
+        <Alert key={item} message={item} showIcon type="warning" />
+      ))}
+
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+                    <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={[
+              { label: "ȫ������", value: "ALL" },
+              ...accountOptions.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={(value) => {
+              setScopeBySelection(false);
+              setAccountFilter(value);
+            }}
+          />
+          <Button onClick={() => setActivePage("users")}>����</Button>
+          <Button onClick={() => setActivePage("members")}>��Ա</Button>
+          <Button
+            onClick={() =>
+              openMetaAccountsPage({
+                  focused_account_id:
+                  selectedAccountId || (accountFilter !== "ALL" ? accountFilter : undefined),
+              })
+            }
+          >
+            Meta ����
+          </Button>
+          <Button onClick={() => setActivePage("sites")}>վ��</Button>
+          <Button onClick={() => setActivePage("access_control")}>Ȩ��</Button>
+          <Button onClick={() => setActivePage("security_settings")}>��ȫ</Button>
+          <Button onClick={() => setActivePage("audit")}>���</Button>
+          <Button loading={loading} onClick={() => void loadPage()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="������Χ" value={accountScopes.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��������" value={activeSeats} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��Ծ WABA" value={activeWabaCount} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="Webhook ����" value={readyWebhookCount} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��֯��Ԫ" value={visibleUnits.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="�€������? value={visibleInviteDomains.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic
+              title="审批�?
+              value={visibleApprovalChains.length}
+              suffix={`/ ${approvalChains.length}`}
+            />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic
+              title="��������"
+              value={blockedAccountCount}
+              valueStyle={{ color: blockedAccountCount > 0 ? "#cf1322" : undefined }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<OrganizationAccountScope>
+            columns={accountColumns}
+            dataSource={accountScopes}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 6 }}
+            rowKey="account_id"
+            search={false}
+            toolBarRender={false}
+            onRow={(record) => ({
+              onClick: () => {
+                setScopeBySelection(true);
+                setSelectedAccountId(record.account_id);
+              },
+            })}
+          />
+        </Col>
+
+        <Col lg={10} xs={24}>
+          <Card
+            title="��������"
+            extra={selectedAccount ? getSourceTag(selectedAccount.source) : null}
+          >
+            {selectedAccount ? (
+              <Descriptions bordered column={1} size="small">
+                <Descriptions.Item label="����">{selectedAccount.account_id}</Descriptions.Item>
+                <Descriptions.Item label="����">{selectedAccount.display_name}</Descriptions.Item>
+                <Descriptions.Item label="����ͨ��">
+                  {selectedAccount.provider_type}
+                </Descriptions.Item>
+                <Descriptions.Item label="AI">
+                  <Tag color={selectedAccount.ai_enabled ? "success" : "default"}>
+                    {selectedAccount.ai_enabled ? "���" : "�����"}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="Portfolio ID">
+                  {selectedAccount.meta_business_portfolio_id ?? "����"}
+                </Descriptions.Item>
+                <Descriptions.Item label="�?WABA">
+                  {selectedAccount.primary_waba_id ?? "����"}
+                </Descriptions.Item>
+                <Descriptions.Item label="վ������">
+                  {selectedAccount.primary_site_key ?? "����"}
+                </Descriptions.Item>
+                <Descriptions.Item label="���">
+                  {`${selectedAccount.active_member_count} / ${selectedAccount.member_count}`}
+                </Descriptions.Item>
+                <Descriptions.Item label="WABA">
+                  {`${selectedAccount.active_waba_count} / ${selectedAccount.waba_count}`}
+                </Descriptions.Item>
+                <Descriptions.Item label="号码�?>
+                  {`${selectedAccount.registered_phone_number_count} / ${selectedAccount.phone_number_count}`}
+                </Descriptions.Item>
+                <Descriptions.Item label="Webhook ��֤">
+                  {getVerificationTag(selectedAccount.webhook_verification_status)}
+                </Descriptions.Item>
+                <Descriptions.Item label="Webhook ����?>
+                  {getRuntimeTag(selectedAccount.webhook_runtime_status)}
+                </Descriptions.Item>
+                <Descriptions.Item label="Webhook ���€?>
+                  <Tag color={selectedAccount.ready_for_webhook_delivery ? "success" : "default"}>
+                    {selectedAccount.ready_for_webhook_delivery ? "������? : "����?}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="��������€?>
+                  <Tag color={selectedAccount.ready_for_outbound_messages ? "success" : "default"}>
+                    {selectedAccount.ready_for_outbound_messages ? "������? : "����?}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="�€�?Webhook">
+                  {formatTimestamp(selectedAccount.last_webhook_event_at)}
+                </Descriptions.Item>
+                <Descriptions.Item label="����?>
+                  {selectedAccount.blocking_reasons.length ? (
+                    <Space size={[8, 8]} wrap>
+                      {selectedAccount.blocking_reasons.map((reason) => (
+                        <Tag color="warning" key={reason}>
+                          {reason}
+                        </Tag>
+                      ))}
+                    </Space>
+                  ) : (
+                    <Tag color="success">�?/Tag>
+                  )}
+                </Descriptions.Item>
+              </Descriptions>
+            ) : (
+              <Typography.Text type="secondary">��������</Typography.Text>
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={12} xs={24}>
+          <Card title="����������" extra={<Tag color="cyan">���</Tag>}>
+            <List<OrganizationUnit>
+              dataSource={visibleUnits}
+              locale={{ emptyText: "������Ԫ" }}
+              renderItem={(item) => (
+                <List.Item>
+                  <List.Item.Meta
+                    description={
+                      <Space direction="vertical" size={0}>
+                        <Typography.Text type="secondary">{item.manager_name}</Typography.Text>
+                        <Typography.Text type="secondary">
+                          {item.account_scope.join(", ")}
+                        </Typography.Text>
+                      </Space>
+                    }
+                    title={
+                      <Space size={[8, 8]} wrap>
+                        <span>{item.name}</span>
+                        <Tag color={item.status === "active" ? "success" : "default"}>
+                          {item.status === "active" ? "���" : "���"}
+                        </Tag>
+                        <Tag>{`${item.member_count} ��`}</Tag>
+                        {getSourceTag(item.source)}
+                      </Space>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          </Card>
+        </Col>
+
+        <Col lg={12} xs={24}>
+          <Card title="�€������? extra={<Tag color="cyan">�����</Tag>}>
+            <Table<OrganizationInviteDomain>
+              columns={domainColumns}
+              dataSource={visibleInviteDomains}
+              pagination={false}
+              rowKey="domain_id"
+              size="small"
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={10} xs={24}>
+          <Card title="��֯����" extra={<Tag color="cyan">����</Tag>}>
+            {snapshot ? (
+              <Descriptions bordered column={1} size="small">
+                <Descriptions.Item label="��֯">
+                  {snapshot.profile.display_name}
+                </Descriptions.Item>
+                <Descriptions.Item label="管理�?>
+                  {snapshot.profile.owner_name}
+                </Descriptions.Item>
+                <Descriptions.Item label="�">
+                  {snapshot.profile.environment}
+                </Descriptions.Item>
+                <Descriptions.Item label="ģʽ">
+                  {snapshot.profile.provider_mode === "production" ? "����" : "ģ��"}
+                </Descriptions.Item>
+                <Descriptions.Item label="���">
+                  {snapshot.profile.default_language}
+                </Descriptions.Item>
+                <Descriptions.Item label="����">
+                  {snapshot.profile.data_region}
+                </Descriptions.Item>
+                <Descriptions.Item label="��������">
+                  {`${snapshot.profile.seat_used} / ${snapshot.profile.seat_limit}`}
+                </Descriptions.Item>
+              </Descriptions>
+            ) : (
+              <Typography.Text type="secondary">��������</Typography.Text>
+            )}
+          </Card>
+        </Col>
+
+        <Col lg={14} xs={24}>
+          <Card title="������? extra={<Tag color="cyan">���</Tag>}>
+            <List<OrganizationApprovalChain>
+              dataSource={visibleApprovalChains}
+              locale={{ emptyText: "暂无审批�? }}
+              renderItem={(item) => (
+                <List.Item>
+                  <List.Item.Meta
+                    description={
+                      <Space direction="vertical" size={0}>
+                        <Typography.Text type="secondary">
+                          {item.account_id ?? "ȫ��"}
+                        </Typography.Text>
+                        <Typography.Text type="secondary">
+                          {item.approvers.join(" / ")}
+                        </Typography.Text>
+                      </Space>
+                    }
+                    title={
+                      <Space size={[8, 8]} wrap>
+                        <span>{item.name}</span>
+                        <Tag>{getApprovalTriggerLabel(item.trigger_type)}</Tag>
+                        <Tag color={item.enabled ? "success" : "default"}>
+                          {item.enabled ? "���" : "�����"}
+                        </Tag>
+                        <Tag>{`${item.sla_minutes} ����`}</Tag>
+                        {getSourceTag(item.source)}
+                      </Space>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          </Card>
+        </Col>
+      </Row>
+    </Space>
+  );
+}
+

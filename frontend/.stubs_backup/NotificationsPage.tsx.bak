@@ -1,0 +1,685 @@
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Form,
+  Input,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Switch,
+  Tag,
+  Typography,
+} from "antd";
+
+import {
+  createNotificationChannel,
+  getNotificationCenterSnapshot,
+  toggleNotificationChannel,
+} from "../services/notificationCenter";
+import { useAppStore } from "../stores/appStore";
+import type {
+  NotificationCenterSnapshot,
+  NotificationChannelConfig,
+  NotificationChannelCreatePayload,
+  NotificationDeliveryLog,
+} from "../types/notifications";
+import type { AlertRuleDefinition } from "../types/operations";
+
+type ChannelFormValues = NotificationChannelCreatePayload;
+
+function formatTimestamp(value: string): string {
+  return new Date(value).toLocaleString("zh-CN");
+}
+
+function getSeverityTag(severity: NotificationDeliveryLog["severity"]): JSX.Element {
+  if (severity === "critical") return <Tag color="error">��������</Tag>;
+  if (severity === "warning") return <Tag color="warning">��ע</Tag>;
+  return <Tag color="processing">����</Tag>;
+}
+
+function getDeliveryStatusTag(status: NotificationDeliveryLog["delivery_status"]): JSX.Element {
+  if (status === "delivered") return <Tag color="success">���€����</Tag>;
+  if (status === "pending") return <Tag color="warning">待发�?/Tag>;
+  return <Tag color="error">ʧ��</Tag>;
+}
+
+function getChannelResultTag(result: NotificationChannelConfig["effective_result"]): JSX.Element {
+  if (result === "enforced") return <Tag color="success">已生�?/Tag>;
+  if (result === "partial") return <Tag color="processing">������Ч</Tag>;
+  return <Tag color="warning">待收�?/Tag>;
+}
+
+function getChannelSourceTag(source: NotificationChannelConfig["source"]): JSX.Element {
+  return <Tag color={source === "hybrid" ? "cyan" : "gold"}>{source === "hybrid" ? "����" : "ģ��"}</Tag>;
+}
+
+function getDeliverySourceTag(source: NotificationDeliveryLog["source"]): JSX.Element {
+  return <Tag color={source === "hybrid" ? "cyan" : "gold"}>{source === "hybrid" ? "����" : "ģ��"}</Tag>;
+}
+
+export function NotificationsPage(): JSX.Element {
+  const [form] = Form.useForm<ChannelFormValues>();
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+  const openAlertsPage = useAppStore((state) => state.openAlertsPage);
+  const openMembersPage = useAppStore((state) => state.openMembersPage);
+  const openAuditPage = useAppStore((state) => state.openAuditPage);
+  const openRolesPage = useAppStore((state) => state.openRolesPage);
+  const openAccessControlPage = useAppStore((state) => state.openAccessControlPage);
+  const openSecuritySettingsPage = useAppStore((state) => state.openSecuritySettingsPage);
+  const notificationsPagePrefill = useAppStore((state) => state.notificationsPagePrefill);
+  const clearNotificationsPagePrefill = useAppStore((state) => state.clearNotificationsPagePrefill);
+  const setNotificationsPagePrefill = useAppStore((state) => state.setNotificationsPagePrefill);
+  const lastAppliedPrefillNonce = useRef<number | null>(null);
+  const loadRequestIdRef = useRef(0);
+
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [snapshot, setSnapshot] = useState<NotificationCenterSnapshot | null>(null);
+  const [selectedChannelId, setSelectedChannelId] = useState<string>("");
+  const [selectionLocked, setSelectionLocked] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [selectionWarning, setSelectionWarning] = useState<string | null>(null);
+
+  const selectedChannel = useMemo(
+    () => snapshot?.channels.find((item) => item.channel_id === selectedChannelId) ?? null,
+    [selectedChannelId, snapshot]
+  );
+
+  const accountOptions = useMemo(() => {
+    const values = new Set<string>(actorAccountIds);
+    snapshot?.channels.forEach((item) => {
+      if (item.account_id) values.add(item.account_id);
+    });
+    snapshot?.rules.forEach((item) => {
+      if (item.account_id) values.add(item.account_id);
+    });
+    snapshot?.deliveries.forEach((item) => {
+      if (item.account_id) values.add(item.account_id);
+    });
+    return Array.from(values).sort((left, right) => left.localeCompare(right, "zh-CN"));
+  }, [actorAccountIds, snapshot]);
+
+  useEffect(() => {
+    if (accountFilter === "ALL" && actorAccountIds.length === 1) {
+      setAccountFilter(actorAccountIds[0]);
+    }
+  }, [accountFilter, actorAccountIds]);
+
+  useEffect(() => {
+    if (!notificationsPagePrefill) {
+      return;
+    }
+    if (lastAppliedPrefillNonce.current === notificationsPagePrefill.nonce) {
+      return;
+    }
+    lastAppliedPrefillNonce.current = notificationsPagePrefill.nonce;
+    setAccountFilter(notificationsPagePrefill.account_id ?? "ALL");
+    setSelectedChannelId(notificationsPagePrefill.selected_channel_id ?? "");
+    setSelectionLocked(Boolean(notificationsPagePrefill.selected_channel_id));
+    setSelectionWarning(null);
+    clearNotificationsPagePrefill();
+  }, [clearNotificationsPagePrefill, notificationsPagePrefill]);
+
+  useEffect(() => {
+    void loadPage();
+  }, [accountFilter]);
+
+  useEffect(() => {
+    form.setFieldsValue({
+      account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+    });
+  }, [accountFilter, form]);
+
+  useEffect(() => {
+    if (!snapshot?.channels.length) {
+      setSelectedChannelId("");
+      if (selectionLocked) {
+        setSelectionLocked(false);
+      }
+      return;
+    }
+    if (selectedChannelId && snapshot.channels.some((item) => item.channel_id === selectedChannelId)) {
+      return;
+    }
+    if (selectionLocked && selectedChannelId) {
+      setSelectionWarning("�����������€�����������������������?);
+      setSelectionLocked(false);
+      return;
+    }
+    setSelectionWarning(null);
+    setSelectedChannelId(snapshot.channels[0].channel_id);
+  }, [selectedChannelId, selectionLocked, snapshot]);
+
+  useEffect(() => {
+    setNotificationsPagePrefill({
+      account_id: accountFilter,
+      selected_channel_id: selectedChannelId || undefined,
+    });
+  }, [accountFilter, selectedChannelId, setNotificationsPagePrefill]);
+
+  async function loadPage(): Promise<void> {
+    const requestId = ++loadRequestIdRef.current;
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const nextSnapshot = await getNotificationCenterSnapshot(
+        accountFilter !== "ALL" ? accountFilter : undefined
+      );
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setSnapshot(nextSnapshot);
+      setNotice(`已ˢ�?${formatTimestamp(nextSnapshot.generated_at)}`);
+    } catch (loadError) {
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setError(loadError instanceof Error ? loadError.message : "������������������");
+    } finally {
+      if (requestId === loadRequestIdRef.current) {
+        setLoading(false);
+        setPendingAction(null);
+      }
+    }
+  }
+
+  async function handleCreateChannel(values: ChannelFormValues): Promise<void> {
+    setPendingAction("create-channel");
+    setError(null);
+    setNotice(null);
+    try {
+      const created = await createNotificationChannel(values);
+      setSelectionLocked(false);
+      setSelectionWarning(null);
+      setNotice(`������������${created.name}`);
+      form.resetFields();
+      form.setFieldsValue({
+        account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+        channel_type: "wecom",
+        delivery_mode: "immediate",
+        effective_reason: "",
+        enabled: false,
+      });
+      await loadPage();
+      setSelectedChannelId(created.channel_id);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "��������ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleToggleChannel(channel: NotificationChannelConfig): Promise<void> {
+    setPendingAction(`toggle:${channel.channel_id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await toggleNotificationChannel(channel.channel_id);
+      setNotice(`${updated.name} �?{updated.enabled ? "���" : "�����"}`);
+      await loadPage();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "��������ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  const channels = snapshot?.channels ?? [];
+  const deliveries = snapshot?.deliveries ?? [];
+  const rules = snapshot?.rules ?? [];
+  const members = snapshot?.members ?? [];
+  const enabledChannels = channels.filter((item) => item.enabled).length;
+  const deliveredCount = deliveries.filter((item) => item.delivery_status === "delivered").length;
+  const failedCount = deliveries.filter((item) => item.delivery_status === "failed").length;
+  const pendingCount = deliveries.filter((item) => item.delivery_status === "pending").length;
+  const activeRulesCount = rules.filter((item) => item.status === "active").length;
+  const criticalDeliveries = deliveries.filter((item) => item.severity === "critical").length;
+  const warningDeliveries = deliveries.filter((item) => item.severity === "warning").length;
+  const infoDeliveries = deliveries.filter((item) => item.severity === "info").length;
+
+  const channelColumns: ProColumns<NotificationChannelConfig>[] = [
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.name}</Typography.Text>
+          <Typography.Text type="secondary">{record.target}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "����",
+      render: (_, record) => record.account_id ?? "ȫ��",
+    },
+    {
+      title: "����",
+      render: (_, record) => <Tag>{record.channel_type}</Tag>,
+    },
+    {
+      title: "ģʽ",
+      render: (_, record) => <Tag>{record.delivery_mode === "immediate" ? "��ʱ" : "����"}</Tag>,
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space size={[8, 8]} wrap>
+          {getChannelResultTag(record.effective_result)}
+          {getChannelSourceTag(record.source)}
+        </Space>
+      ),
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Button
+          loading={pendingAction === `toggle:${record.channel_id}`}
+          onClick={() => void handleToggleChannel(record)}
+          size="small"
+        >
+          {record.enabled ? "�����" : "���"}
+        </Button>
+      ),
+    },
+  ];
+
+  const deliveryColumns: ProColumns<NotificationDeliveryLog>[] = [
+    {
+      title: "ʱ��",
+      render: (_, record) => formatTimestamp(record.sent_at),
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.channel_name}</Typography.Text>
+          <Typography.Text type="secondary">{record.channel_type}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "����",
+      render: (_, record) => record.account_id ?? "ȫ��",
+    },
+    {
+      title: "����",
+      render: (_, record) => getSeverityTag(record.severity),
+    },
+    {
+      title: "���€?,
+      render: (_, record) => getDeliveryStatusTag(record.delivery_status),
+    },
+    {
+      title: "��Դ",
+      render: (_, record) => getDeliverySourceTag(record.source),
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>{record.title}</Typography.Text>
+          <Typography.Text type="secondary">{record.summary}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "����",
+      render: (_, record) => {
+        const statusMap: Record<string, string> = {
+          delivered: "���€����",
+          pending: "��������€?,
+          failed: "���€�����?,
+        };
+        const channel = snapshot?.channels.find((c) => c.channel_id === record.channel_id);
+        return (
+          <Space direction="vertical" size={2}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {statusMap[record.delivery_status] ?? record.delivery_status}
+            </Typography.Text>
+            {channel?.effective_reason ? (
+              <Typography.Text style={{ fontSize: 11 }} type="secondary" ellipsis>
+                {channel.effective_reason}
+              </Typography.Text>
+            ) : null}
+          </Space>
+        );
+      },
+    },
+  ];
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+      {selectionWarning ? <Alert message={selectionWarning} showIcon type="warning" /> : null}
+      {snapshot?.warnings.map((item) => (
+        <Alert key={item} message={item} showIcon type="warning" />
+      ))}
+      
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+          <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={[
+              { label: "ȫ������", value: "ALL" },
+              ...accountOptions.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={(value) => {
+              setSelectionLocked(false);
+              setSelectionWarning(null);
+              setAccountFilter(value);
+            }}
+          />
+          <Button
+            onClick={() =>
+              openAlertsPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+              })
+            }
+          >
+            ������
+          </Button>
+          <Button
+            onClick={() =>
+              openMembersPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+              })
+            }
+          >
+            ��Ա
+          </Button>
+          <Button
+            onClick={() =>
+              openRolesPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+              })
+            }
+          >
+            ��ɫ
+          </Button>
+          <Button
+            onClick={() =>
+              openAccessControlPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+              })
+            }
+          >
+            ��������
+          </Button>
+          <Button
+            onClick={() =>
+              openSecuritySettingsPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+              })
+            }
+          >
+            ��ȫ����
+          </Button>
+          <Button loading={loading} onClick={() => void loadPage()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="֪ͨ����" value={channels.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="已启用渠�? value={enabledChannels} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="�������������" value={activeRulesCount} suffix={`/ ${rules.length}`} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��Ա����" value={members.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="������¼" value={deliveredCount} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="待Ͷ�? value={pendingCount} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="ʧ����¼" value={failedCount} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Space size={[12, 12]} wrap>
+              <Statistic
+                title="��������"
+                value={criticalDeliveries}
+                valueStyle={{ color: criticalDeliveries > 0 ? "#cf1322" : undefined }}
+              />
+              <Statistic title="��ע" value={warningDeliveries} />
+              <Statistic title="����" value={infoDeliveries} />
+            </Space>
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<NotificationChannelConfig>
+            columns={channelColumns}
+            dataSource={channels}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 6 }}
+            rowKey="channel_id"
+            search={false}
+            toolBarRender={false}
+            onRow={(record) => ({
+              onClick: () => {
+                setSelectionLocked(false);
+                setSelectionWarning(null);
+                setSelectedChannelId(record.channel_id);
+              },
+            })}
+          />
+        </Col>
+        <Col lg={10} xs={24}>
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <Card
+              title="��ǰ����"
+              extra={selectedChannel ? getChannelSourceTag(selectedChannel.source) : <Tag>�€����</Tag>}
+            >
+              {selectedChannel ? (
+                <Descriptions bordered column={1} size="small">
+                  <Descriptions.Item label="����">
+                    {selectedChannel.account_id ?? "ȫ��"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="����">{selectedChannel.channel_type}</Descriptions.Item>
+                  <Descriptions.Item label="���">{selectedChannel.target}</Descriptions.Item>
+                  <Descriptions.Item label="ģʽ">
+                    {selectedChannel.delivery_mode === "immediate" ? "��ʱ" : "����"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="������€?>
+                    <Space size={[8, 8]} wrap>
+                      <Tag color={selectedChannel.enabled ? "success" : "default"}>
+                        {selectedChannel.enabled ? "���" : "�����"}
+                      </Tag>
+                      {getChannelSourceTag(selectedChannel.source)}
+                    </Space>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="��Ч����">
+                    <Space size={[8, 8]} wrap>
+                      {getChannelResultTag(selectedChannel.effective_result)}
+                    </Space>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="����˵��">
+                    <Space direction="vertical" size={2}>
+                      <Typography.Text>{selectedChannel.effective_reason}</Typography.Text>
+                      {selectedChannel.effective_result === "enforced" ? (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          ���������������������������������€?                        </Typography.Text>
+                      ) : selectedChannel.effective_result === "partial" ? (
+                        <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                          ���������������������€����������?                        </Typography.Text>
+                      ) : (
+                        <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                          �€�������������������������������
+                        </Typography.Text>
+                      )}
+                    </Space>
+                  </Descriptions.Item>
+                </Descriptions>
+              ) : (
+                <Typography.Text type="secondary">��������</Typography.Text>
+              )}
+            </Card>
+
+            <Card title="��������" extra={<Tag color="gold">ģ��</Tag>}>
+              <Form<ChannelFormValues>
+                form={form}
+                initialValues={{
+                  account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+                  channel_type: "wecom",
+                  delivery_mode: "immediate",
+                  effective_reason: "",
+                }}
+                layout="vertical"
+                onFinish={(values) => void handleCreateChannel(values)}
+              >
+                <Form.Item label="����" name="account_id">
+                  <Select
+                    allowClear
+                    options={accountOptions.map((item) => ({ label: item, value: item }))}
+                  />
+                </Form.Item>
+                <Form.Item label="����" name="channel_type" rules={[{ required: true }]}>
+                  <Select
+                    options={[
+                      { label: "控制�?, value: "console" },
+                      { label: "���", value: "email" },
+                      { label: "��������", value: "wecom" },
+                      { label: "Webhook", value: "webhook" },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item label="����" name="name" rules={[{ required: true }]}>
+                  <Input />
+                </Form.Item>
+                <Form.Item label="���" name="target" rules={[{ required: true }]}>
+                  <Input />
+                </Form.Item>
+                <Form.Item label="���€�����? name="delivery_mode" rules={[{ required: true }]}>
+                  <Select
+                    options={[
+                      { label: "��ʱ", value: "immediate" },
+                      { label: "����", value: "batch" },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item label="����ԭ��" name="effective_reason" rules={[{ required: true }]}>
+                  <Input />
+                </Form.Item>
+                <Form.Item label="���" name="enabled" valuePropName="checked">
+                  <Switch />
+                </Form.Item>
+                <Button
+                  block
+                  htmlType="submit"
+                  loading={pendingAction === "create-channel"}
+                  type="primary"
+                >
+                  ��������
+                </Button>
+              </Form>
+            </Card>
+          </Space>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<NotificationDeliveryLog>
+            columns={deliveryColumns}
+            dataSource={deliveries}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 8 }}
+            rowKey="delivery_id"
+            search={false}
+            toolBarRender={false}
+          />
+        </Col>
+        <Col lg={10} xs={24}>
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <Card title="��������" extra={<Tag color="cyan">�����</Tag>}>
+              <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                {rules.slice(0, 5).map((rule: AlertRuleDefinition) => (
+                  <Card key={rule.rule_id} size="small">
+                    <Space direction="vertical" size={4}>
+                      <Typography.Text strong>{rule.name}</Typography.Text>
+                      <Typography.Text type="secondary">
+                        {`${rule.account_id ?? "ȫ��"} / ${rule.condition_summary}`}
+                      </Typography.Text>
+                      <Space size={[8, 8]} wrap>
+                        <Tag>{rule.severity}</Tag>
+                        <Tag color={rule.status === "active" ? "success" : "default"}>
+                          {rule.status}
+                        </Tag>
+                        <Tag color="gold">{rule.source === "mock" ? "ģ��" : rule.source}</Tag>
+                      </Space>
+                    </Space>
+                  </Card>
+                ))}
+              </Space>
+            </Card>
+
+            <Card title="��Ա����" extra={<Tag color="cyan">����</Tag>}>
+              <Descriptions bordered column={1} size="small">
+                <Descriptions.Item label="成Ա�?>{members.length}</Descriptions.Item>
+                <Descriptions.Item label="������Ա">
+                  {members.filter((item) => item.status === "online").length}
+                </Descriptions.Item>
+                <Descriptions.Item label="��������">
+                  {members.filter((item) => item.status === "busy").length}
+                </Descriptions.Item>
+                <Descriptions.Item label="���">
+                  <Button
+                    onClick={() =>
+                      openAuditPage({
+                        account_id:
+                          selectedChannel?.account_id ??
+                          (accountFilter !== "ALL" ? accountFilter : undefined),
+                        limit: 50,
+                      })
+                    }
+                    size="small"
+                  >
+                    ����
+                  </Button>
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+          </Space>
+        </Col>
+      </Row>
+    </Space>
+  );
+}
+

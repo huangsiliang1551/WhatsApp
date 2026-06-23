@@ -1,0 +1,761 @@
+import { useEffect, useMemo, useState, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  Radio,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
+} from "antd";
+
+import {
+  claimOperationsTask,
+  createOperationsBatchJob,
+  getOperationsCenterSnapshot,
+  listPlatformUserMemberStatusIndex,
+  replayOperationsProviderStatus,
+  type PlatformUserMemberStatusSummary,
+} from "../services/operations";
+import { useAppStore } from "../stores/appStore";
+import type {
+  OperationsAuditItem,
+  OperationsBatchJob,
+  OperationsBatchJobCreatePayload,
+  OperationsCenterSnapshot,
+  OperationsProviderBacklogItem,
+  OperationsTaskItem,
+} from "../types/operations";
+
+type BatchJobFormValues = {
+  account_id?: string;
+  name: string;
+  target_scope: string;
+  affected_count: number;
+};
+
+function formatTime(value: string | null | undefined): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN");
+}
+
+function getVerificationStatusColor(status: string): string {
+  if (status === "approved") return "success";
+  if (status === "rejected") return "error";
+  if (status === "submitted" || status === "under_review") return "processing";
+  return "default";
+}
+
+function getBindingStatusColor(status: string): string {
+  if (status === "bound" || status === "approved") return "success";
+  if (status === "failed" || status === "rejected") return "error";
+  if (status === "submitted" || status === "pending" || status === "verifying") return "processing";
+  return "default";
+}
+
+export function OperationsCenterPage(): JSX.Element {
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+  const setActivePage = useAppStore((state) => state.setActivePage);
+  const openCustomersPage = useAppStore((state) => state.openCustomersPage);
+  const openWorkspacePage = useAppStore((state) => state.openWorkspacePage);
+  const openAuditPage = useAppStore((state) => state.openAuditPage);
+  const openProviderEventsPage = useAppStore((state) => state.openProviderEventsPage);
+  const openEvidencePage = useAppStore((state) => state.openEvidencePage);
+  const operationsPagePrefill = useAppStore((state) => state.operationsPagePrefill);
+  const clearOperationsPagePrefill = useAppStore((state) => state.clearOperationsPagePrefill);
+  const setOperationsPagePrefill = useAppStore((state) => state.setOperationsPagePrefill);
+
+  const [form] = Form.useForm<BatchJobFormValues>();
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [timeDimension, setTimeDimension] = useState<"today" | "week" | "month">("today");
+  const [snapshot, setSnapshot] = useState<OperationsCenterSnapshot | null>(null);
+  const [taskMemberStatusIndex, setTaskMemberStatusIndex] = useState<
+    Record<string, PlatformUserMemberStatusSummary>
+  >({});
+  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const accountOptions = useMemo(
+    () => [
+      { label: "ȫ������", value: "ALL" },
+      ...actorAccountIds.map((item) => ({ label: item, value: item })),
+    ],
+    [actorAccountIds]
+  );
+
+  // Mock operation stats - computed from snapshot data
+  const operationsStats = useMemo(() => {
+    const tasks = snapshot?.tasks ?? [];
+    const taskPending = tasks.filter((t) => t.status === "pending" || t.status === "open").length;
+    const taskApproved = tasks.filter((t) => t.status === "approved").length;
+    const taskRejected = tasks.filter((t) => t.status === "rejected").length;
+    const ticketTotal = tasks.reduce((sum, t) => sum + t.active_ticket_count, 0);
+    // Mock withdrawal stats (no real data source yet)
+    const mockWithdrawalPending = 3;
+    const mockWithdrawalProcessed = 12;
+    // Mock alert summary
+    const mockAlerts = [
+      { level: "warning" as const, message: "工单处理超ʱ (3 �?" },
+      { level: "info" as const, message: "��������€��������� > 5%" },
+      { level: "warning" as const, message: "�������� > 50 �? },
+    ];
+    return { taskPending, taskApproved, taskRejected, ticketTotal, mockWithdrawalPending, mockWithdrawalProcessed, mockAlerts };
+  }, [snapshot]);
+
+  useEffect(() => {
+    if (accountFilter === "ALL" && actorAccountIds.length === 1) {
+      setAccountFilter(actorAccountIds[0]);
+    }
+  }, [accountFilter, actorAccountIds]);
+
+  useEffect(() => {
+    if (!operationsPagePrefill) {
+      return;
+    }
+    setAccountFilter(operationsPagePrefill.account_id ?? "ALL");
+    clearOperationsPagePrefill();
+  }, [clearOperationsPagePrefill, operationsPagePrefill]);
+
+  useEffect(() => {
+    void loadSnapshot();
+  }, [accountFilter]);
+
+  useEffect(() => {
+    setOperationsPagePrefill({
+      account_id: accountFilter,
+    });
+  }, [accountFilter, setOperationsPagePrefill]);
+
+  async function loadSnapshot(): Promise<void> {
+    setLoading(true);
+    setError(null);
+    try {
+      const nextSnapshot = await getOperationsCenterSnapshot(
+        accountFilter !== "ALL" ? accountFilter : undefined
+      );
+      const nextStatusIndex = await listPlatformUserMemberStatusIndex(
+        nextSnapshot.tasks.map((task) => ({
+          id: task.user_id,
+          account_id: task.account_id,
+          public_user_id: task.public_user_id,
+        })),
+        accountFilter !== "ALL" ? accountFilter : undefined
+      );
+      setSnapshot(nextSnapshot);
+      setTaskMemberStatusIndex(nextStatusIndex);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "������������������");
+    } finally {
+      setLoading(false);
+      setPendingAction(null);
+    }
+  }
+
+  async function handleClaimTask(task: OperationsTaskItem): Promise<void> {
+    setPendingAction(`claim:${task.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await claimOperationsTask(task.id);
+      setNotice("���������?);
+      await loadSnapshot();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "������ȡʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleReplayProvider(item: OperationsProviderBacklogItem): Promise<void> {
+    setPendingAction(`replay:${item.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await replayOperationsProviderStatus(item.replay_payload);
+      setNotice(`�������� ${result.replayed_count}`);
+      await loadSnapshot();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "���€����������?);
+      setPendingAction(null);
+    }
+  }
+
+  async function handleCreateBatchJob(values: BatchJobFormValues): Promise<void> {
+    setPendingAction("batch");
+    setError(null);
+    setNotice(null);
+    try {
+      const payload: OperationsBatchJobCreatePayload = {
+        account_id: values.account_id?.trim() || null,
+        name: values.name.trim(),
+        target_scope: values.target_scope.trim(),
+        affected_count: Number(values.affected_count),
+      };
+      await createOperationsBatchJob(payload);
+      setNotice("批量任务已加入本地队�?);
+      form.resetFields();
+      await loadSnapshot();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "������������ʧ��");
+      setPendingAction(null);
+    }
+  }
+
+  /* const taskMemberStatusColumns: ProColumns<OperationsTaskItem>[] = [
+    {
+      title: "会员认证",
+      key: "member_verification",
+      render: (_, record) => {
+        const summary = taskMemberStatusIndex[record.user_id];
+        if (!summary?.latestVerificationStatus) {
+          return <Typography.Text type="secondary">鏆傛�?/Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getVerificationStatusColor(summary.latestVerificationStatus)}>
+              {summary.latestVerificationStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.verificationCount} �?/Typography.Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: "WhatsApp 缁戝�?,
+      key: "member_whatsapp_binding",
+      render: (_, record) => {
+        const summary = taskMemberStatusIndex[record.user_id];
+        if (!summary?.latestBindingStatus) {
+          return <Typography.Text type="secondary">鏆傛�?/Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getBindingStatusColor(summary.latestBindingStatus)}>
+              {summary.latestBindingStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.bindingCount} �?/Typography.Text>
+          </Space>
+        );
+      },
+    },
+  ];
+
+  ];
+  */
+  /* const taskMemberStatusColumns: ProColumns<OperationsTaskItem>[] = [
+    {
+      title: "会员认证",
+      key: "member_verification",
+      render: (_, record) => {
+        const summary = taskMemberStatusIndex[record.user_id];
+        if (!summary?.latestVerificationStatus) {
+          return <Typography.Text type="secondary">����</Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getVerificationStatusColor(summary.latestVerificationStatus)}>
+              {summary.latestVerificationStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.verificationCount} �?/Typography.Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: "WhatsApp 缁戝�?,
+      key: "member_whatsapp_binding",
+      render: (_, record) => {
+        const summary = taskMemberStatusIndex[record.user_id];
+        if (!summary?.latestBindingStatus) {
+          return <Typography.Text type="secondary">����</Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getBindingStatusColor(summary.latestBindingStatus)}>
+              {summary.latestBindingStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.bindingCount} �?/Typography.Text>
+          </Space>
+        );
+      },
+    },
+  ];
+
+  ];
+  */
+  const taskMemberStatusColumns: ProColumns<OperationsTaskItem>[] = [
+    {
+      title: "Verification",
+      key: "member_verification",
+      render: (_, record) => {
+        const summary = taskMemberStatusIndex[record.user_id];
+        if (!summary?.latestVerificationStatus) {
+          return <Typography.Text type="secondary">N/A</Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getVerificationStatusColor(summary.latestVerificationStatus)}>
+              {summary.latestVerificationStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.verificationCount}x</Typography.Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: "Binding",
+      key: "member_whatsapp_binding",
+      render: (_, record) => {
+        const summary = taskMemberStatusIndex[record.user_id];
+        if (!summary?.latestBindingStatus) {
+          return <Typography.Text type="secondary">N/A</Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getBindingStatusColor(summary.latestBindingStatus)}>
+              {summary.latestBindingStatus}
+            </Tag>
+            <Typography.Text type="secondary">{summary.bindingCount}x</Typography.Text>
+          </Space>
+        );
+      },
+    },
+  ];
+
+  const taskColumns: ProColumns<OperationsTaskItem>[] = [
+    ...taskMemberStatusColumns,
+    {
+      title: "����",
+      render: (_, record) => record.account_id ?? "ȫ��",
+    },
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.template_name}</Typography.Text>
+          <Typography.Text type="secondary">{record.public_user_id}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "���€?,
+      dataIndex: "status",
+    },
+    {
+      title: "����",
+      render: (_, record) =>
+        record.review_required ? <Tag color="warning">�€�?/Tag> : <Tag color="success">�?/Tag>,
+    },
+    {
+      title: "����",
+      dataIndex: "active_ticket_count",
+      width: 84,
+    },
+    {
+      title: "�������?,
+      render: (_, record) => formatTime(record.available_at),
+    },
+    {
+      title: "����",
+      width: 220,
+      render: (_, record) => (
+        <Space wrap>
+          <Button
+            size="small"
+            loading={pendingAction === `claim:${record.id}`}
+            onClick={() => void handleClaimTask(record)}
+            type="primary"
+          >
+            ��ȡ
+          </Button>
+          <Button
+            size="small"
+            onClick={() =>
+              openCustomersPage({
+                account_id: record.account_id ?? undefined,
+                selected_profile_id: record.user_id,
+                query: record.public_user_id,
+              })
+            }
+          >
+            瀹㈡�?          </Button>
+          <Button
+            size="small"
+            onClick={() =>
+              openWorkspacePage({
+                accountId: record.account_id ?? undefined,
+                search: record.public_user_id,
+              })
+            }
+          >
+            ����
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+
+  const providerColumns = [
+    {
+      title: "����",
+      dataIndex: "account_id",
+    },
+    {
+      title: "ͨ��",
+      dataIndex: "provider_name",
+    },
+    {
+      title: "��������€?,
+      dataIndex: "external_status",
+    },
+    {
+      title: "����",
+      render: (_: unknown, record: OperationsProviderBacklogItem) => (
+        <Tag color={record.replay_state === "pending" ? "warning" : "success"}>
+          {record.replay_state}
+        </Tag>
+      ),
+    },
+    {
+      title: "��Ϣ ID",
+      dataIndex: "provider_message_id",
+      ellipsis: true,
+    },
+    {
+      title: "����ʱ��",
+      render: (_: unknown, record: OperationsProviderBacklogItem) => formatTime(record.occurred_at),
+    },
+    {
+      title: "����",
+      render: (_: unknown, record: OperationsProviderBacklogItem) => (
+        <Space wrap>
+          <Button
+            size="small"
+            loading={pendingAction === `replay:${record.id}`}
+            onClick={() => void handleReplayProvider(record)}
+            type="primary"
+          >
+            ����
+          </Button>
+          <Button
+            size="small"
+            onClick={() =>
+              openProviderEventsPage({
+                account_id: record.account_id,
+                provider_name: record.provider_name,
+                provider_message_id: record.provider_message_id,
+                external_status: record.external_status,
+                replay_state: "pending",
+              })
+            }
+          >
+            ����
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+
+  const auditColumns = [
+    {
+      title: "����",
+      render: (_: unknown, record: OperationsAuditItem) => record.account_id ?? "ȫ��",
+    },
+    {
+      title: "����",
+      dataIndex: "action",
+    },
+    {
+      title: "���",
+      render: (_: unknown, record: OperationsAuditItem) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>{record.target_type}</Typography.Text>
+          <Typography.Text type="secondary">{record.target_id ?? "-"}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "ʱ��",
+      render: (_: unknown, record: OperationsAuditItem) => formatTime(record.created_at),
+    },
+    {
+      title: "����",
+      render: (_: unknown, record: OperationsAuditItem) => (
+        <Button
+          size="small"
+          onClick={() =>
+            openAuditPage({
+              account_id: record.account_id ?? undefined,
+              action: record.action,
+              target_type: record.target_type,
+              target_id: record.target_id ?? undefined,
+              limit: 50,
+            })
+          }
+        >
+          ���
+        </Button>
+      ),
+    },
+  ];
+
+  const batchColumns = [
+    {
+      title: "����",
+      render: (_: unknown, record: OperationsBatchJob) => record.account_id ?? "ȫ��",
+    },
+    {
+      title: "����",
+      dataIndex: "name",
+    },
+    {
+      title: "��Χ",
+      dataIndex: "target_scope",
+    },
+    {
+      title: "���€?,
+      render: (_: unknown, record: OperationsBatchJob) => (
+        <Tag color={record.source === "mock" ? "gold" : "default"}>{record.status}</Tag>
+      ),
+    },
+    {
+      title: "����",
+      dataIndex: "affected_count",
+    },
+    {
+      title: "����ʱ��",
+      render: (_: unknown, record: OperationsBatchJob) => formatTime(record.updated_at),
+    },
+  ];
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+          <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={accountOptions}
+            onChange={setAccountFilter}
+          />
+          <Radio.Group
+            value={timeDimension}
+            onChange={(e) => setTimeDimension(e.target.value)}
+            optionType="button"
+            buttonStyle="solid"
+          >
+            <Radio.Button value="today">����</Radio.Button>
+            <Radio.Button value="week">���</Radio.Button>
+            <Radio.Button value="month">���</Radio.Button>
+          </Radio.Group>
+          <Button
+            onClick={() =>
+              openProviderEventsPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+                replay_state: "pending",
+              })
+            }
+          >
+            待回�?          </Button>
+          <Button onClick={() => setActivePage("tasks")}>
+            ��������
+          </Button>
+          <Button onClick={() => setActivePage("tickets")}>
+            ��������
+          </Button>
+          <Button onClick={() => setActivePage("reviews")}>
+            ��������
+          </Button>
+          <Button
+            onClick={() =>
+              openAuditPage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+                limit: 50,
+              })
+            }
+          >
+            ���
+          </Button>
+          <Button
+            onClick={() =>
+              openEvidencePage({
+                account_id: accountFilter !== "ALL" ? accountFilter : undefined,
+              })
+            }
+          >
+            ��������
+          </Button>
+          <Button loading={loading} onClick={() => void loadSnapshot()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="���������? value={operationsStats.taskPending} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="���€����" value={operationsStats.taskApproved} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="已拒�? value={operationsStats.taskRejected} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="��Ծ����" value={operationsStats.ticketTotal} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="���������? value={operationsStats.mockWithdrawalPending} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="���������? value={operationsStats.mockWithdrawalProcessed} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="��������" value={snapshot?.queued_jobs ?? 0} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card loading={loading}>
+            <Statistic title="ʧ������" value={snapshot?.failed_jobs ?? 0} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={24} xs={24}>
+          <Card title="�����������" size="small">
+            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+              {operationsStats.mockAlerts.length === 0 ? (
+                <Typography.Text type="secondary">��������</Typography.Text>
+              ) : (
+                operationsStats.mockAlerts.map((alert, idx) => (
+                  <Alert
+                    key={idx}
+                    message={alert.message}
+                    showIcon
+                    type={alert.level === "warning" ? "warning" : "info"}
+                  />
+                ))
+              )}
+            </Space>
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <Card title="���������?>
+            <ProTable<OperationsTaskItem>
+              columns={taskColumns}
+              dataSource={snapshot?.tasks ?? []}
+              loading={loading}
+              options={false}
+              pagination={{ pageSize: 8 }}
+              rowKey="id"
+              search={false}
+              toolBarRender={false}
+            />
+          </Card>
+        </Col>
+        <Col lg={10} xs={24}>
+          <Card title="��������">
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Form<BatchJobFormValues>
+                form={form}
+                layout="vertical"
+                onFinish={(values) => void handleCreateBatchJob(values)}
+              >
+                <Form.Item label="����" name="account_id">
+                  <Select
+                    allowClear
+                    options={actorAccountIds.map((item) => ({ label: item, value: item }))}
+                  />
+                </Form.Item>
+                <Form.Item label="任务�? name="name" rules={[{ required: true }]}>
+                  <Input />
+                </Form.Item>
+                <Form.Item label="��������" name="target_scope" rules={[{ required: true }]}>
+                  <Input />
+                </Form.Item>
+                <Form.Item label="Ӱ������" name="affected_count" rules={[{ required: true }]}>
+                  <Input type="number" />
+                </Form.Item>
+                <Button htmlType="submit" loading={pendingAction === "batch"} type="primary" block>
+                  �������������
+                </Button>
+              </Form>
+            </Space>
+          </Card>
+        </Col>
+      </Row>
+
+      <Card title="��������">
+        <Table<OperationsProviderBacklogItem>
+          columns={providerColumns}
+          dataSource={snapshot?.provider_backlog ?? []}
+          loading={loading}
+          pagination={false}
+          rowKey="id"
+          size="small"
+        />
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={12} xs={24}>
+          <Card title="�€����?>
+            <Table<OperationsAuditItem>
+              columns={auditColumns}
+              dataSource={snapshot?.audit_items ?? []}
+              loading={loading}
+              pagination={false}
+              rowKey="id"
+              size="small"
+            />
+          </Card>
+        </Col>
+        <Col lg={12} xs={24}>
+          <Card title="�€�����������?>
+            <Table<OperationsBatchJob>
+              columns={batchColumns}
+              dataSource={snapshot?.batch_jobs ?? []}
+              loading={loading}
+              pagination={false}
+              rowKey="job_id"
+              size="small"
+            />
+          </Card>
+        </Col>
+      </Row>
+    </Space>
+  );
+}
+

@@ -1,0 +1,662 @@
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import { Alert, Button, Card, Col, Descriptions, Form, Input, Row, Select, Space, Statistic, Tag, Timeline, Typography } from "antd";
+
+import {
+  getSupportTicketAllowedTransitions,
+  getSupportTicketDetail,
+  getSupportTicketStatusLabel,
+  isSupportTicketTerminalStatus,
+  listSupportTickets,
+  replySupportTicket,
+  updateSupportTicketStatus,
+  type SupportTicket,
+  type SupportTicketDetail,
+  type SupportTicketReplyPayload,
+  type SupportTicketStatus,
+} from "../services/h5";
+import { useMemberStatus } from "../hooks/useMemberStatus";
+import { useAppStore } from "../stores/appStore";
+
+function formatTimestamp(value: string | null): string {
+  return value ? new Date(value).toLocaleString("zh-CN") : "����";
+}
+
+function getVerificationStatusColor(status: string): string {
+  if (status === "approved") return "success";
+  if (status === "rejected") return "error";
+  if (status === "submitted" || status === "under_review") return "processing";
+  return "default";
+}
+
+function getBindingStatusColor(status: string): string {
+  if (status === "bound" || status === "approved") return "success";
+  if (status === "failed" || status === "rejected") return "error";
+  if (status === "submitted" || status === "pending" || status === "verifying") return "processing";
+  return "default";
+}
+
+export function TicketsPage(): JSX.Element {
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+  const consoleAgentName = useAppStore((state) => state.consoleAgentName);
+  const openCustomersPage = useAppStore((state) => state.openCustomersPage);
+
+  const {
+    memberStatus,
+    memberStatusLoading,
+    memberStatusError,
+    loadMemberStatus,
+    resetMemberStatus,
+  } = useMemberStatus();
+
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [detail, setDetail] = useState<SupportTicketDetail | null>(null);
+  const [selectedId, setSelectedId] = useState("");
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const replyBlocker = useMemo(() => {
+    if (!detail) return "����ѡ������";
+    if (isSupportTicketTerminalStatus(detail.status)) return "������������";
+    return null;
+  }, [detail]);
+
+  const allowedStatus = detail ? getSupportTicketAllowedTransitions(detail.status) : [];
+
+  useEffect(() => {
+    if (accountFilter === "ALL" && actorAccountIds.length === 1) {
+      setAccountFilter(actorAccountIds[0]);
+    }
+  }, [accountFilter, actorAccountIds]);
+
+  useEffect(() => {
+    void loadTickets();
+  }, [accountFilter, statusFilter]);
+
+  useEffect(() => {
+    if (!tickets.length) {
+      setSelectedId("");
+      setDetail(null);
+      return;
+    }
+    if (selectedId && tickets.some((item) => item.id === selectedId)) {
+      return;
+    }
+    setSelectedId(tickets[0].id);
+  }, [selectedId, tickets]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    void loadDetail(selectedId);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!detail) {
+      resetMemberStatus();
+      return;
+    }
+    void loadMemberStatus(detail);
+  }, [detail, resetMemberStatus, loadMemberStatus]);
+
+  async function loadTickets(): Promise<void> {
+    setLoading(true);
+    setError(null);
+    try {
+      setTickets(
+        await listSupportTickets({
+          account_id: accountFilter === "ALL" ? undefined : accountFilter,
+          status: statusFilter === "ALL" ? undefined : (statusFilter as SupportTicketStatus),
+        })
+      );
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "��������ʧ��");
+    } finally {
+      setLoading(false);
+      setPendingAction(null);
+    }
+  }
+
+  async function loadDetail(ticketId: string): Promise<void> {
+    try {
+      setDetail(await getSupportTicketDetail(ticketId));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "������������ʧ��");
+    }
+  }
+
+
+
+  async function handleReply(values: SupportTicketReplyPayload): Promise<void> {
+    if (!detail || replyBlocker) {
+      if (replyBlocker) setError(replyBlocker);
+      return;
+    }
+    setPendingAction("reply");
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await replySupportTicket(detail.id, {
+        ...values,
+        sender_name: values.sender_name.trim() || consoleAgentName,
+        content: values.content.trim(),
+      });
+      setDetail(updated);
+      setNotice(`������������${detail.id}`);
+      await loadTickets();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "�������������");
+      setPendingAction(null);
+    }
+  }
+
+  async function handleStatusUpdate(status: SupportTicketStatus, note: string): Promise<void> {
+    if (!detail || allowedStatus.length === 0) return;
+    setPendingAction("status");
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await updateSupportTicketStatus(detail.id, {
+        status,
+        actor_name: consoleAgentName,
+        note: note.trim() || undefined,
+      });
+      setDetail(updated);
+      setNotice(`��������€����������?{detail.id}`);
+      await loadTickets();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "��������€����������?);
+      setPendingAction(null);
+    }
+  }
+
+  const columns: ProColumns<SupportTicket>[] = [
+    { title: "����", dataIndex: "account_id" },
+    { title: "���", dataIndex: "subject" },
+    { title: "����", dataIndex: "category" },
+    { title: "���€?, render: (_, record) => <Tag>{getSupportTicketStatusLabel(record.status)}</Tag> },
+    { title: "优先�?, dataIndex: "priority" },
+    { title: "�€������?, render: (_, record) => formatTimestamp(record.last_reply_at ?? record.updated_at) },
+  ];
+
+  const ticketsStats = useMemo(() => {
+    const open = tickets.filter((t) => t.status === "open").length;
+    const inProgress = tickets.filter((t) => t.status === "in_progress").length;
+    const resolved = tickets.filter((t) => t.status === "resolved" || t.status === "closed").length;
+    return { total: tickets.length, open, inProgress, resolved };
+  }, [tickets]);
+
+  const accountOptions = Array.from(new Set([...actorAccountIds, ...tickets.map((item) => item.account_id)])).filter(Boolean).sort();
+  const latestVerification = memberStatus?.verificationRequests[0] ?? null;
+  const latestBinding = memberStatus?.bindingRequests[0] ?? null;
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+                    <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={[
+              { label: "ȫ������", value: "ALL" },
+              ...accountOptions.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={setAccountFilter}
+          />
+          <Select
+            style={{ width: 220 }}
+            value={statusFilter}
+            options={[
+              { label: "��������€?, value: "ALL" },
+              { label: "����?, value: "open" },
+              { label: "处理�?, value: "in_progress" },
+              { label: "待用户补�?, value: "pending_user" },
+              { label: "已解�?, value: "resolved" },
+              { label: "已驳�?, value: "rejected" },
+              { label: "已关�?, value: "closed" },
+              { label: "已ȡ�?, value: "cancelled" },
+            ]}
+            onChange={setStatusFilter}
+          />
+          <Button loading={loading} onClick={() => void loadTickets()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic title="总工�? value={ticketsStats.total} />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic title="����? value={ticketsStats.open} valueStyle={{ color: ticketsStats.open > 0 ? "#cf1322" : undefined }} />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic title="处理�? value={ticketsStats.inProgress} valueStyle={{ color: "#1890ff" }} />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic title="已解�?已关�? value={ticketsStats.resolved} />
+          </Card>
+        </Col>
+      </Row>
+
+      <ProTable<SupportTicket>
+        columns={columns}
+        dataSource={tickets}
+        loading={loading}
+        options={false}
+        pagination={{ pageSize: 8 }}
+        rowKey="id"
+        search={false}
+        toolBarRender={false}
+        onRow={(record) => ({
+          onClick: () => setSelectedId(record.id),
+        })}
+      />
+
+      <Card title="��������">
+        {detail ? (
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            {/* ����������������������������������������������������������������������������������������?*/}
+            {/* ������������������������������������������������������������������������������������������������������������������?*/}
+            <Descriptions bordered column={2} size="small">
+              <Descriptions.Item label="���">{detail.subject}</Descriptions.Item>
+              <Descriptions.Item label="���€?>{getSupportTicketStatusLabel(detail.status)}</Descriptions.Item>
+              <Descriptions.Item label="����">{detail.category}</Descriptions.Item>
+              <Descriptions.Item label="��������">{detail.linked_task_instance_id ?? "����"}</Descriptions.Item>
+              <Descriptions.Item label="����ʱ��">{formatTimestamp(detail.created_at)}</Descriptions.Item>
+              <Descriptions.Item label="����ʱ��">{formatTimestamp(detail.updated_at)}</Descriptions.Item>
+              <Descriptions.Item label="����" span={2}>{detail.description}</Descriptions.Item>
+            </Descriptions>
+            {/*
+
+            <Card size="small" title="消Ϣʱ间�?>
+              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                <Space size={[8, 8]} wrap>
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      openCustomersPage({
+                        account_id: detail.account_id ?? undefined,
+                        query: detail.public_user_id,
+                      })
+                    }
+                  >
+                    ����
+                  </Button>
+                </Space>
+
+                <Row gutter={[16, 16]}>
+                  <Col lg={12} xs={24}>
+                    <Card size="small" title="�������������€? extra={<Tag color="blue">API</Tag>}>
+                      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                        {memberStatusError ? (
+                          <Alert message={memberStatusError} showIcon type="warning" />
+                        ) : null}
+                        {memberStatusLoading ? (
+                          <Typography.Text type="secondary">加载�?/Typography.Text>
+                        ) : latestVerification ? (
+                          <>
+                            <Descriptions bordered column={1} size="small">
+                              <Descriptions.Item label="���€?>
+                                <Tag color={getVerificationStatusColor(latestVerification.status)}>
+                                  {latestVerification.status}
+                                </Tag>
+                              </Descriptions.Item>
+                              <Descriptions.Item label="��֤����">
+                                {latestVerification.requestType}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="������ע">
+                                {latestVerification.reviewNote ?? latestVerification.notes ?? "����"}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="�€�����������?>
+                                {formatTimestamp(latestVerification.updatedAt)}
+                              </Descriptions.Item>
+                            </Descriptions>
+                            <Typography.Text type="secondary">
+                              认֤记¼ {memberStatus?.verificationRequests.length ?? 0} �?                            </Typography.Text>
+                          </>
+                        ) : (
+                          <Typography.Text type="secondary">������Ա��֤��¼</Typography.Text>
+                        )}
+                      </Space>
+                    </Card>
+                  </Col>
+
+                  <Col lg={12} xs={24}>
+                    <Card size="small" title="WhatsApp ��������€? extra={<Tag color="blue">API</Tag>}>
+                      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                        {memberStatusLoading ? (
+                          <Typography.Text type="secondary">加载�?/Typography.Text>
+                        ) : latestBinding ? (
+                          <>
+                            <Descriptions bordered column={1} size="small">
+                              <Descriptions.Item label="���€?>
+                                <Tag color={getBindingStatusColor(latestBinding.status)}>
+                                  {latestBinding.status}
+                                </Tag>
+                              </Descriptions.Item>
+                              <Descriptions.Item label="��������">
+                                {latestBinding.requestedPhoneNumber ?? "����"}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="ʧ��ԭ��">
+                                {latestBinding.lastError ?? "����"}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="�€�����������?>
+                                {formatTimestamp(latestBinding.updatedAt)}
+                              </Descriptions.Item>
+                            </Descriptions>
+                            <Typography.Text type="secondary">
+                              绑定记¼ {memberStatus?.bindingRequests.length ?? 0} �?                            </Typography.Text>
+                          </>
+                        ) : (
+                          <Typography.Text type="secondary">���� WhatsApp ������¼</Typography.Text>
+                        )}
+                      </Space>
+                    </Card>
+                  </Col>
+                </Row>
+
+                <Timeline
+                  items={detail.messages.map((message) => ({
+                    children: (
+                      <Space direction="vertical" size={2}>
+                        <Typography.Text strong>{`${message.sender_name} / ${message.sender_type}`}</Typography.Text>
+                        <Typography.Text>{message.content}</Typography.Text>
+                        <Typography.Text type="secondary">
+                          {`${formatTimestamp(message.created_at)}${message.internal_only ? " / ������ע" : ""}`}
+                        </Typography.Text>
+                      </Space>
+                    ),
+                  }))}
+                />
+              </Space>
+            </Card>
+            */}
+
+            {/*
+            <Space size={[8, 8]} wrap>
+              <Button
+                size="small"
+                onClick={() =>
+                  openCustomersPage({
+                    account_id: detail.account_id ?? undefined,
+                    query: detail.public_user_id,
+                  })
+                }
+              >
+                客户�?              </Button>
+            </Space>
+
+            <Row gutter={[16, 16]}>
+              <Col lg={12} xs={24}>
+                <Card size="small" title="�������������€? extra={<Tag color="blue">API</Tag>}>
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    {memberStatusError ? <Alert message={memberStatusError} showIcon type="warning" /> : null}
+                    {memberStatusLoading ? (
+                      <Typography.Text type="secondary">加载�?/Typography.Text>
+                    ) : latestVerification ? (
+                      <>
+                        <Descriptions bordered column={1} size="small">
+                          <Descriptions.Item label="���€?>
+                            <Tag color={getVerificationStatusColor(latestVerification.status)}>
+                              {latestVerification.status}
+                            </Tag>
+                          </Descriptions.Item>
+                          <Descriptions.Item label="��֤����">{latestVerification.requestType}</Descriptions.Item>
+                          <Descriptions.Item label="������ע">
+                            {latestVerification.reviewNote ?? latestVerification.notes ?? "����"}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="�€�����������?>
+                            {formatTimestamp(latestVerification.updatedAt)}
+                          </Descriptions.Item>
+                        </Descriptions>
+                        <Typography.Text type="secondary">
+                          认֤记¼ {memberStatus?.verificationRequests.length ?? 0} �?                        </Typography.Text>
+                      </>
+                    ) : (
+                      <Typography.Text type="secondary">������Ա��֤��¼</Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+              </Col>
+
+              <Col lg={12} xs={24}>
+                <Card size="small" title="WhatsApp ��������€? extra={<Tag color="blue">API</Tag>}>
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    {memberStatusLoading ? (
+                      <Typography.Text type="secondary">加载�?/Typography.Text>
+                    ) : latestBinding ? (
+                      <>
+                        <Descriptions bordered column={1} size="small">
+                          <Descriptions.Item label="���€?>
+                            <Tag color={getBindingStatusColor(latestBinding.status)}>
+                              {latestBinding.status}
+                            </Tag>
+                          </Descriptions.Item>
+                          <Descriptions.Item label="��������">
+                            {latestBinding.requestedPhoneNumber ?? "����"}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="ʧ��ԭ��">
+                            {latestBinding.lastError ?? "����"}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="�€�����������?>
+                            {formatTimestamp(latestBinding.updatedAt)}
+                          </Descriptions.Item>
+                        </Descriptions>
+                        <Typography.Text type="secondary">
+                          绑定记¼ {memberStatus?.bindingRequests.length ?? 0} �?                        </Typography.Text>
+                      </>
+                    ) : (
+                      <Typography.Text type="secondary">���� WhatsApp ������¼</Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+              </Col>
+            </Row>
+
+            <Card size="small" title="消Ϣʱ间�?>
+              <Timeline
+                items={detail.messages.map((message) => ({
+                  children: (
+                    <Space direction="vertical" size={2}>
+                      <Typography.Text strong>{`${message.sender_name} / ${message.sender_type}`}</Typography.Text>
+                      <Typography.Text>{message.content}</Typography.Text>
+                      <Typography.Text type="secondary">
+                        {`${formatTimestamp(message.created_at)}${message.internal_only ? " / 内部备注" : ""}`}
+                      </Typography.Text>
+                    </Space>
+                  ),
+                }))}
+              />
+            </Card>
+            */}
+
+            <Space size={[8, 8]} wrap>
+              <Button
+                size="small"
+                onClick={() =>
+                  openCustomersPage({
+                    account_id: detail.account_id ?? undefined,
+                    query: detail.public_user_id,
+                  })
+                }
+              >
+                客户�?              </Button>
+            </Space>
+
+            <Row gutter={[16, 16]}>
+              <Col lg={12} xs={24}>
+                <Card size="small" title="�������������€? extra={<Tag color="blue">API</Tag>}>
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    {memberStatusError ? <Alert message={memberStatusError} showIcon type="warning" /> : null}
+                    {memberStatusLoading ? (
+                      <Typography.Text type="secondary">加载�?/Typography.Text>
+                    ) : latestVerification ? (
+                      <>
+                        <Descriptions bordered column={1} size="small">
+                          <Descriptions.Item label="���€?>
+                            <Tag color={getVerificationStatusColor(latestVerification.status)}>
+                              {latestVerification.status}
+                            </Tag>
+                          </Descriptions.Item>
+                          <Descriptions.Item label="��֤����">{latestVerification.requestType}</Descriptions.Item>
+                          <Descriptions.Item label="������ע">
+                            {latestVerification.reviewNote ?? latestVerification.notes ?? "����"}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="�€������?>
+                            {formatTimestamp(latestVerification.updatedAt)}
+                          </Descriptions.Item>
+                        </Descriptions>
+                        <Typography.Text type="secondary">
+                          认֤记¼ {memberStatus?.verificationRequests.length ?? 0} �?                        </Typography.Text>
+                      </>
+                    ) : (
+                      <Typography.Text type="secondary">������Ա��֤��¼</Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+              </Col>
+
+              <Col lg={12} xs={24}>
+                <Card size="small" title="WhatsApp ��������€? extra={<Tag color="blue">API</Tag>}>
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    {memberStatusLoading ? (
+                      <Typography.Text type="secondary">加载�?/Typography.Text>
+                    ) : latestBinding ? (
+                      <>
+                        <Descriptions bordered column={1} size="small">
+                          <Descriptions.Item label="���€?>
+                            <Tag color={getBindingStatusColor(latestBinding.status)}>
+                              {latestBinding.status}
+                            </Tag>
+                          </Descriptions.Item>
+                          <Descriptions.Item label="��������">
+                            {latestBinding.requestedPhoneNumber ?? "����"}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="ʧ��ԭ��">
+                            {latestBinding.lastError ?? "����"}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="�€������?>
+                            {formatTimestamp(latestBinding.updatedAt)}
+                          </Descriptions.Item>
+                        </Descriptions>
+                        <Typography.Text type="secondary">
+                          绑定记¼ {memberStatus?.bindingRequests.length ?? 0} �?                        </Typography.Text>
+                      </>
+                    ) : (
+                      <Typography.Text type="secondary">���� WhatsApp ������¼</Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+              </Col>
+            </Row>
+
+            <Card size="small" title="���������?>
+              <Timeline
+                items={detail.messages.map((message) => ({
+                  children: (
+                    <Space direction="vertical" size={2}>
+                      <Typography.Text strong>{`${message.sender_name} / ${message.sender_type}`}</Typography.Text>
+                      <Typography.Text>{message.content}</Typography.Text>
+                      <Typography.Text type="secondary">
+                        {`${formatTimestamp(message.created_at)}${message.internal_only ? " / ������ע" : ""}`}
+                      </Typography.Text>
+                    </Space>
+                  ),
+                }))}
+              />
+            </Card>
+
+            <Row gutter={[16, 16]}>
+              <Col lg={12} xs={24}>
+                <Card size="small" title="��������">
+                  <Form
+                    key={`reply:${detail.id}`}
+                    layout="vertical"
+                    initialValues={{
+                      sender_type: "agent",
+                      sender_name: consoleAgentName,
+                      content: "",
+                      internal_only: false,
+                    }}
+                    onFinish={(values) => void handleReply(values)}
+                  >
+                    <Form.Item label="sender_type" name="sender_type">
+                      <Select
+                        disabled={Boolean(replyBlocker)}
+                        options={[
+                          { label: "agent", value: "agent" },
+                          { label: "system", value: "system" },
+                        ]}
+                      />
+                    </Form.Item>
+                    <Form.Item label="sender_name" name="sender_name" rules={[{ required: true }]}>
+                      <Input disabled={Boolean(replyBlocker)} />
+                    </Form.Item>
+                    <Form.Item label="content" name="content" rules={[{ required: true }]}>
+                      <Input.TextArea rows={4} disabled={Boolean(replyBlocker)} />
+                    </Form.Item>
+                    <Form.Item label="internal_only" name="internal_only">
+                      <Select
+                        disabled={Boolean(replyBlocker)}
+                        options={[
+                          { label: "�?, value: false },
+                          { label: "�?, value: true },
+                        ]}
+                      />
+                    </Form.Item>
+                    <Button htmlType="submit" disabled={Boolean(replyBlocker)} loading={pendingAction === "reply"} type="primary">
+                      ���€�����?                    </Button>
+                  </Form>
+                </Card>
+              </Col>
+              <Col lg={12} xs={24}>
+                <Card size="small" title="������ת">
+                  <Form
+                    key={`status:${detail.id}:${detail.status}`}
+                    layout="vertical"
+                    initialValues={{ status: allowedStatus[0], note: "" }}
+                    onFinish={(values) => void handleStatusUpdate(values.status, values.note ?? "")}
+                  >
+                    <Form.Item label="���€? name="status">
+                      <Select
+                        disabled={allowedStatus.length === 0}
+                        options={allowedStatus.map((status) => ({
+                          label: getSupportTicketStatusLabel(status),
+                          value: status,
+                        }))}
+                      />
+                    </Form.Item>
+                    <Form.Item label="��ע" name="note">
+                      <Input.TextArea rows={4} disabled={allowedStatus.length === 0} />
+                    </Form.Item>
+                    <Button htmlType="submit" disabled={allowedStatus.length === 0} loading={pendingAction === "status"}>
+                      ��������€?                    </Button>
+                  </Form>
+                </Card>
+              </Col>
+            </Row>
+          </Space>
+        ) : (
+          <Typography.Text type="secondary">��������</Typography.Text>
+        )}
+      </Card>
+    </Space>
+  );
+}
+

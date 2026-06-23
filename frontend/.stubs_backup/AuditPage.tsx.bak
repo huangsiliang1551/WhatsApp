@@ -1,0 +1,520 @@
+import { lazy, useEffect, useMemo, useRef, useState, type ComponentType, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Input,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Tabs,
+  Tag,
+  Typography,
+} from "antd";
+
+const LazySystemLogsContent = lazy(() =>
+  import("./SystemLogsPage").then((m) => ({ default: m.SystemLogsPage }))
+);
+const LazyEvidenceContent = lazy(() =>
+  import("./EvidenceCenterPage").then((m) => ({ default: m.EvidenceCenterPage }))
+);
+
+import {
+  listAuditLogs,
+  listRuntimeState,
+  type AuditLogEntry,
+  type RuntimeState,
+} from "../services/api";
+import { useAppStore } from "../stores/appStore";
+
+const DEFAULT_LIMIT = 50;
+
+type AuditFilters = {
+  account_id: string;
+  waba_id: string;
+  phone_number_id: string;
+  actor_type: string;
+  actor_id: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  date_from: string;
+  date_to: string;
+  limit: number;
+};
+
+const INITIAL_FILTERS: AuditFilters = {
+  account_id: "ALL",
+  waba_id: "",
+  phone_number_id: "",
+  actor_type: "",
+  actor_id: "",
+  action: "",
+  target_type: "",
+  target_id: "",
+  date_from: "",
+  date_to: "",
+  limit: DEFAULT_LIMIT,
+};
+
+function formatTimestamp(value: string): string {
+  return new Date(value).toLocaleString("zh-CN");
+}
+
+function formatAuditTarget(entry: AuditLogEntry): string {
+  return `${entry.account_id ?? "ȫ��"} / ${entry.target_type} / ${entry.target_id ?? "����"}`;
+}
+
+function formatAccountLabel(accountId: string, runtimeState: RuntimeState | null): string {
+  const matched = runtimeState?.accounts.find((account) => account.account_id === accountId);
+  return matched ? `${matched.display_name} (${accountId})` : accountId;
+}
+
+function formatPayload(payload: Record<string, unknown> | null): string {
+  if (!payload) {
+    return "无附加载�?;
+  }
+  return JSON.stringify(payload, null, 2);
+}
+
+function buildColumns(
+  runtimeState: RuntimeState | null
+): ProColumns<AuditLogEntry>[] {
+  return [
+    {
+      title: "ʱ��",
+      dataIndex: "created_at",
+      width: 180,
+      renderText: (value) => formatTimestamp(value),
+    },
+    {
+      title: "����",
+      dataIndex: "account_id",
+      width: 220,
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>
+            {record.account_id ? formatAccountLabel(record.account_id, runtimeState) : "ȫ��"}
+          </Typography.Text>
+          {record.waba_id ? <Typography.Text type="secondary">{record.waba_id}</Typography.Text> : null}
+        </Space>
+      ),
+    },
+    {
+      title: "操作�?,
+      key: "actor",
+      width: 180,
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Tag color="blue">{record.actor_type}</Tag>
+          <Typography.Text type="secondary">{record.actor_id ?? "system"}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "����",
+      dataIndex: "action",
+      width: 180,
+      render: (_, record) => <Tag color="processing">{record.action}</Tag>,
+    },
+    {
+      title: "���",
+      key: "target",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>{formatAuditTarget(record)}</Typography.Text>
+          {record.phone_number_id ? (
+            <Typography.Text type="secondary">{record.phone_number_id}</Typography.Text>
+          ) : null}
+        </Space>
+      ),
+    },
+  ];
+}
+
+export function AuditLogsContent(): JSX.Element {
+  const auditPagePrefill = useAppStore((state) => state.auditPagePrefill);
+  const clearAuditPagePrefill = useAppStore((state) => state.clearAuditPagePrefill);
+  const setAuditPagePrefill = useAppStore((state) => state.setAuditPagePrefill);
+  const openEvidencePage = useAppStore((state) => state.openEvidencePage);
+  const lastAppliedPrefillNonce = useRef<number | null>(null);
+  const auditRequestIdRef = useRef(0);
+
+  const [runtimeState, setRuntimeState] = useState<RuntimeState | null>(null);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [filters, setFilters] = useState<AuditFilters>(INITIAL_FILTERS);
+  const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    void loadAuditData();
+  }, []);
+
+  useEffect(() => {
+    if (!auditPagePrefill) {
+      return;
+    }
+    if (lastAppliedPrefillNonce.current === auditPagePrefill.nonce) {
+      return;
+    }
+
+    lastAppliedPrefillNonce.current = auditPagePrefill.nonce;
+    const nextFilters: AuditFilters = {
+      account_id: auditPagePrefill.account_id ?? "ALL",
+      waba_id: auditPagePrefill.waba_id ?? "",
+      phone_number_id: auditPagePrefill.phone_number_id ?? "",
+      actor_type: auditPagePrefill.actor_type ?? "",
+      actor_id: auditPagePrefill.actor_id ?? "",
+      action: auditPagePrefill.action ?? "",
+      target_type: auditPagePrefill.target_type ?? "",
+      target_id: auditPagePrefill.target_id ?? "",
+      date_from: auditPagePrefill.date_from ?? "",
+      date_to: auditPagePrefill.date_to ?? "",
+      limit: auditPagePrefill.limit ?? DEFAULT_LIMIT,
+    };
+    setFilters(nextFilters);
+    clearAuditPagePrefill();
+    void loadAuditData(nextFilters);
+  }, [auditPagePrefill, clearAuditPagePrefill]);
+
+  // �����������������������������������������������������������������������
+
+  async function loadAuditData(activeFilters: AuditFilters = filters): Promise<void> {
+    const requestId = auditRequestIdRef.current + 1;
+    auditRequestIdRef.current = requestId;
+    setRefreshing(true);
+    setError(null);
+
+    const nextWarnings: string[] = [];
+    const [runtimeResult, logsResult] = await Promise.allSettled([
+      listRuntimeState(),
+      listAuditLogs({
+        account_id: activeFilters.account_id !== "ALL" ? activeFilters.account_id : undefined,
+        waba_id: activeFilters.waba_id.trim() || undefined,
+        phone_number_id: activeFilters.phone_number_id.trim() || undefined,
+        actor_type: activeFilters.actor_type.trim() || undefined,
+        actor_id: activeFilters.actor_id.trim() || undefined,
+        action: activeFilters.action.trim() || undefined,
+        target_type: activeFilters.target_type.trim() || undefined,
+        target_id: activeFilters.target_id.trim() || undefined,
+        date_from: activeFilters.date_from || undefined,
+        date_to: activeFilters.date_to || undefined,
+        limit: activeFilters.limit,
+      }),
+    ]);
+
+    if (requestId !== auditRequestIdRef.current) {
+      return;
+    }
+
+    if (runtimeResult.status === "fulfilled") {
+      setRuntimeState(runtimeResult.value);
+    } else {
+      nextWarnings.push("������������ʧ��");
+    }
+
+    if (logsResult.status === "fulfilled") {
+      setAuditLogs(logsResult.value);
+      setLastUpdatedAt(new Date().toISOString());
+    } else {
+      setAuditLogs([]);
+      setError("�������������");
+    }
+
+    setWarnings(nextWarnings);
+    setRefreshing(false);
+  }
+
+  const accountOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const account of runtimeState?.accounts ?? []) {
+      values.add(account.account_id);
+    }
+    for (const entry of auditLogs) {
+      if (entry.account_id) {
+        values.add(entry.account_id);
+      }
+    }
+    return Array.from(values).sort((left, right) => left.localeCompare(right));
+  }, [auditLogs, runtimeState]);
+
+  const actorTypeOptions = useMemo(
+    () => Array.from(new Set(auditLogs.map((entry) => entry.actor_type))).sort(),
+    [auditLogs]
+  );
+  const actionOptions = useMemo(
+    () => Array.from(new Set(auditLogs.map((entry) => entry.action))).sort(),
+    [auditLogs]
+  );
+  const targetTypeOptions = useMemo(
+    () => Array.from(new Set(auditLogs.map((entry) => entry.target_type))).sort(),
+    [auditLogs]
+  );
+
+  const hasInvalidDateRange =
+    filters.date_from.length > 0 &&
+    filters.date_to.length > 0 &&
+    filters.date_from > filters.date_to;
+
+  const columns = useMemo(() => buildColumns(runtimeState), [runtimeState]);
+  const uniqueAccountCount = new Set(auditLogs.map((entry) => entry.account_id ?? "ȫ��")).size;
+  const uniqueActionCount = new Set(auditLogs.map((entry) => entry.action)).size;
+  const uniqueActorCount = new Set(
+    auditLogs.map((entry) => `${entry.actor_type}:${entry.actor_id ?? "system"}`)
+  ).size;
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {warnings.map((warning) => (
+        <Alert key={warning} message={warning} showIcon type="warning" />
+      ))}
+
+      <Card>
+        <Space align="center" size={[12, 12]} style={{ justifyContent: "space-between", width: "100%" }} wrap>
+          <Space size={[12, 12]} wrap>
+                        <Typography.Text type="secondary">
+              {lastUpdatedAt ? `������?${formatTimestamp(lastUpdatedAt)} / ${auditLogs.length} � : "����?}
+            </Typography.Text>
+          </Space>
+          <Space>
+            <Button
+              onClick={() =>
+                openEvidencePage({
+                  account_id: filters.account_id !== "ALL" ? filters.account_id : undefined,
+                  source_kind: "audit",
+                })
+              }
+            >
+              ��������
+            </Button>
+            <Button loading={refreshing} onClick={() => void loadAuditData()} type="primary">
+              ˢ��
+            </Button>
+          </Space>
+        </Space>
+      </Card>
+
+      <Card title="���€�����?>
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <Row gutter={[16, 16]}>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>����</Typography.Text>
+                  <Select
+                    onChange={(value) =>
+                      setFilters((current) => ({ ...current, account_id: value }))
+                    }
+                    options={[
+                      { label: "ȫ������", value: "ALL" },
+                      ...accountOptions.map((accountId) => ({
+                        label: formatAccountLabel(accountId, runtimeState),
+                        value: accountId,
+                      })),
+                    ]}
+                    style={{ width: "100%" }}
+                    value={filters.account_id}
+                  />
+                </Col>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>WABA</Typography.Text>
+                  <Input
+                    onChange={(event) =>
+                      setFilters((current) => ({ ...current, waba_id: event.target.value }))
+                    }
+                    placeholder="waba-123"
+                    value={filters.waba_id}
+                  />
+                </Col>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>���� ID</Typography.Text>
+                  <Input
+                    onChange={(event) =>
+                      setFilters((current) => ({
+                        ...current,
+                        phone_number_id: event.target.value,
+                      }))
+                    }
+                    placeholder="pn-123"
+                    value={filters.phone_number_id}
+                  />
+                </Col>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>操作者类�?/Typography.Text>
+                  <Select
+                    allowClear
+                    onChange={(value) =>
+                      setFilters((current) => ({ ...current, actor_type: value ?? "" }))
+                    }
+                    options={actorTypeOptions.map((value) => ({ label: value, value }))}
+                    style={{ width: "100%" }}
+                    value={filters.actor_type || undefined}
+                  />
+                </Col>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>����</Typography.Text>
+                  <Select
+                    allowClear
+                    onChange={(value) =>
+                      setFilters((current) => ({ ...current, action: value ?? "" }))
+                    }
+                    options={actionOptions.map((value) => ({ label: value, value }))}
+                    style={{ width: "100%" }}
+                    value={filters.action || undefined}
+                  />
+                </Col>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>����</Typography.Text>
+                  <Select
+                    onChange={(value) =>
+                      setFilters((current) => ({ ...current, limit: Number(value) }))
+                    }
+                    options={[20, 50, 100, 200].map((value) => ({ label: String(value), value }))}
+                    style={{ width: "100%" }}
+                    value={filters.limit}
+                  />
+                </Col>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>操作�?ID</Typography.Text>
+                  <Input
+                    onChange={(event) =>
+                      setFilters((current) => ({ ...current, actor_id: event.target.value }))
+                    }
+                    placeholder="agent-1"
+                    value={filters.actor_id}
+                  />
+                </Col>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>��������</Typography.Text>
+                  <Select
+                    allowClear
+                    onChange={(value) =>
+                      setFilters((current) => ({ ...current, target_type: value ?? "" }))
+                    }
+                    options={targetTypeOptions.map((value) => ({ label: value, value }))}
+                    style={{ width: "100%" }}
+                    value={filters.target_type || undefined}
+                  />
+                </Col>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>��� ID</Typography.Text>
+                  <Input
+                    onChange={(event) =>
+                      setFilters((current) => ({ ...current, target_id: event.target.value }))
+                    }
+                    placeholder="conv-123"
+                    value={filters.target_id}
+                  />
+                </Col>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>�€������?/Typography.Text>
+                  <Input
+                    onChange={(event) =>
+                      setFilters((current) => ({ ...current, date_from: event.target.value }))
+                    }
+                    type="date"
+                    value={filters.date_from}
+                  />
+                </Col>
+                <Col lg={8} md={12} xs={24}>
+                  <Typography.Text>��������</Typography.Text>
+                  <Input
+                    onChange={(event) =>
+                      setFilters((current) => ({ ...current, date_to: event.target.value }))
+                    }
+                    type="date"
+                    value={filters.date_to}
+                  />
+                </Col>
+          </Row>
+
+          {hasInvalidDateRange ? (
+            <Alert message="�€����������������������������€? showIcon type="error" />
+          ) : null}
+
+          <Space>
+            <Button
+              disabled={hasInvalidDateRange}
+              loading={refreshing}
+              onClick={() => void loadAuditData()}
+              type="primary"
+            >
+              ��������€?
+            </Button>
+            <Button onClick={() => setFilters(INITIAL_FILTERS)}>����</Button>
+          </Space>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��־����" value={auditLogs.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��������" value={uniqueAccountCount} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��������" value={uniqueActionCount} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��������" value={uniqueActorCount} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Card title="��־����">
+        <ProTable<AuditLogEntry>
+          columns={columns}
+          dataSource={auditLogs}
+          options={false}
+          pagination={{ pageSize: filters.limit, showSizeChanger: false }}
+          rowKey="id"
+          search={false}
+          toolBarRender={false}
+          expandable={{
+            expandedRowRender: (record) => (
+              <Descriptions bordered column={1} size="small">
+                <Descriptions.Item label="����">{record.account_id ?? "ȫ��"}</Descriptions.Item>
+                <Descriptions.Item label="WABA">{record.waba_id ?? "����"}</Descriptions.Item>
+                <Descriptions.Item label="���� ID">
+                  {record.phone_number_id ?? "����"}
+                </Descriptions.Item>
+                <Descriptions.Item label="����">
+                  <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                    {formatPayload(record.payload)}
+                  </pre>
+                </Descriptions.Item>
+              </Descriptions>
+            ),
+          }}
+        />
+      </Card>
+    </Space>
+  );
+}
+
+export function AuditPage(): JSX.Element {
+  return (
+    <Tabs
+      defaultActiveKey="audit"
+      items={[
+        { key: "audit", label: "��������", children: <AuditLogsContent /> },
+        { key: "system", label: "ϵͳ��־", children: <LazySystemLogsContent /> },
+        { key: "evidence", label: "��������", children: <LazyEvidenceContent /> },
+      ]}
+    />
+  );
+}

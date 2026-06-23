@@ -1,0 +1,502 @@
+import { useEffect, useMemo, useState, type JSX } from "react";
+
+import { ProCard } from "@ant-design/pro-card";
+import {
+  Alert,
+  Button,
+  Col,
+  List,
+  Progress,
+  Row,
+  Space,
+  Statistic,
+  Tag,
+  Typography,
+} from "antd";
+
+import { useHealth } from "../hooks/useHealth";
+import {
+  buildErrorTrend,
+  buildInfraCards,
+  buildMonitoringEvents,
+  buildRequestTrend,
+  type MonitoringEventItem,
+  type MonitoringTrendPoint,
+} from "../mocks/monitoring";
+import {
+  getLaunchReadiness,
+  getMetricsSummary,
+  getRuntimeConfigSummary,
+  isApiFeatureUnavailable,
+  listAuditLogs,
+  listProviderStatusBuffer,
+  listQueueStats,
+  listRuntimeState,
+  type AuditLogEntry,
+  type LaunchReadinessResponse,
+  type MetricsSummaryResponse,
+  type ProviderStatusBufferEntry,
+  type QueueStatsResponse,
+  type RuntimeConfigSummary,
+  type RuntimeState,
+} from "../services/api";
+import { useAppStore } from "../stores/appStore";
+
+type MonitoringState = {
+  runtimeState: RuntimeState | null;
+  queueStats: QueueStatsResponse | null;
+  metrics: MetricsSummaryResponse | null;
+  config: RuntimeConfigSummary | null;
+  launchReadiness: LaunchReadinessResponse | null;
+  auditLogs: AuditLogEntry[];
+  providerItems: ProviderStatusBufferEntry[];
+};
+
+const EMPTY_MONITORING_STATE: MonitoringState = {
+  runtimeState: null,
+  queueStats: null,
+  metrics: null,
+  config: null,
+  launchReadiness: null,
+  auditLogs: [],
+  providerItems: [],
+};
+
+function formatTimestamp(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleString("zh-CN") : "-";
+}
+
+function getStatusTag(status: "healthy" | "warning" | "degraded" | "placeholder"): JSX.Element {
+  if (status === "healthy") {
+    return <Tag color="success">����</Tag>;
+  }
+  if (status === "warning") {
+    return <Tag color="warning">��ע</Tag>;
+  }
+  if (status === "degraded") {
+    return <Tag color="error">����</Tag>;
+  }
+  return <Tag>Ԥ��</Tag>;
+}
+
+function getReadinessColor(
+  status: LaunchReadinessResponse["summary"]["overall_status"] | undefined
+): "success" | "warning" | "error" {
+  if (status === "ready") return "success";
+  if (status === "needs_attention") return "warning";
+  return "error";
+}
+
+function renderTrendCard(
+  title: string,
+  sourceLabel: string,
+  points: MonitoringTrendPoint[]
+): JSX.Element {
+  const maxValue = Math.max(...points.map((point) => point.value), 1);
+  return (
+    <ProCard
+      bordered
+      className="admin-panel"
+      extra={<Tag color="cyan">{sourceLabel}</Tag>}
+      headerBordered
+      title={title}
+    >
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        {points.map((point) => (
+          <div key={point.label}>
+            <Space style={{ justifyContent: "space-between", width: "100%" }}>
+              <Typography.Text>{point.label}</Typography.Text>
+              <Typography.Text>{point.value}</Typography.Text>
+            </Space>
+            <Progress percent={Math.round((point.value / maxValue) * 100)} showInfo={false} />
+          </div>
+        ))}
+      </Space>
+    </ProCard>
+  );
+}
+
+export function MonitoringPage(): JSX.Element {
+  const healthStatus = useHealth();
+  const openProviderEventsPage = useAppStore((state) => state.openProviderEventsPage);
+  const openAuditPage = useAppStore((state) => state.openAuditPage);
+  const openWorkspacePage = useAppStore((state) => state.openWorkspacePage);
+  const openWhatsAppStatsPage = useAppStore((state) => state.openWhatsAppStatsPage);
+  const openOperationsPage = useAppStore((state) => state.openOperationsPage);
+
+  const [state, setState] = useState<MonitoringState>(EMPTY_MONITORING_STATE);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+
+  const infraCards = useMemo(
+    () => buildInfraCards(healthStatus, state.runtimeState, state.queueStats, state.config),
+    [healthStatus, state.config, state.queueStats, state.runtimeState]
+  );
+  const requestTrend = useMemo(() => buildRequestTrend(state.metrics), [state.metrics]);
+  const errorTrend = useMemo(() => buildErrorTrend(state.metrics), [state.metrics]);
+  const monitoringEvents = useMemo(
+    () => buildMonitoringEvents(state.auditLogs, state.providerItems),
+    [state.auditLogs, state.providerItems]
+  );
+
+  const launchSummary = state.launchReadiness?.summary;
+  const openConversationCount =
+    state.runtimeState?.conversations.filter((item) => item.status === "open").length ?? 0;
+  const humanManagedCount =
+    state.runtimeState?.conversations.filter((item) => item.management_mode === "human_managed")
+      .length ?? 0;
+  const pausedCount =
+    state.runtimeState?.conversations.filter((item) => item.management_mode === "paused").length ??
+    0;
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function refresh(): Promise<void> {
+    setRefreshing(true);
+    setError(null);
+
+    const [
+      runtimeResult,
+      queueResult,
+      metricsResult,
+      configResult,
+      readinessResult,
+      auditResult,
+      providerResult,
+    ] = await Promise.allSettled([
+      listRuntimeState(),
+      listQueueStats(),
+      getMetricsSummary(),
+      getRuntimeConfigSummary(),
+      getLaunchReadiness(),
+      listAuditLogs({ limit: 8 }),
+      listProviderStatusBuffer({ limit: 6, replay_state: "pending" }),
+    ]);
+
+    const nextState: MonitoringState = {
+      runtimeState: runtimeResult.status === "fulfilled" ? runtimeResult.value : null,
+      queueStats: queueResult.status === "fulfilled" ? queueResult.value : null,
+      metrics: metricsResult.status === "fulfilled" ? metricsResult.value : null,
+      config: configResult.status === "fulfilled" ? configResult.value : null,
+      launchReadiness: readinessResult.status === "fulfilled" ? readinessResult.value : null,
+      auditLogs: auditResult.status === "fulfilled" ? auditResult.value : [],
+      providerItems: providerResult.status === "fulfilled" ? providerResult.value.items : [],
+    };
+
+    setState(nextState);
+
+    const warningItems: string[] = [];
+    if (runtimeResult.status === "rejected") warningItems.push("runtime");
+    if (queueResult.status === "rejected") warningItems.push("queue");
+    if (metricsResult.status === "rejected") warningItems.push("metrics");
+    if (configResult.status === "rejected") warningItems.push("config");
+    if (readinessResult.status === "rejected") warningItems.push("readiness");
+    if (auditResult.status === "rejected") warningItems.push("audit");
+    if (providerResult.status === "rejected") warningItems.push("provider");
+
+    setNotice(
+      warningItems.length > 0 ? `ȱʧ ${warningItems.join(" / ")}` : "��ˢ��"
+    );
+
+    if (
+      runtimeResult.status === "rejected" &&
+      queueResult.status === "rejected" &&
+      metricsResult.status === "rejected"
+    ) {
+      const unreachable =
+        isApiFeatureUnavailable(runtimeResult.reason) ||
+        isApiFeatureUnavailable(queueResult.reason) ||
+        isApiFeatureUnavailable(metricsResult.reason);
+      setError(unreachable ? "��������δ����" : "������������ʧ��");
+    }
+
+    setLastUpdatedAt(new Date().toISOString());
+    setRefreshing(false);
+  }
+
+  function openEvent(event: MonitoringEventItem): void {
+    if (event.category === "provider") {
+      openProviderEventsPage({
+        account_id: event.account_id ?? undefined,
+        provider_name: event.provider_name,
+        provider_message_id: event.provider_message_id,
+        external_status: event.external_status,
+        waba_id: event.waba_id ?? undefined,
+        phone_number_id: event.phone_number_id ?? undefined,
+        replay_state: "pending",
+      });
+      return;
+    }
+
+    if (event.category === "audit") {
+      openAuditPage({
+        account_id: event.account_id ?? undefined,
+        action: event.action,
+        target_type: event.target_type,
+        target_id: event.target_id ?? undefined,
+        waba_id: event.waba_id ?? undefined,
+        phone_number_id: event.phone_number_id ?? undefined,
+        limit: 50,
+      });
+    }
+  }
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      <ProCard
+        bordered
+        className="admin-panel"
+        extra={
+          <Space wrap>
+            <Button onClick={() => openOperationsPage()}>��������</Button>
+            <Button onClick={() => openProviderEventsPage({ replay_state: "pending" })}>
+              ��������
+            </Button>
+            <Button onClick={() => openAuditPage({ limit: 50 })}>����</Button>
+            <Button loading={refreshing} onClick={() => void refresh()} type="primary">
+              ˢ��
+            </Button>
+          </Space>
+        }
+        headerBordered
+        title="����"
+      >
+        <Typography.Text type="secondary">
+          {lastUpdatedAt ? `��ˢ�� ${formatTimestamp(lastUpdatedAt)}` : "δ����"}
+        </Typography.Text>
+      </ProCard>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <ProCard bordered className="admin-panel">
+            <Statistic title="��������" value={healthStatus === "ok" ? "OK" : healthStatus} />
+          </ProCard>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <ProCard
+            bordered
+            className="admin-panel"
+            extra={
+              <Tag color={getReadinessColor(launchSummary?.overall_status)}>
+                {launchSummary?.overall_status ?? "����"}
+              </Tag>
+            }
+          >
+            <Statistic title="��������" value={launchSummary?.blocker_count ?? 0} suffix="����" />
+            <Typography.Text type="secondary">
+              {`${launchSummary?.warning_count ?? 0} ��ע / ${launchSummary?.meta_ready_account_count ?? 0} Meta ����`}
+            </Typography.Text>
+          </ProCard>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <ProCard
+            bordered
+            className="admin-panel"
+            extra={
+              <Button size="small" type="link" onClick={() => openOperationsPage()}>
+                ����
+              </Button>
+            }
+          >
+            <Statistic
+              title="����̬��"
+              value={`${state.metrics?.queue.queued_current ?? 0} / ${state.metrics?.queue.processing_current ?? 0}`}
+            />
+            <Typography.Text type="secondary">
+              {`ʧ�� ${state.metrics?.queue.failed_current ?? 0}`}
+            </Typography.Text>
+          </ProCard>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <ProCard
+            bordered
+            className="admin-panel"
+            extra={
+              <Button
+                size="small"
+                type="link"
+                onClick={() => openProviderEventsPage({ replay_state: "pending" })}
+              >
+                ����
+              </Button>
+            }
+          >
+            <Statistic title="������״̬" value={state.providerItems.length} />
+            <Typography.Text type="secondary">
+              {state.providerItems[0]
+                ? `${state.providerItems[0].provider_name} / ${state.providerItems[0].external_status}`
+                : "����"}
+            </Typography.Text>
+          </ProCard>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        {infraCards.map((card) => (
+          <Col key={card.id} lg={8} md={12} xs={24}>
+            <ProCard bordered className="admin-panel" headerBordered title={card.label}>
+              <Space direction="vertical" size={8}>
+                {getStatusTag(card.status)}
+                <Typography.Text>{card.summary}</Typography.Text>
+                <Tag color={card.source === "api" ? "blue" : "gold"}>
+                  {card.source === "api" ? "API" : "ģ��"}
+                </Tag>
+              </Space>
+            </ProCard>
+          </Col>
+        ))}
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={12} xs={24}>
+          {renderTrendCard(
+            "������",
+            state.metrics ? "ָ������" : "ģ��",
+            requestTrend
+          )}
+        </Col>
+        <Col lg={12} xs={24}>
+          {renderTrendCard(
+            "������",
+            state.metrics ? "ָ������" : "ģ��",
+            errorTrend
+          )}
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={8} xs={24}>
+          <ProCard
+            bordered
+            className="admin-panel"
+            extra={
+              <Button
+                size="small"
+                type="link"
+                onClick={() => openWorkspacePage({ managementMode: "all" })}
+              >
+                ����
+              </Button>
+            }
+            headerBordered
+            title="��������"
+          >
+            <Statistic title="������" value={openConversationCount} />
+          </ProCard>
+        </Col>
+        <Col lg={8} xs={24}>
+          <ProCard
+            bordered
+            className="admin-panel"
+            extra={
+              <Button
+                size="small"
+                type="link"
+                onClick={() => openWorkspacePage({ managementMode: "human_managed" })}
+              >
+                ����
+              </Button>
+            }
+            headerBordered
+            title="��������"
+          >
+            <Statistic title="������" value={humanManagedCount} />
+          </ProCard>
+        </Col>
+        <Col lg={8} xs={24}>
+          <ProCard
+            bordered
+            className="admin-panel"
+            extra={
+              <Button
+                size="small"
+                type="link"
+                onClick={() => openWorkspacePage({ managementMode: "paused" })}
+              >
+                ����
+              </Button>
+            }
+            headerBordered
+            title="��ͣ����"
+          >
+            <Statistic title="��ͣ��" value={pausedCount} />
+          </ProCard>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={10} xs={24}>
+          <ProCard
+            bordered
+            className="admin-panel"
+            extra={
+              <Button size="small" type="link" onClick={() => openWhatsAppStatsPage({})}>
+                ͳ��
+              </Button>
+            }
+            headerBordered
+            title="��������"
+          >
+            <Space direction="vertical" size={8}>
+              <Typography.Text>
+                {`��Ϣͨ�� ${state.config?.messaging_provider ?? "����"}`}
+              </Typography.Text>
+              <Typography.Text>
+                {`AI ${state.config?.ai_provider ?? "����"}`}
+              </Typography.Text>
+              <Typography.Text>
+                {`���� ${state.config?.queue_backend ?? "����"}`}
+              </Typography.Text>
+              <Typography.Text type="secondary">
+                {state.config?.test_mode ? "����ģʽ" : state.config?.app_env ?? "����"}
+              </Typography.Text>
+            </Space>
+          </ProCard>
+        </Col>
+        <Col lg={14} xs={24}>
+          <ProCard bordered className="admin-panel" headerBordered title="������������">
+            <List
+              dataSource={monitoringEvents}
+              renderItem={(event) => (
+                <List.Item
+                  actions={[
+                    event.category !== "mock" ? (
+                      <Button key={`${event.id}:jump`} size="small" onClick={() => openEvent(event)}>
+                        ����
+                      </Button>
+                    ) : null,
+                  ]}
+                  key={event.id}
+                >
+                  <List.Item.Meta
+                    description={
+                      <Space direction="vertical" size={0}>
+                        <Typography.Text>{event.summary}</Typography.Text>
+                        <Typography.Text type="secondary">
+                          {formatTimestamp(event.timestamp)}
+                        </Typography.Text>
+                      </Space>
+                    }
+                    title={
+                      <Space wrap>
+                        <span>{event.title}</span>
+                        <Tag color={event.source === "api" ? "blue" : "gold"}>
+                          {event.source === "api" ? "API" : "ģ��"}
+                        </Tag>
+                      </Space>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          </ProCard>
+        </Col>
+      </Row>
+    </Space>
+  );
+}

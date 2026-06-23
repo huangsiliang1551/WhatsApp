@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whatsapp-support-platform"
+version = "0.1.0"
+description = "FastAPI and React skeleton for a WhatsApp support platform."
+requires-python = ">=3.14"
+dependencies = [
+  "fastapi>=0.116,<1.0",
+  "uvicorn[standard]>=0.35,<1.0",
+  "python-multipart>=0.0.20,<1.0",
+  "pydantic-settings>=2.10,<3.0",
+  "prometheus-client>=0.22,<1.0",
+  "structlog>=25,<26",
+  "httpx>=0.28,<1.0",
+  "sqlalchemy>=2.0,<3.0",
+  "alembic>=1.16,<2.0",
+  "psycopg>=3.2,<4.0",
+  "redis>=6.2,<7.0",
+  "openai>=1.99,<2.0",
+  "bcrypt>=4.2,<5.0",
+  "pytz>=2024.2,<2025.0",
+  "cryptography>=44.0,<45.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<9.0"
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = [
+    "tests",
+]
+markers = [
+    "postgres: Tests that require PostgreSQL (skipped automatically when no Postgres available)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:fastapi.testclient",
+]

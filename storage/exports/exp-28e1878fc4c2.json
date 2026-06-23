@@ -1,0 +1,13 @@
+{
+  "export_id": "exp-28e1878fc4c2",
+  "type": "conversations",
+  "filters": {},
+  "columns": [],
+  "status": "completed",
+  "estimated_rows": 1,
+  "created_at": "2026-06-13T10:54:24.440460+00:00",
+  "expires_at": "2026-06-14T10:54:24.440467+00:00",
+  "file_size_bytes": 4,
+  "row_count": 0,
+  "download_url": "/api/exports/exp-28e1878fc4c2/download"
+}

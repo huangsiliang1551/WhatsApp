@@ -1,0 +1,110 @@
+groups:
+  - name: whatsapp-platform
+    rules:
+      # ── Infrastructure ──────────────────────────────────────
+      - alert: WhatsAppAppDown
+        expr: up{job="whatsapp_app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "WhatsApp app target is down"
+          description: "Prometheus cannot scrape the FastAPI /metrics endpoint for 1 minute."
+
+      - alert: WhatsAppWorkerDown
+        expr: up{job="whatsapp_worker"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "WhatsApp worker 进程不在线"
+          description: "Worker 进程超过 1 分钟不可达。"
+
+      # ── Queue ───────────────────────────────────────────────
+      - alert: AIQueueBacklogHigh
+        expr: queue_jobs_current{queue="ai_generation",status="queued"} > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI queue backlog is high"
+          description: "The ai_generation queue has more than 50 queued jobs for 10 minutes."
+
+      - alert: AIQueueFailuresPresent
+        expr: queue_jobs_current{queue="ai_generation",status="failed"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI queue has failed jobs"
+          description: "There are failed ai_generation jobs waiting for operator review."
+
+      # ── Provider ────────────────────────────────────────────
+      - alert: ProviderStatusBufferStuck
+        expr: provider_status_event_buffer_oldest_age_seconds{provider="whatsapp"} > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "WhatsApp provider status buffer is not draining"
+          description: "At least one WhatsApp provider status callback has been pending replay for more than 5 minutes."
+
+      # ── Error Rate ──────────────────────────────────────────
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(message_processing_failures_total[5m]))
+          /
+          sum(rate(business_inbound_messages_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "消息处理错误率超过 10%"
+          description: "过去 5 分钟消息处理错误率为 {{ $value | humanizePercentage }}，超过 10% 阈值。"
+
+      # ── Webhook ─────────────────────────────────────────────
+      - alert: WebhookSignatureFailuresHigh
+        expr: rate(whatsapp_webhook_signature_failures_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook 签名验证持续失败"
+          description: "过去 10 分钟内有签名验证失败，可能是 app_secret 不匹配。"
+
+      # ── AI ──────────────────────────────────────────────────
+      - alert: AIFallbackRateHigh
+        expr: |
+          sum(rate(business_ai_replies_total{outcome="fallback"}[10m]))
+          /
+          sum(rate(business_ai_replies_total[10m])) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI 回复降级率超过 30%"
+          description: "过去 10 分钟 AI 降级回复占比 {{ $value | humanizePercentage }}。"
+
+      # ── Template ────────────────────────────────────────────
+      - alert: TemplateSendFailureHigh
+        expr: |
+          sum(rate(business_template_send_failures_total[10m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "模板消息发送持续失败"
+          description: "过去 10 分钟内存在模板发送失败事件。"
+
+      # ── Translation ─────────────────────────────────────────
+      - alert: TranslationFailureHigh
+        expr: |
+          sum(rate(translation_operations_total{outcome="fallback"}[10m]))
+          /
+          sum(rate(translation_operations_total[10m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "翻译降级率超过 50%"
+          description: "过去 10 分钟翻译操作降级占比过高。"

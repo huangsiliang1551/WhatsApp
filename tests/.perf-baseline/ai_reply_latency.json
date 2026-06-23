@@ -1,0 +1,13 @@
+{
+  "test": "test_perf_ai_reply_latency",
+  "description": "50 条 AI 模式消息处理延迟 (Mock AI, 不含真实 API)",
+  "count": 50,
+  "latency_ms": {
+    "avg": 50.76,
+    "p50": 45.46,
+    "p95": 62.43,
+    "p99": 163.98,
+    "min": 42.86,
+    "max": 173.47
+  }
+}

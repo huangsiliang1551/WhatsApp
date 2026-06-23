@@ -1,0 +1,769 @@
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+
+import { ProTable, type ProColumns } from "@ant-design/pro-table";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Input,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Tag,
+  Typography,
+} from "antd";
+
+import {
+  getCustomerProfileDetail,
+  listPlatformUserMemberStatusIndex,
+  listCustomerProfiles,
+  type PlatformUserMemberStatusSummary,
+} from "../services/operations";
+import { useMemberStatus } from "../hooks/useMemberStatus";
+import { useAppStore } from "../stores/appStore";
+import type {
+  CustomerConversationLink,
+  CustomerProfileDetail,
+  CustomerProfileSummary,
+  CustomerTicketLink,
+} from "../types/operations";
+
+function formatTimestamp(value: string | null): string {
+  return value ? new Date(value).toLocaleString("zh-CN") : "����";
+}
+
+function getConversationStatusColor(status: string): string {
+  return status === "open" ? "success" : "default";
+}
+
+function getLifecycleStatusLabel(status: string): string {
+  if (status === "active") return "��Ծ";
+  if (status === "inactive") return "ͣ��";
+  if (status === "archived") return "����";
+  return status;
+}
+
+function getConversationStatusLabel(status: string): string {
+  if (status === "open") return "����?;
+  if (status === "closed") return "已关�?;
+  if (status === "paused") return "已暂�?;
+  return status;
+}
+
+function getTicketStatusColor(status: string): string {
+  if (status === "resolved") return "success";
+  if (status === "closed" || status === "cancelled") return "default";
+  if (status === "pending_user") return "warning";
+  return "processing";
+}
+
+function getTicketStatusLabel(status: string): string {
+  if (status === "resolved") return "已解�?;
+  if (status === "closed") return "已关�?;
+  if (status === "cancelled") return "已ȡ�?;
+  if (status === "pending_user") return "���������?;
+  if (status === "open") return "处理�?;
+  return status;
+}
+
+function getVerificationStatusColor(status: string): string {
+  if (status === "approved") return "success";
+  if (status === "rejected") return "error";
+  if (status === "under_review") return "processing";
+  return "default";
+}
+
+function getVerificationStatusLabel(status: string): string {
+  if (status === "approved") return "���€����";
+  if (status === "rejected") return "已拒�?;
+  if (status === "under_review") return "审核�?;
+  if (status === "pending") return "����?;
+  return status;
+}
+
+function getBindingStatusColor(status: string): string {
+  if (status === "bound") return "success";
+  if (status === "failed") return "error";
+  return "processing";
+}
+
+function getBindingStatusLabel(status: string): string {
+  if (status === "bound") return "已绑�?;
+  if (status === "failed") return "����ʧ��";
+  if (status === "pending") return "����?;
+  if (status === "processing") return "处理�?;
+  return status;
+}
+
+function getVerificationTypeLabel(value: string): string {
+  if (value === "identity") return "��������";
+  return value || "����";
+}
+
+function getConversationModeLabel(mode: string): string {
+  if (mode === "ai_managed") return "AI ���";
+  if (mode === "human_managed") return "��������";
+  if (mode === "paused") return "已暂�?;
+  return mode;
+}
+
+function renderCustomerFlags(profile: Pick<
+  CustomerProfileSummary,
+  "is_anonymous" | "is_new_user" | "is_invited_user" | "restrict_task_claim"
+>): JSX.Element {
+  return (
+    <Space size={[6, 6]} wrap>
+      <Tag color={profile.is_anonymous ? "warning" : "default"}>
+        {profile.is_anonymous ? "����" : "ʵ��"}
+      </Tag>
+      {profile.is_new_user ? <Tag color="processing">���</Tag> : null}
+      {profile.is_invited_user ? <Tag color="purple">�€�?/Tag> : null}
+      <Tag color={profile.restrict_task_claim ? "warning" : "default"}>
+        {profile.restrict_task_claim ? "��������" : "��?}
+      </Tag>
+    </Space>
+  );
+}
+
+export function CustomersPage(): JSX.Element {
+  const actorAccountIds = useAppStore((state) => state.actorAccountIds);
+  const openSitesPage = useAppStore((state) => state.openSitesPage);
+  const openUsersPage = useAppStore((state) => state.openUsersPage);
+  const openWorkspacePage = useAppStore((state) => state.openWorkspacePage);
+  const openAuditPage = useAppStore((state) => state.openAuditPage);
+  const customersPagePrefill = useAppStore((state) => state.customersPagePrefill);
+  const clearCustomersPagePrefill = useAppStore((state) => state.clearCustomersPagePrefill);
+  const setCustomersPagePrefill = useAppStore((state) => state.setCustomersPagePrefill);
+  const {
+    memberStatus,
+    memberStatusLoading,
+    memberStatusError,
+    loadMemberStatus,
+    resetMemberStatus,
+  } = useMemberStatus();
+  const lastAppliedPrefillNonce = useRef<number | null>(null);
+  const profileLoadRequestIdRef = useRef(0);
+  const detailLoadRequestIdRef = useRef(0);
+
+  const [profiles, setProfiles] = useState<CustomerProfileSummary[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>("");
+  const [detail, setDetail] = useState<CustomerProfileDetail | null>(null);
+  const [customerMemberStatusIndex, setCustomerMemberStatusIndex] = useState<
+    Record<string, PlatformUserMemberStatusSummary>
+  >({});
+  const [accountFilter, setAccountFilter] = useState<string>("ALL");
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const accountOptions = useMemo(() => {
+    const values = new Set<string>();
+    actorAccountIds.forEach((item) => item && values.add(item));
+    profiles.forEach((item) => item.account_id && values.add(item.account_id));
+    return Array.from(values).sort((left, right) => left.localeCompare(right, "zh-CN"));
+  }, [actorAccountIds, profiles]);
+
+  const filteredProfiles = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    return profiles.filter((profile) => {
+      if (!keyword) return true;
+      return [
+        profile.public_user_id,
+        profile.display_name ?? "",
+        profile.registration_site_key ?? "",
+        profile.registration_site_domain ?? "",
+        ...profile.tag_keys,
+        ...profile.identity_values,
+        ...profile.relatedCustomerIds,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(keyword);
+    });
+  }, [profiles, query]);
+
+  const selectedProfile = useMemo(
+    () => filteredProfiles.find((item) => item.id === selectedProfileId) ?? null,
+    [filteredProfiles, selectedProfileId]
+  );
+
+  useEffect(() => {
+    if (accountFilter === "ALL" && actorAccountIds.length === 1) {
+      setAccountFilter(actorAccountIds[0]);
+    }
+  }, [actorAccountIds, accountFilter]);
+
+  useEffect(() => {
+    if (!customersPagePrefill) return;
+    if (lastAppliedPrefillNonce.current === customersPagePrefill.nonce) return;
+    lastAppliedPrefillNonce.current = customersPagePrefill.nonce;
+    setAccountFilter(customersPagePrefill.account_id ?? "ALL");
+    setQuery(customersPagePrefill.query ?? "");
+    setSelectedProfileId(customersPagePrefill.selected_profile_id ?? "");
+    clearCustomersPagePrefill();
+  }, [clearCustomersPagePrefill, customersPagePrefill]);
+
+  useEffect(() => {
+    void loadProfiles();
+  }, [accountFilter]);
+
+  useEffect(() => {
+    if (!filteredProfiles.length) {
+      setSelectedProfileId("");
+      setDetail(null);
+      return;
+    }
+    if (selectedProfileId && filteredProfiles.some((item) => item.id === selectedProfileId)) {
+      return;
+    }
+    setSelectedProfileId(filteredProfiles[0].id);
+  }, [filteredProfiles, selectedProfileId]);
+
+  useEffect(() => {
+    if (!selectedProfile) return;
+    void loadDetail(selectedProfile);
+    void loadMemberStatus(selectedProfile);
+  }, [selectedProfile]);
+
+  useEffect(() => {
+    if (!selectedProfile) {
+      resetMemberStatus();
+    }
+  }, [selectedProfile, resetMemberStatus]);
+
+  useEffect(() => {
+    setCustomersPagePrefill({
+      account_id: accountFilter,
+      query: query || undefined,
+      selected_profile_id: selectedProfileId || undefined,
+    });
+  }, [accountFilter, query, selectedProfileId, setCustomersPagePrefill]);
+
+  async function loadProfiles(): Promise<void> {
+    const requestId = ++profileLoadRequestIdRef.current;
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const nextProfiles = await listCustomerProfiles(
+        accountFilter !== "ALL" ? accountFilter : undefined
+      );
+      const nextStatusIndex = await listPlatformUserMemberStatusIndex(
+        nextProfiles,
+        accountFilter !== "ALL" ? accountFilter : undefined
+      );
+      if (requestId !== profileLoadRequestIdRef.current) return;
+      setProfiles(nextProfiles);
+      setCustomerMemberStatusIndex(nextStatusIndex);
+      setNotice(`已ˢ�?${new Date().toLocaleString("zh-CN")}`);
+    } catch (loadError) {
+      if (requestId !== profileLoadRequestIdRef.current) return;
+      setError(loadError instanceof Error ? loadError.message : "������������������");
+    } finally {
+      if (requestId === profileLoadRequestIdRef.current) {
+        setLoading(false);
+      }
+    }
+  }
+
+  async function loadDetail(profile: CustomerProfileSummary): Promise<void> {
+    const requestId = ++detailLoadRequestIdRef.current;
+    setDetailLoading(true);
+    setError(null);
+    setDetail(null);
+    try {
+      const nextDetail = await getCustomerProfileDetail(profile.id, profile.account_id ?? undefined);
+      if (requestId !== detailLoadRequestIdRef.current) return;
+      setDetail(nextDetail);
+    } catch (loadError) {
+      if (requestId !== detailLoadRequestIdRef.current) return;
+      setError(loadError instanceof Error ? loadError.message : "������������ʧ��");
+    } finally {
+      if (requestId === detailLoadRequestIdRef.current) {
+        setDetailLoading(false);
+      }
+    }
+  }
+
+
+
+  const columns: ProColumns<CustomerProfileSummary>[] = [
+    {
+      title: "����",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.display_name || record.public_user_id}</Typography.Text>
+          <Typography.Text type="secondary">{record.public_user_id}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: "���� / վ��",
+      render: (_, record) =>
+        `${record.account_id ?? "����"} / ${record.registration_site_key ?? record.registration_site_domain ?? "����"}`,
+    },
+    {
+      title: "���€?,
+      render: (_, record) => (
+        <Space size={[6, 6]} wrap>
+          <Tag color={record.lifecycle_status === "active" ? "success" : "default"}>
+            {getLifecycleStatusLabel(record.lifecycle_status)}
+          </Tag>
+          {renderCustomerFlags(record)}
+        </Space>
+      ),
+    },
+    {
+      title: "��Ա��֤",
+      render: (_, record) => {
+        const summary = customerMemberStatusIndex[record.id];
+        if (!summary?.latestVerificationStatus) {
+          return <Typography.Text type="secondary">����</Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getVerificationStatusColor(summary.latestVerificationStatus)}>
+              {getVerificationStatusLabel(summary.latestVerificationStatus)}
+            </Tag>
+            <Typography.Text type="secondary">{summary.verificationCount} �?/Typography.Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: "WhatsApp ����",
+      render: (_, record) => {
+        const summary = customerMemberStatusIndex[record.id];
+        if (!summary?.latestBindingStatus) {
+          return <Typography.Text type="secondary">����</Typography.Text>;
+        }
+        return (
+          <Space size={[6, 6]} wrap>
+            <Tag color={getBindingStatusColor(summary.latestBindingStatus)}>
+              {getBindingStatusLabel(summary.latestBindingStatus)}
+            </Tag>
+            <Typography.Text type="secondary">{summary.bindingCount} �?/Typography.Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: "���� / ����",
+      render: (_, record) =>
+        `${record.open_conversation_count}/${record.conversation_count} / ${record.open_ticket_count}/${record.ticket_count}`,
+    },
+  ];
+
+  const latestVerification = memberStatus?.verificationRequests[0] ?? null;
+  const latestBinding = memberStatus?.bindingRequests[0] ?? null;
+  const detailAccountId = detail?.profile.account_id ?? (accountFilter !== "ALL" ? accountFilter : undefined);
+  const primaryConversation = detail?.conversations[0] ?? null;
+  const detailSourceTags = (
+    <Space size={[8, 8]} wrap>
+      <Tag color="blue">API</Tag>
+      {detail?.conversations.length || detail?.tickets.length ? <Tag color="cyan">����</Tag> : null}
+    </Space>
+  );
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      {error ? <Alert message={error} showIcon type="error" /> : null}
+      {notice ? <Alert message={notice} showIcon type="info" /> : null}
+
+      <Card>
+        <Space align="center" size={[12, 12]} wrap>
+                    <Select
+            style={{ width: 220 }}
+            value={accountFilter}
+            options={[
+              { label: "ȫ������", value: "ALL" },
+              ...accountOptions.map((item) => ({ label: item, value: item })),
+            ]}
+            onChange={setAccountFilter}
+          />
+          <Input.Search
+            allowClear
+            style={{ width: 260 }}
+            placeholder="���������� / ��� / ���"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <Button loading={loading} onClick={() => void loadProfiles()} type="primary">
+            ˢ��
+          </Button>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic title="��������" value={filteredProfiles.length} />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic
+              title="WhatsApp ����"
+              value={filteredProfiles.filter((item) => item.has_whatsapp).length}
+            />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic
+              title="��������"
+              value={filteredProfiles.reduce((sum, item) => sum + item.open_conversation_count, 0)}
+            />
+          </Card>
+        </Col>
+        <Col lg={6} md={12} xs={24}>
+          <Card>
+            <Statistic
+              title="��������"
+              value={filteredProfiles.reduce((sum, item) => sum + item.open_ticket_count, 0)}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col lg={14} xs={24}>
+          <ProTable<CustomerProfileSummary>
+            columns={columns}
+            dataSource={filteredProfiles}
+            loading={loading}
+            options={false}
+            pagination={{ pageSize: 8 }}
+            rowKey="id"
+            search={false}
+            toolBarRender={false}
+            onRow={(record) => ({
+              onClick: () => setSelectedProfileId(record.id),
+            })}
+          />
+        </Col>
+        <Col lg={10} xs={24}>
+          <Card
+            extra={detail ? detailSourceTags : <Tag color="blue">API</Tag>}
+            loading={detailLoading}
+            title="��������"
+          >
+            {detail ? (
+              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                <Space size={[8, 8]} wrap>
+                  <Button
+                    disabled={!primaryConversation}
+                    onClick={() =>
+                      primaryConversation
+                        ? openWorkspacePage({
+                            accountId: primaryConversation.account_id,
+                            conversationKey: primaryConversation.conversation_id,
+                          })
+                        : undefined
+                    }
+                    size="small"
+                  >
+                    工作�?                  </Button>
+                  <Button
+                    disabled={!detailAccountId}
+                    onClick={() =>
+                      openUsersPage({
+                        account_id: detailAccountId,
+                        search: detail.profile.public_user_id,
+                        selected_user_id: detail.profile.id,
+                      })
+                    }
+                    size="small"
+                  >
+                    ����
+                  </Button>
+                  <Button
+                    disabled={!detailAccountId}
+                    onClick={() =>
+                      openSitesPage({
+                        account_id: detailAccountId,
+                        selected_site_key: detail.profile.registration_site_key ?? undefined,
+                      })
+                    }
+                    size="small"
+                  >
+                    վ��
+                  </Button>
+                  <Button
+                    onClick={() =>
+                      openAuditPage({
+                        account_id: detailAccountId,
+                        target_type: "platform_user",
+                        target_id: detail.profile.id,
+                        limit: 50,
+                      })
+                    }
+                    size="small"
+                  >
+                    ���
+                  </Button>
+                </Space>
+
+                <Descriptions bordered column={1} size="small">
+                  <Descriptions.Item label="����">
+                    {detail.profile.display_name || detail.profile.public_user_id}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="���� ID">
+                    {detail.profile.public_user_id}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="����">
+                    {detail.profile.account_id ?? "����"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="վ��">
+                    {detail.profile.registration_site_key ?? "����"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="����">
+                    {detail.profile.registration_site_domain ?? "����"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="���">
+                    {detail.profile.language_code}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="���">
+                    {renderCustomerFlags(detail.profile)}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="�€������?>
+                    {formatTimestamp(detail.profile.last_active_at)}
+                  </Descriptions.Item>
+                </Descriptions>
+
+                <Card size="small" title="���" extra={<Tag color="blue">API</Tag>}>
+                  <Space size={[8, 8]} wrap>
+                    {detail.identities.length > 0 ? (
+                      detail.identities.map((identity) => (
+                        <Tag key={`${identity.identity_type}:${identity.identity_value}`}>
+                          {`${identity.identity_type}:${identity.identity_value}`}
+                        </Tag>
+                      ))
+                    ) : (
+                      <Typography.Text type="secondary">����</Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+
+                <Card size="small" title="���" extra={<Tag color="blue">API</Tag>}>
+                  <Space size={[8, 8]} wrap>
+                    {detail.tags.length > 0 ? (
+                      detail.tags.map((tag) => <Tag key={tag.tag_key}>{tag.tag_key}</Tag>)
+                    ) : (
+                      <Typography.Text type="secondary">����</Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+
+                <Card size="small" title="�������������€? extra={<Tag color="blue">API</Tag>}>
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    {memberStatusError ? (
+                      <Alert message={memberStatusError} showIcon type="warning" />
+                    ) : null}
+                    {memberStatusLoading ? (
+                      <Typography.Text type="secondary">加载�?/Typography.Text>
+                    ) : latestVerification ? (
+                      <>
+                        <Descriptions bordered column={1} size="small">
+                          <Descriptions.Item label="���€?>
+                            <Tag color={getVerificationStatusColor(latestVerification.status)}>
+                              {getVerificationStatusLabel(latestVerification.status)}
+                            </Tag>
+                          </Descriptions.Item>
+                          <Descriptions.Item label="��֤����">
+                            {getVerificationTypeLabel(latestVerification.requestType)}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="������ע">
+                            {latestVerification.reviewNote ?? latestVerification.notes ?? "����"}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="�€�����������?>
+                            {formatTimestamp(latestVerification.updatedAt)}
+                          </Descriptions.Item>
+                        </Descriptions>
+                        <Space size={[8, 8]} wrap>
+                          <Typography.Text type="secondary">
+                            认֤记¼ {memberStatus?.verificationRequests.length ?? 0} �?                          </Typography.Text>
+                          <Button
+                            size="small"
+                            onClick={() =>
+                              openAuditPage({
+                                account_id: detail.profile.account_id ?? undefined,
+                                target_type: "member_verification_request",
+                                target_id: latestVerification.id,
+                                limit: 50,
+                              })
+                            }
+                          >
+                            ���
+                          </Button>
+                        </Space>
+                      </>
+                    ) : (
+                      <Typography.Text type="secondary">������Ա��֤��¼</Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+
+                <Card size="small" title="WhatsApp ��������€? extra={<Tag color="blue">API</Tag>}>
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    {memberStatusLoading ? (
+                      <Typography.Text type="secondary">加载�?/Typography.Text>
+                    ) : latestBinding ? (
+                      <>
+                        <Descriptions bordered column={1} size="small">
+                          <Descriptions.Item label="���€?>
+                            <Tag color={getBindingStatusColor(latestBinding.status)}>
+                              {getBindingStatusLabel(latestBinding.status)}
+                            </Tag>
+                          </Descriptions.Item>
+                          <Descriptions.Item label="��������">
+                            {latestBinding.requestedPhoneNumber ?? "����"}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="ʧ��ԭ��">
+                            {latestBinding.lastError ?? "����"}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="�€�����������?>
+                            {formatTimestamp(latestBinding.updatedAt)}
+                          </Descriptions.Item>
+                        </Descriptions>
+                        <Space size={[8, 8]} wrap>
+                          <Typography.Text type="secondary">
+                            绑定记¼ {memberStatus?.bindingRequests.length ?? 0} �?                          </Typography.Text>
+                          <Button
+                            size="small"
+                            onClick={() =>
+                              openAuditPage({
+                                account_id: detail.profile.account_id ?? undefined,
+                                target_type: "member_whatsapp_binding_request",
+                                target_id: latestBinding.id,
+                                limit: 50,
+                              })
+                            }
+                          >
+                            ���
+                          </Button>
+                        </Space>
+                      </>
+                    ) : (
+                      <Typography.Text type="secondary">���� WhatsApp ������¼</Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+
+                <Card size="small" title="��������" extra={<Tag color="cyan">����</Tag>}>
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    {detail.conversations.length > 0 ? (
+                      detail.conversations.map((conversation: CustomerConversationLink) => (
+                        <Card key={conversation.conversation_id} size="small">
+                          <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                            <Space size={[6, 6]} wrap>
+                              <Tag>{conversation.account_id}</Tag>
+                              {conversation.waba_id ? <Tag>{conversation.waba_id}</Tag> : null}
+                              {conversation.phone_number_id ? (
+                                <Tag>{conversation.phone_number_id}</Tag>
+                              ) : null}
+                              <Tag color={getConversationStatusColor(conversation.status)}>
+                                {getConversationStatusLabel(conversation.status)}
+                              </Tag>
+                              <Tag color={conversation.effective_ai_enabled ? "processing" : "default"}>
+                                {conversation.effective_ai_enabled ? "AI �����" : "AI ����?}
+                              </Tag>
+                              <Tag>{getConversationModeLabel(conversation.management_mode)}</Tag>
+                            </Space>
+                            <Typography.Text>
+                              {conversation.last_message_preview ?? "������Ϣ"}
+                            </Typography.Text>
+                            <Typography.Text type="secondary">
+                              {conversation.ai_reason}
+                            </Typography.Text>
+                            <Space wrap>
+                              <Typography.Text type="secondary">
+                                {formatTimestamp(conversation.last_message_at)}
+                              </Typography.Text>
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  openWorkspacePage({
+                                    accountId: conversation.account_id,
+                                    conversationKey: conversation.conversation_id,
+                                  })
+                                }
+                              >
+                                工作�?                              </Button>
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  openAuditPage({
+                                    account_id: conversation.account_id,
+                                    target_id: conversation.conversation_id,
+                                    limit: 50,
+                                  })
+                                }
+                              >
+                                ���
+                              </Button>
+                            </Space>
+                          </Space>
+                        </Card>
+                      ))
+                    ) : (
+                      <Typography.Text type="secondary">����</Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+
+                <Card size="small" title="��������" extra={<Tag color="cyan">����</Tag>}>
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    {detail.tickets.length > 0 ? (
+                      detail.tickets.map((ticket: CustomerTicketLink) => (
+                        <Card key={ticket.id} size="small">
+                          <Space direction="vertical" size={6}>
+                            <Space size={[6, 6]} wrap>
+                              <Tag>{ticket.account_id}</Tag>
+                              <Tag color={getTicketStatusColor(ticket.status)}>
+                                {getTicketStatusLabel(ticket.status)}
+                              </Tag>
+                              <Tag>{ticket.priority}</Tag>
+                            </Space>
+                            <Typography.Text>{ticket.subject}</Typography.Text>
+                            <Space wrap>
+                              <Typography.Text type="secondary">
+                                {formatTimestamp(ticket.updated_at)}
+                              </Typography.Text>
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  openAuditPage({
+                                    account_id: ticket.account_id,
+                                    target_id: ticket.id,
+                                    limit: 50,
+                                  })
+                                }
+                              >
+                                ���
+                              </Button>
+                            </Space>
+                          </Space>
+                        </Card>
+                      ))
+                    ) : (
+                      <Typography.Text type="secondary">����</Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">��������</Typography.Text>
+            )}
+          </Card>
+        </Col>
+      </Row>
+    </Space>
+  );
+}
+
