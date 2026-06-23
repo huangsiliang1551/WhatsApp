@@ -1,5 +1,7 @@
 from typing import Literal
 
+from sqlalchemy.exc import IntegrityError
+
 from app.core.metrics import (
     business_ai_replies_total,
     business_inbound_messages_total,
@@ -8,6 +10,7 @@ from app.core.metrics import (
     mock_inbound_messages_total,
 )
 from app.core.settings import Settings
+from app.db.models import Message
 from app.providers.factory import (
     get_ai_provider,
     get_ecommerce_provider,
@@ -24,6 +27,46 @@ from app.services.support_intent_service import SupportIntentDecision
 from app.services.support_knowledge_service import SupportKnowledgeService
 from app.services.support_router import SupportRouter
 from app.services.translation_service import TranslationService
+
+
+async def _build_deduplicated_result(
+    normalized: NormalizedMessage,
+    existing: Message,
+    runtime_state_store: RuntimeStateStore,
+) -> dict[str, object]:
+    """Build the standard "duplicate inbound ignored" response payload."""
+    return {
+        "inbound": normalized.model_dump(),
+        "translation": {
+            "source_language": None,
+            "console_language": None,
+            "console_text": normalized.text,
+        },
+        "account_id": normalized.account_id,
+        "outbound": {
+            "provider": None,
+            "provider_message_id": None,
+            "text": None,
+            "delivery_mode": "duplicate_inbound_ignored",
+        },
+        "ai": {
+            "provider": "none",
+            "model": "none",
+        },
+        "queue": None,
+        "runtime": await runtime_state_store.get_effective_ai_status(
+            normalized.account_id,
+            normalized.conversation_id,
+        ),
+        "intent": {
+            "intent_name": None,
+            "confidence": None,
+            "handover_recommended": False,
+            "handover_reason": None,
+        },
+        "deduplicated": True,
+        "existing_message_id": existing.id,
+    }
 
 
 async def process_inbound_message(
@@ -74,38 +117,9 @@ async def process_inbound_message(
                 provider=messaging_provider.provider_name,
                 outcome="duplicate",
             ).inc()
-            return {
-                "inbound": normalized.model_dump(),
-                "translation": {
-                    "source_language": None,
-                    "console_language": None,
-                    "console_text": normalized.text,
-                },
-                "account_id": normalized.account_id,
-                "outbound": {
-                    "provider": None,
-                    "provider_message_id": None,
-                    "text": None,
-                    "delivery_mode": "duplicate_inbound_ignored",
-                },
-                "ai": {
-                    "provider": "none",
-                    "model": "none",
-                },
-                "queue": None,
-                "runtime": await runtime_state_store.get_effective_ai_status(
-                    normalized.account_id,
-                    normalized.conversation_id,
-                ),
-                "intent": {
-                    "intent_name": None,
-                    "confidence": None,
-                    "handover_recommended": False,
-                    "handover_reason": None,
-                },
-                "deduplicated": True,
-                "existing_message_id": duplicate_message.id,
-            }
+            return await _build_deduplicated_result(
+                normalized, duplicate_message, runtime_state_store
+            )
     ecommerce_service = EcommerceService(
         provider=get_ecommerce_provider(settings),
         runtime_state=runtime_state_store,
@@ -143,24 +157,44 @@ async def process_inbound_message(
         customer_language_source="hint" if language_hint else "detected",
         provider_phone_number_id=normalized.phone_number_id,
     )
-    await runtime_state_store.record_inbound_message(
-        account_id=normalized.account_id,
-        conversation_id=normalized.conversation_id,
-        sender_id=normalized.user_id,
-        text=normalized.text,
-        language_code=detected_language,
-        translated_text=None,
-        translated_language_code=None,
-        message_type=normalized.message_type,
-        provider_message_id=normalized.external_message_id,
-        payload={
-            **normalized.model_dump(),
-            "intent_name": intent_decision.intent_name,
-            "intent_confidence": intent_decision.confidence,
-            "handover_recommended": intent_decision.handover_recommended,
-            "handover_reason": intent_decision.handover_reason,
-        },
-    )
+    try:
+        await runtime_state_store.record_inbound_message(
+            account_id=normalized.account_id,
+            conversation_id=normalized.conversation_id,
+            sender_id=normalized.user_id,
+            text=normalized.text,
+            language_code=detected_language,
+            translated_text=None,
+            translated_language_code=None,
+            message_type=normalized.message_type,
+            provider_message_id=normalized.external_message_id,
+            payload={
+                **normalized.model_dump(),
+                "intent_name": intent_decision.intent_name,
+                "intent_confidence": intent_decision.confidence,
+                "handover_recommended": intent_decision.handover_recommended,
+                "handover_reason": intent_decision.handover_reason,
+            },
+        )
+    except IntegrityError:
+        # Race condition: another worker inserted the same provider_message_id
+        # between our pre-check and commit. The DB unique constraint on
+        # ``messages.provider_message_id`` is the final authority. Roll back
+        # and return the already-stored message as a deduplicated result.
+        runtime_state_store.session.rollback()
+        existing = await runtime_state_store.get_message_model_by_provider_message_id(
+            normalized.account_id,
+            normalized.external_message_id,
+        )
+        if existing is not None:
+            business_inbound_messages_total.labels(
+                provider=messaging_provider.provider_name,
+                outcome="duplicate",
+            ).inc()
+            return await _build_deduplicated_result(
+                normalized, existing, runtime_state_store
+            )
+        raise
     business_inbound_messages_total.labels(
         provider=messaging_provider.provider_name,
         outcome="accepted",

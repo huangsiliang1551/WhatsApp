@@ -80,14 +80,23 @@ class RedisQueueProvider(QueueProvider):
         pipe.execute()
 
     def list_dead_letter_jobs(self, queue_name: QueueName | None = None) -> list[QueueJob]:
+        # Dead-letter keys are Redis *lists* (populated by rpush in
+        # ``move_to_dead_letter``), so we must read them with ``lrange``.
+        # Using ``GET`` on a list key raises WRONGTYPE. The scan pattern must
+        # match ``queue:*:dead_letter`` (the shape returned by
+        # ``_dead_letter_key``), not ``queue:dead:*``.
         jobs: list[QueueJob] = []
-        for key in self._client.scan_iter(match="queue:dead:*"):
-            if queue_name is not None and key != self._dead_letter_key(queue_name):
-                continue
-            payload = self._client.get(key)
-            if payload is None:
-                continue
-            jobs.append(QueueJob.model_validate_json(payload))
+        if queue_name is not None:
+            dead_keys = [self._dead_letter_key(queue_name)]
+        else:
+            dead_keys = list(self._client.scan_iter(match="queue:*:dead_letter"))
+
+        for dead_key in dead_keys:
+            job_ids = self._client.lrange(dead_key, 0, -1)
+            for job_id in job_ids:
+                job = self.get_job(job_id)
+                if job is not None:
+                    jobs.append(job)
         return jobs
 
     def requeue_dead_letter(self, job_id: str) -> QueueJob | None:

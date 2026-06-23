@@ -366,15 +366,27 @@ def test_runtime_state_rejects_invalid_jwt_even_if_legacy_actor_headers_are_pres
 def test_permission_center_rejects_header_only_actor_when_auth_is_required(
     strict_client: TestClient,
 ) -> None:
-    response = strict_client.get(
-        "/api/auth/permissions",
-        headers={
-            "X-Actor-Id": "legacy-header-admin",
-            "X-Actor-Role": "super_admin",
-        },
-    )
+    original_env = {"APP_ENV": os.environ.get("APP_ENV")}
+    try:
+        os.environ["APP_ENV"] = "production"
+        from app.core.settings import get_settings
 
-    assert response.status_code == 401
+        get_settings.cache_clear()
+        response = strict_client.get(
+            "/api/auth/permissions",
+            headers={
+                "X-Actor-Id": "legacy-header-admin",
+                "X-Actor-Role": "super_admin",
+            },
+        )
+
+        assert response.status_code == 401
+    finally:
+        if original_env["APP_ENV"] is None:
+            os.environ.pop("APP_ENV", None)
+        else:
+            os.environ["APP_ENV"] = original_env["APP_ENV"]
+        get_settings.cache_clear()
 
 
 def test_get_request_actor_ignores_legacy_headers_when_bearer_jwt_is_present(

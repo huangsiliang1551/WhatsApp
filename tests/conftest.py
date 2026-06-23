@@ -170,6 +170,39 @@ class StubMetaManagementProvider(MetaManagementProvider):
             message="Stub embedded-signup confirmation completed.",
         )
 
+    async def health_check(
+        self,
+        waba_id: str,
+        access_token: str,
+    ) -> dict[str, object]:
+        return {"status": "healthy", "waba_id": waba_id}
+
+    async def send_test_message(
+        self,
+        waba_id: str,
+        access_token: str,
+        phone_id: str,
+        to: str,
+        text: str,
+    ) -> dict[str, object]:
+        return {"status": "sent", "phone_id": phone_id, "to": to}
+
+    async def query_phone_detail(
+        self,
+        waba_id: str,
+        access_token: str,
+        phone_id: str,
+    ) -> dict[str, object]:
+        return {"waba_id": waba_id, "phone_id": phone_id}
+
+    async def query_business_profile(
+        self,
+        waba_id: str,
+        access_token: str,
+        phone_id: str,
+    ) -> dict[str, object]:
+        return {"waba_id": waba_id, "phone_id": phone_id}
+
 
 @pytest.fixture
 def override_meta_management_provider() -> Generator[

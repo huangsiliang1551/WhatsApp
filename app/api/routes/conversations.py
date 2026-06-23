@@ -52,6 +52,18 @@ def _raise_outbound_route_value_error(exc: ValueError) -> None:
     raise HTTPException(status_code=409, detail=detail) from exc
 
 
+def _apply_equal_filter(statement, column, value):
+    """Apply an equality filter that is portable across PostgreSQL and SQLite.
+
+    ``.is_(value)`` is only correct for ``NULL`` / boolean values; using it for
+    plain strings such as ``status='open'`` produces non-portable SQL. For
+    ordinary values we must use ``==``.
+    """
+    if value is None or isinstance(value, bool):
+        return statement.where(column.is_(value))
+    return statement.where(column == value)
+
+
 @router.get(
     "",
     summary="List conversations",
@@ -239,7 +251,7 @@ async def get_conversation_stats(
         q = base
         for k, v in filters.items():
             col = getattr(Conversation, k)
-            q = q.where(col.is_(v))
+            q = _apply_equal_filter(q, col, v)
         return db_session.scalar(q) or 0
 
     return {

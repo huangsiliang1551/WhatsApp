@@ -84,6 +84,41 @@ def get_db_session() -> Generator[Session, None, None]:
         session.close()
 
 
+def get_readonly_db_session() -> Generator[Session, None, None]:
+    """Read-only DB session: never auto-commits.
+
+    Use this for pure GET endpoints so incidental ORM attribute mutations are
+    never flushed to the database. Writes must use ``get_transactional_db_session``
+    or the existing ``get_db_session``.
+    """
+    session = get_sessionmaker()()
+    try:
+        yield session
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def get_transactional_db_session() -> Generator[Session, None, None]:
+    """Transactional DB session: commits on success, rolls back on error.
+
+    Services using this dependency must perform their writes within the
+    request scope; the commit happens automatically after the endpoint
+    returns.
+    """
+    session = get_sessionmaker()()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def get_db_session_with_isolation(
     request: Request,
     settings: Settings = Depends(get_settings),
@@ -116,6 +151,21 @@ def get_db_session_with_isolation(
         raise
     finally:
         session.close()
+
+
+def _allows_header_actor(settings: Settings) -> bool:
+    """Whether request actor headers (X-Actor-*) may be trusted.
+
+    Header actors are only accepted in development/test contexts. In production
+    (or any non-dev env with auth required), they must not be trusted so that
+    callers cannot forge identity by setting ``X-Actor-Role: super_admin``.
+    """
+    env = (settings.app_env or "").strip().lower()
+    return (
+        settings.test_mode
+        or not settings.auth_required
+        or env in {"development", "local", "dev"}
+    )
 
 
 def _build_request_actor(
@@ -177,11 +227,22 @@ def _build_request_actor(
                     detail=f"Unsupported JWT user_type '{jwt_user_type}'.",
                 )
             role_value = mapped_role
-    elif require_bearer_token and settings.auth_required:
+    elif require_bearer_token and settings.auth_required and not _allows_header_actor(settings):
+        # In production (or any non-dev env with auth required), a permission
+        # endpoint must not accept forged X-Actor-* headers as identity.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Bearer token is required.",
         )
+    elif not token_present:
+        # Defense-in-depth: reject header-only actors outside dev/test even on
+        # non-strict (get_request_actor) paths.
+        has_actor_headers = bool(actor_id or role_value or display_name or account_scope)
+        if has_actor_headers and not _allows_header_actor(settings):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Request actor headers are not accepted outside development/test mode.",
+            )
 
     if not actor_id or not role_value:
         if settings.test_mode or not settings.auth_required:
@@ -275,7 +336,7 @@ def _build_request_actor(
 
 
 def require_permission(permission_code: str):
-    def dependency(actor: RequestActor = Depends(get_request_actor)) -> RequestActor:
+    def dependency(actor: RequestActor = Depends(get_strict_request_actor)) -> RequestActor:
         actor.require_permission(permission_code)
         return actor
 

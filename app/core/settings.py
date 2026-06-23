@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     sleeping_threshold_hours: int = Field(default=48, alias="SLEEPING_THRESHOLD_HOURS")
     media_storage_root: str = Field(default="storage/media-assets", alias="MEDIA_STORAGE_ROOT")
     task_proof_storage_root: str = Field(default="storage/task-proofs", alias="TASK_PROOF_STORAGE_ROOT")
+    # Static template preview / upload directories (P2-03: no hard-coded paths).
+    template_static_root: str = Field(
+        default="/opt/whatsapp/static/templates",
+        alias="TEMPLATE_STATIC_ROOT",
+    )
+    template_upload_root: str = Field(
+        default="/opt/whatsapp/uploads/templates",
+        alias="TEMPLATE_UPLOAD_ROOT",
+    )
 
     ai_provider: str = Field(default="openai", alias="AI_PROVIDER")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
@@ -92,7 +101,13 @@ class Settings(BaseSettings):
     ai_context_max_total_chars: int = Field(default=4000, alias="AI_CONTEXT_MAX_TOTAL_CHARS")
 
     # AI provider config DB encryption & cache
-    ai_config_encryption_key: str = Field(default="", alias="AI_CONFIG_ENCRY_KEY")
+    ai_config_encryption_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "AI_CONFIG_ENCRYPTION_KEY",
+            "AI_CONFIG_ENCRY_KEY",
+        ),
+    )
     ai_config_cache_ttl_seconds: int = Field(default=60, alias="AI_CONFIG_CACHE_TTL_SECONDS")
     ai_config_db_enabled: bool = Field(default=True, alias="AI_CONFIG_DB_ENABLED")
 

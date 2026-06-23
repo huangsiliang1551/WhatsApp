@@ -187,12 +187,22 @@ async def sleeping_scanner(settings) -> None:
             db = SessionLocal()
             try:
                 threshold = utc_now() - timedelta(hours=threshold_hours)
-                # Batch-scan conversations: is_sleeping=False, status=open, last_customer_message_at < threshold
+                # Batch-scan conversations: is_sleeping=False, status=open,
+                # last_customer_message_at < threshold.
+                #
+                # We must NOT use offset pagination here: every iteration
+                # mutates the matched rows (sets is_sleeping=True), so an
+                # offset would skip rows that still match the original
+                # condition. Instead we repeatedly take the first batch until
+                # none remain.
+                #
+                # We also must not wrap ``Query.update()`` in ``db.execute()``:
+                # ``Query.update()`` already executes and returns a rowcount,
+                # so passing it to ``db.execute()`` raises a runtime error.
                 batch_size = 200
-                offset = 0
                 total_marked = 0
                 while True:
-                    stmt = (
+                    conversations = (
                         db.query(Conversation)
                         .filter(
                             Conversation.is_sleeping.is_(False),
@@ -200,29 +210,25 @@ async def sleeping_scanner(settings) -> None:
                             Conversation.last_customer_message_at.isnot(None),
                             Conversation.last_customer_message_at < threshold,
                         )
-                        .order_by(Conversation.account_id)
-                        .offset(offset)
+                        .order_by(Conversation.account_id, Conversation.id)
                         .limit(batch_size)
+                        .all()
                     )
-                    conversations = stmt.all()
                     if not conversations:
                         break
                     for conv in conversations:
                         conv.is_sleeping = True
-                        # Mark messages older than threshold as cold
-                        db.execute(
-                            db.query(db_models.Message)
-                            .filter(
-                                db_models.Message.conversation_id == conv.id,
-                                db_models.Message.is_cold.is_(False),
-                                db_models.Message.created_at < threshold,
-                            )
-                            .update({"is_cold": True}, synchronize_session=False)
-                        )
+                        # Mark messages older than threshold as cold.
+                        # Use Query.update() directly (returns rowcount), do
+                        # NOT wrap in db.execute().
+                        db.query(db_models.Message).filter(
+                            db_models.Message.conversation_id == conv.id,
+                            db_models.Message.is_cold.is_(False),
+                            db_models.Message.created_at < threshold,
+                        ).update({"is_cold": True}, synchronize_session=False)
                         db.add(conv)
                     db.commit()
                     total_marked += len(conversations)
-                    offset += batch_size
                 if total_marked > 0:
                     logger.info("sleeping_scanner_marked", count=total_marked, threshold_utc=threshold.isoformat())
             finally:

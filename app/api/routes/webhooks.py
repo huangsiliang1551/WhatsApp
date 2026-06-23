@@ -82,6 +82,18 @@ def _is_whatsapp_provider_mode(settings: Settings) -> bool:
     return settings.messaging_provider.strip().lower() == "whatsapp"
 
 
+def _should_verify_webhook_signature(settings: Settings) -> bool:
+    """Whether inbound webhook signatures must be verified.
+
+    Production always enforces signature verification, even when
+    ``WEBHOOK_SIGNATURE_ENABLED=false``. Development/test/mock environments
+    may disable it for local integration work.
+    """
+    if (settings.app_env or "").strip().lower() == "production":
+        return True
+    return bool(settings.webhook_signature_enabled)
+
+
 async def _assert_whatsapp_webhook_delivery_ready(
     *,
     settings: Settings,
@@ -798,6 +810,14 @@ async def _receive_whatsapp_webhook_for_scope(
 
     if not _is_whatsapp_provider_mode(settings):
         signature_verified = True
+    elif not _should_verify_webhook_signature(settings):
+        # Dev/test/mock may disable signature verification for local work.
+        logger.warning(
+            "webhook_signature_verification_disabled",
+            app_env=settings.app_env,
+            messaging_provider=settings.messaging_provider,
+        )
+        signature_verified = True
     elif not signature_verified:
         signature_header = signature_header or ""
         if app_secret:
@@ -1085,35 +1105,25 @@ async def _receive_whatsapp_webhook_for_scope(
             )
             continue
 
-        # BE2-007: Message dedup check
+        # BE2-007: Message dedup is now enforced by the service layer + DB
+        # unique constraint on ``messages.provider_message_id``. The previous
+        # in-memory set was not safe across workers/restarts, so it must not
+        # gate production processing. ``_reset_message_dedup`` is kept only as
+        # a test helper.
         message_id = normalized.external_message_id or ""
-        if _is_message_deduplicated(message_id):
-            logger.warning(
-                "webhook_deduplicated_message_skipped",
-                account_id=account_id,
-                waba_id=waba_id,
-                message_id=message_id,
-            )
-            continue
-        _mark_message_processed(message_id)
 
         # BE2-009: Download and store inbound media
         await media_processor.process_inbound_media(normalized)
 
         try:
-            results.append(
-                await process_inbound_message(
-                    normalized,
-                    messaging_provider=provider,
-                    requested_mode="ai",
-                    settings=settings,
-                    runtime_state_store=runtime_state_store,
-                    translation_service=translation_service,
-                    queue_service=queue_service,
-                )
-            )
-            accepted_message_phone_counts[normalized.phone_number_id or "unknown"] = (
-                accepted_message_phone_counts.get(normalized.phone_number_id or "unknown", 0) + 1
+            process_result = await process_inbound_message(
+                normalized,
+                messaging_provider=provider,
+                requested_mode="ai",
+                settings=settings,
+                runtime_state_store=runtime_state_store,
+                translation_service=translation_service,
+                queue_service=queue_service,
             )
         except Exception:
             processing_failures += 1
@@ -1128,6 +1138,26 @@ async def _receive_whatsapp_webhook_for_scope(
                 message_id=message_id,
             )
             raise
+
+        if process_result.get("deduplicated"):
+            # Duplicate delivery: the service layer returned the existing
+            # message. Do not count it as a newly accepted message.
+            business_inbound_messages_total.labels(
+                provider=provider.provider_name,
+                outcome="duplicate",
+            ).inc()
+            logger.info(
+                "webhook_deduplicated_message_skipped",
+                account_id=account_id,
+                waba_id=waba_id,
+                message_id=message_id,
+            )
+            continue
+
+        results.append(process_result)
+        accepted_message_phone_counts[normalized.phone_number_id or "unknown"] = (
+            accepted_message_phone_counts.get(normalized.phone_number_id or "unknown", 0) + 1
+        )
 
     matched_status_updates = 0
     accepted_status_updates = 0
@@ -1400,7 +1430,15 @@ async def receive_whatsapp_webhook_root(
 
     # --- signature validation (whatsapp mode only) ---
     signature_verified = False
-    if _is_whatsapp_provider_mode(settings):
+    if _is_whatsapp_provider_mode(settings) and not _should_verify_webhook_signature(settings):
+        # Dev/test/mock may disable signature verification for local work.
+        logger.warning(
+            "webhook_signature_verification_disabled",
+            app_env=settings.app_env,
+            messaging_provider=settings.messaging_provider,
+        )
+        signature_verified = True
+    elif _is_whatsapp_provider_mode(settings):
         if unique_secrets:
             app_secret = unique_secrets[0]
             if signature_header:

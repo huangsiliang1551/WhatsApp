@@ -258,13 +258,15 @@ app.add_middleware(
     ],
 )
 
-# ── Static files: template preview ──
+# ── Static files: template preview (P2-03: paths from settings, not hard-coded) ──
 import os
-_static_dir = "/opt/whatsapp/static/templates"
-_upload_dir = "/opt/whatsapp/uploads/templates"
+from pathlib import Path
+
+_static_dir = Path(settings.template_static_root).expanduser()
+_upload_dir = Path(settings.template_upload_root).expanduser()
 os.makedirs(_static_dir, exist_ok=True)
 os.makedirs(_upload_dir, exist_ok=True)
-app.mount("/templates", StaticFiles(directory=_static_dir), name="templates")
+app.mount("/templates", StaticFiles(directory=str(_static_dir)), name="templates")
 
 
 @app.middleware("http")
@@ -365,7 +367,11 @@ app.include_router(ai_providers_router)
 app.include_router(health_router)
 app.include_router(metrics_router)
 app.include_router(notifications_router)
-app.include_router(dev_router)
+# P2-01: dev/mock routes are only registered outside production so they can
+# never be reached in a production deployment (returns 404 instead of relying
+# on in-route checks alone).
+if settings.app_env.strip().lower() != "production" or settings.test_mode:
+    app.include_router(dev_router)
 app.include_router(queue_router)
 app.include_router(exports_router)
 app.include_router(h5_auth_router)
