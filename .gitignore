@@ -11,3 +11,12 @@ frontend/dist/
 *.egg-info/
 .backend.pid
 .tmp_restore/
+*.log
+*.pid
+frontend/*.log
+frontend/*.pid
+frontend/screenshot*.png
+frontend/.codex-artifacts/
+frontend/.codex-h5-audit/
+frontend/.stubs_backup/
+backend-restart.*.log
