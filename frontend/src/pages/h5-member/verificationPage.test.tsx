@@ -206,4 +206,30 @@ describe("VerificationPage", () => {
 
     expect(onOpenVerificationRequest).toHaveBeenCalledWith("vr-latest");
   });
+
+  it("surfaces a preparation checklist before the submission form and history", async () => {
+    await renderVerificationPage();
+
+    const prepHeading = screen.getByText(t("verification.prepTitle"));
+    const submitHeading = screen.getByText(t("verification.submitRequest"));
+    const historyHeading = screen.getByText(t("verification.applicationHistory"));
+
+    expect(prepHeading.compareDocumentPosition(submitHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(submitHeading.compareDocumentPosition(historyHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText(t("verification.prepIdentityTitle"))).toBeTruthy();
+    expect(screen.getByText(t("verification.prepPhotoTitle"))).toBeTruthy();
+    expect(screen.getByText(t("verification.prepReviewTitle"))).toBeTruthy();
+  });
+
+  it("opens support from the verification form when the member needs help", async () => {
+    const onNavigate = vi.fn();
+
+    await renderVerificationPage({
+      onNavigate,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: t("verification.openSupport") }));
+
+    expect(onNavigate).toHaveBeenCalledWith("/h5/tickets/new");
+  });
 });

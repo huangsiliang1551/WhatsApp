@@ -65,7 +65,9 @@ function parseRoute(locationKey: string): ParsedRoute {
   if (parts[1] === "invite") return { page: "invite", siteKey };
   if (parts[1] === "messages") return { page: "messages", siteKey };
   if (parts[1] === "me" && parts[2] === "settings") return { page: "settings", siteKey };
+  if (parts[1] === "profile" && parts[2] === "settings") return { page: "settings", siteKey };
   if (parts[1] === "me") return { page: "profile", siteKey };
+  if (parts[1] === "profile") return { page: "profile", siteKey };
   if (parts[1] === "wallet" || parts[1] === "recharge") return { page: "recharge", siteKey };
   if (parts[1] === "withdraw") return { page: "withdraw", siteKey };
   if (parts[1] === "orders") return { page: "orders", siteKey };
@@ -647,7 +649,7 @@ export function H5App({ locationKey, navigate }: H5AppProps): JSX.Element {
               chatMessages={s.chatMessages}
               chatLoading={s.chatLoading}
               chatHasMore={s.chatHasMore}
-              onSendMessage={(content, type) => s.handleSendMessage(content, type)}
+              onSendMessage={(content, type, imageUrl) => s.handleSendMessage(content, type, imageUrl)}
               onLoadMoreMessages={() => s.handleLoadMoreMessages()}
               onRefreshMessages={() => s.handleRefreshMessages()}
               onBack={() => s.navigate(s.secondaryBackPath)}

@@ -101,7 +101,7 @@ export function HomePage({
             <button
               aria-label={t("profile.title")}
               className="h5-member-home-status-avatar"
-              onClick={() => onNavigate("/h5/profile")}
+              onClick={() => onNavigate("/h5/me")}
               type="button"
             >
               {statusInitial}
@@ -261,7 +261,7 @@ export function HomePage({
             actionLabel={t("common.viewAll")}
             meta={t("home.cumulativeRankings")}
             onClick={() => onNavigate("/h5/leaderboard")}
-            sideNote={`Top ${dashboard.leaderboard.length}`}
+            sideNote={t("home.leaderboardTopCount", { count: dashboard.leaderboard.length })}
             title={t("home.withdrawLeaderboard")}
             tone="active"
           />

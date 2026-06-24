@@ -2,9 +2,10 @@ import { type JSX, type ChangeEvent, type FormEvent, useState } from "react";
 import { UserOutlined } from "@ant-design/icons";
 
 import type { H5HomeDashboard } from "../../services/h5Member";
-import { PasswordField, SectionHeader } from "./sharedComponents";
+import { CompactListRow, DetailGrid, PasswordField, SectionHeader } from "./sharedComponents";
 import { t } from "./i18n";
 import { ProfileSkeleton } from "./skeletons";
+import { formatTimestamp, getVerificationStatusLabel } from "./sharedUtils";
 
 function validatePhone(value: string): string {
   const cleaned = value.replace(/\s/g, "");
@@ -131,8 +132,20 @@ export function SettingsPage({
     }
   }
 
+  const overviewItems = [
+    { label: t('settings.overviewIdentityLabel'), value: dashboard.member.displayName || dashboard.member.accountIdMasked },
+    { label: t('settings.overviewPhoneLabel'), value: settingsPhone || dashboard.member.phone || "--" },
+    { label: t('settings.overviewVerificationLabel'), value: getVerificationStatusLabel(dashboard.verification.currentStatus) },
+    { label: t('settings.overviewMemberSinceLabel'), value: formatTimestamp(dashboard.member.createdAt) },
+  ];
+
   return (
     <section className="h5-card-stack">
+      <article className="h5-card h5-member-settings-overview-card">
+        <SectionHeader meta={t('settings.overviewMeta')} title={t('settings.overviewTitle')} />
+        <DetailGrid items={overviewItems} />
+      </article>
+
       <article className="h5-card">
         <SectionHeader meta={t('settings.profileManagement')} title={t('settings.title')} />
         <form className="h5-form h5-card-stack" onSubmit={(event) => void handleSaveProfile(event)}>
@@ -170,6 +183,29 @@ export function SettingsPage({
           {profileSaveSuccess ? <span className="h5-field-success">{t('notification.profileUpdated')}</span> : null}
           {profileSaveError ? <span className="h5-field-error">{profileSaveError}</span> : null}
         </form>
+      </article>
+
+      <article className="h5-card h5-member-settings-checklist-card">
+        <SectionHeader meta={t('settings.securityChecklistMeta')} title={t('settings.securityChecklistTitle')} />
+        <div className="h5-card-stack">
+          <CompactListRow
+            title={t('settings.securityPhoneTitle')}
+            subtitle={t('settings.securityPhoneDesc')}
+            value={settingsPhone || dashboard.member.phone || "--"}
+          />
+          <CompactListRow
+            title={t('settings.securityPasswordTitle')}
+            subtitle={t('settings.securityPasswordDesc')}
+            value={t('settings.securityPasswordValue')}
+            tone="active"
+          />
+          <CompactListRow
+            title={t('settings.securityReviewTitle')}
+            subtitle={t('settings.securityReviewDesc')}
+            value={getVerificationStatusLabel(dashboard.verification.currentStatus)}
+            tone={dashboard.verification.currentStatus === "approved" || dashboard.verification.currentStatus === "verified" ? "success" : "default"}
+          />
+        </div>
       </article>
 
       <article className="h5-card">

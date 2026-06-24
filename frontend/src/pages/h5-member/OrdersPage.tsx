@@ -1,9 +1,9 @@
-import { type JSX } from "react";
-import { ShoppingOutlined } from "@ant-design/icons";
+import { type JSX, useMemo } from "react";
+import { CustomerServiceOutlined, ProfileOutlined, ShoppingOutlined } from "@ant-design/icons";
 
 import type { H5MemberOrder } from "../../services/h5Member";
 import { formatMoney, formatTimestamp } from "./sharedUtils";
-import { CompactListRow, EmptyStateCard, InfiniteScroll, PullToRefresh, SectionHeader } from "./sharedComponents";
+import { CompactListRow, EmptyStateCard, InfiniteScroll, PullToRefresh, QuickActionCard, SectionHeader } from "./sharedComponents";
 import { t } from "./i18n";
 import { ListSkeleton } from "./skeletons";
 
@@ -46,8 +46,58 @@ export function OrdersPage({
   loading = false,
 }: OrdersPageProps): JSX.Element {
   if (loading) return <ListSkeleton count={4} />;
+  const paidCount = useMemo(() => filteredOrders.filter((item) => item.status === "paid").length, [filteredOrders]);
+  const failedCount = useMemo(() => filteredOrders.filter((item) => item.status === "failed").length, [filteredOrders]);
+  const processingCount = useMemo(
+    () => filteredOrders.filter((item) => item.status === "processing" || item.status === "pending").length,
+    [filteredOrders],
+  );
+  const nextStepValue = failedCount > 0
+    ? t('orders.overviewNextStepFailed')
+    : processingCount > 0
+      ? t('orders.overviewNextStepProcessing')
+      : t('orders.overviewNextStepClear');
+
   return (
     <section className="h5-card-stack">
+      <article className="h5-card h5-member-orders-overview-card">
+        <SectionHeader meta={t('orders.overviewMeta')} title={t('orders.overviewTitle')} />
+        <div className="h5-member-orders-overview-grid">
+          <div className="h5-member-orders-overview-metric">
+            <span>{t('orders.overviewPaidLabel')}</span>
+            <strong>{paidCount}</strong>
+          </div>
+          <div className="h5-member-orders-overview-metric">
+            <span>{t('orders.overviewProcessingLabel')}</span>
+            <strong>{processingCount}</strong>
+          </div>
+          <div className="h5-member-orders-overview-metric">
+            <span>{t('orders.overviewFailedLabel')}</span>
+            <strong>{failedCount}</strong>
+          </div>
+          <div className="h5-member-orders-overview-metric">
+            <span>{t('orders.overviewNextStepLabel')}</span>
+            <strong>{nextStepValue}</strong>
+          </div>
+        </div>
+        <div className="h5-member-quick-grid">
+          <QuickActionCard
+            title={t('orders.overviewTaskShortcutTitle')}
+            body={t('orders.overviewTaskShortcutBody')}
+            icon={<ProfileOutlined />}
+            meta={t('orders.overviewTaskShortcutMeta')}
+            onClick={() => onNavigate("/h5/tasks")}
+          />
+          <QuickActionCard
+            title={t('orders.overviewSupportShortcutTitle')}
+            body={t('orders.overviewSupportShortcutBody')}
+            icon={<CustomerServiceOutlined />}
+            meta={t('orders.overviewSupportShortcutMeta')}
+            onClick={() => onNavigate("/h5/tickets/new")}
+          />
+        </div>
+      </article>
+
       <article className="h5-card">
         <SectionHeader meta={t('orders.count', { count: filteredOrders.length })} title={t('orders.title')} />
         <p className="muted">{t('orders.desc')}</p>

@@ -3,7 +3,7 @@ import { GiftOutlined, LinkOutlined, UserOutlined, WhatsAppOutlined } from "@ant
 
 import type { H5InviteInfo, H5InviteRecord } from "../../services/h5Member";
 import { formatMoney, formatTimestamp } from "./sharedUtils";
-import { EmptyStateCard, SectionHeader } from "./sharedComponents";
+import { CompactListRow, DetailGrid, EmptyStateCard, SectionHeader } from "./sharedComponents";
 import { t } from "./i18n";
 import { DetailSkeleton } from "./skeletons";
 
@@ -24,6 +24,8 @@ export function InvitePage({
   onCopyText,
   onRetry,
 }: InvitePageProps): JSX.Element {
+  const inviteProgressValue = `${inviteInfo.invitedCount}/${inviteInfo.maxInvites}`;
+
   function handleWhatsAppShare(): void {
     const shareUrl = `https://wa.me/?text=${encodeURIComponent(`${t("tasks.inviteShareText")}\n${inviteInfo.inviteLink}`)}`;
     window.open(shareUrl, "_blank", "noopener,noreferrer");
@@ -56,17 +58,36 @@ export function InvitePage({
 
   return (
     <section className="h5-card-stack">
-      <article className="h5-card h5-invite-hero">
-        <div className="h5-invite-hero-icon">
-          <GiftOutlined />
+      <article className="h5-card h5-invite-program-card">
+        <SectionHeader meta={t("tasks.inviteProgramMeta")} title={t("tasks.inviteProgramTitle")} />
+
+        <div className="h5-invite-program-hero">
+          <div className="h5-invite-hero-icon">
+            <GiftOutlined />
+          </div>
+          <div className="h5-invite-program-copy">
+            <strong>{t("tasks.inviteTitle")}</strong>
+            <p>{t("tasks.inviteProgramDesc")}</p>
+          </div>
         </div>
-        <h2>{t("tasks.inviteTitle")}</h2>
-        <p>{t("tasks.inviteReward1", { amount: formatMoney(2) })}</p>
-        <p>{t("tasks.inviteReward2", { threshold: formatMoney(30), amount: formatMoney(3) })}</p>
+
+        <div className="h5-member-task-chip-row">
+          <span className="h5-member-inline-pill">{t("tasks.inviteReward1", { amount: formatMoney(2) })}</span>
+          <span className="h5-member-inline-pill">{t("tasks.inviteReward2", { threshold: formatMoney(30), amount: formatMoney(3) })}</span>
+        </div>
+
+        <DetailGrid
+          items={[
+            { label: t("tasks.inviteStatsInvitedLabel"), value: String(inviteInfo.invitedCount) },
+            { label: t("tasks.inviteStatsEarnedLabel"), value: formatMoney(inviteInfo.earnedAmount) },
+            { label: t("tasks.inviteProgress"), value: inviteProgressValue },
+            { label: t("tasks.inviteCapacity"), value: String(inviteInfo.maxInvites) },
+          ]}
+        />
       </article>
 
-      <article className="h5-card">
-        <SectionHeader title={t("tasks.inviteMyLink")} />
+      <article className="h5-card h5-invite-action-card">
+        <SectionHeader meta={t("tasks.inviteActionsMeta")} title={t("tasks.inviteMyLink")} />
         <div className="h5-invite-link-box">
           <span>{inviteInfo.inviteLink}</span>
           <button className="seed-button seed-button-secondary" onClick={handleCopyLink} type="button">
@@ -78,23 +99,31 @@ export function InvitePage({
             <WhatsAppOutlined /> {t("tasks.inviteWhatsAppShare")}
           </button>
         </div>
+        <div className="h5-invite-action-foot">
+          <span className="h5-member-inline-pill">
+            {t("tasks.inviteStatsRemainingLabel")}: {inviteInfo.remainingInvites}
+          </span>
+          <span className="h5-member-inline-pill">
+            {t("tasks.inviteProgress")}: {inviteProgressValue}
+          </span>
+        </div>
       </article>
 
       <article className="h5-card">
-        <SectionHeader title={t("tasks.inviteStatsTitle")} />
-        <div className="h5-invite-stats-grid">
-          <div className="h5-invite-stat-card">
-            <strong>{inviteInfo.invitedCount}</strong>
-            <span>{t("tasks.inviteStatsInvitedLabel")}</span>
-          </div>
-          <div className="h5-invite-stat-card">
-            <strong>{formatMoney(inviteInfo.earnedAmount)}</strong>
-            <span>{t("tasks.inviteStatsEarnedLabel")}</span>
-          </div>
-          <div className="h5-invite-stat-card">
-            <strong>{inviteInfo.remainingInvites}</strong>
-            <span>{t("tasks.inviteStatsRemainingLabel")}</span>
-          </div>
+        <SectionHeader meta={t("tasks.inviteRulesMeta")} title={t("tasks.inviteRulesTitle")} />
+        <div className="h5-card-stack">
+          <CompactListRow
+            meta={t("tasks.inviteRuleRegistrationMeta")}
+            title={t("tasks.inviteRuleRegistrationTitle")}
+            tone="success"
+            value={t("tasks.inviteEarned", { amount: formatMoney(2) })}
+          />
+          <CompactListRow
+            meta={t("tasks.inviteRuleRechargeMeta", { threshold: formatMoney(30) })}
+            title={t("tasks.inviteRuleRechargeTitle")}
+            tone="active"
+            value={t("tasks.inviteEarned", { amount: formatMoney(3) })}
+          />
         </div>
       </article>
 
@@ -102,22 +131,18 @@ export function InvitePage({
         <SectionHeader meta={`${inviteRecords.length} ${t("common.records")}`} title={t("tasks.inviteRecords")} />
         <div className="h5-card-stack">
           {inviteRecords.length > 0 ? (
-            inviteRecords.map((record) => (
-              <div className="h5-invite-record-item" key={record.id}>
+            inviteRecords.map((record: H5InviteRecord) => (
+              <div className="h5-invite-record-row" key={record.id}>
                 <span aria-hidden="true" className="h5-invite-record-icon">
                   <UserOutlined />
                 </span>
-                <div className="h5-invite-record-info">
-                  <strong>{record.userIdMasked}</strong>
-                  <span>
-                    {record.type === "registration" ? t("tasks.inviteRegistered") : t("tasks.inviteRecharged")}
-                    {" · "}
-                    {formatTimestamp(record.createdAt)}
-                  </span>
-                </div>
-                <span className="h5-invite-record-reward">
-                  {t("tasks.inviteEarned", { amount: record.rewardAmount.toFixed(2) })}
-                </span>
+                <CompactListRow
+                  badge={record.type === "registration" ? t("tasks.inviteRecordRegistered") : t("tasks.inviteRecordRecharged")}
+                  meta={formatTimestamp(record.createdAt)}
+                  title={record.userIdMasked}
+                  tone={record.type === "registration" ? "success" : "active"}
+                  value={t("tasks.inviteEarned", { amount: formatMoney(record.rewardAmount) })}
+                />
               </div>
             ))
           ) : (

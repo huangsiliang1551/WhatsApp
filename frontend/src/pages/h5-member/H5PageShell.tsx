@@ -86,6 +86,24 @@ export function H5PageShell(props: H5PageShellProps): JSX.Element {
   } = props;
 
   const { isOnline, isWeakNetwork } = useNetworkStatus();
+  const preferredLocale =
+    dashboard?.site.default_language?.trim()
+    || session?.languageCode?.trim()
+    || getCurrentLocale();
+
+  // Keep translations aligned with the site's runtime language even when no manual preference is stored yet.
+  if (typeof window !== "undefined") {
+    try {
+      if (window.localStorage?.getItem("h5-lang") !== preferredLocale) {
+        window.localStorage.setItem("h5-lang", preferredLocale);
+      }
+    } catch {
+      // Ignore storage failures and still fall back to document-level locale sync below.
+    }
+  }
+
+  syncDocumentLocale(preferredLocale);
+
   const isWhatsAppRoute = route.page === "whatsapp";
   const isHomeRoute = route.page === "home";
   const contentClassName = isWhatsAppRoute ? "h5-member-content h5-member-content-chat" : "h5-member-content";
@@ -108,8 +126,8 @@ export function H5PageShell(props: H5PageShellProps): JSX.Element {
   const homeAvatarLabel = homeTopbarTitle.slice(0, 1).toUpperCase();
 
   useEffect(() => {
-    syncDocumentLocale();
-  });
+    syncDocumentLocale(preferredLocale);
+  }, [preferredLocale]);
 
   useRootScrollUnlock();
 

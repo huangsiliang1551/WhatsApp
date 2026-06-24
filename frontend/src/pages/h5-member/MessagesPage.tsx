@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type JSX } from "react";
-import { BellOutlined, CloseOutlined } from "@ant-design/icons";
+import { BellOutlined, CloseOutlined, CustomerServiceOutlined, ProfileOutlined } from "@ant-design/icons";
 
 import { t } from "./i18n";
 import { ListSkeleton } from "./skeletons";
@@ -10,7 +10,7 @@ import {
   getCurrentLocale,
   isImportantMessage,
 } from "./sharedUtils";
-import { EmptyStateCard, InfiniteScroll, MessageFeedItem, PullToRefresh, SectionHeader } from "./sharedComponents";
+import { EmptyStateCard, InfiniteScroll, MessageFeedItem, PullToRefresh, QuickActionCard, SectionHeader } from "./sharedComponents";
 
 type MessagesPageProps = {
   messages: H5MessageItem[];
@@ -54,14 +54,9 @@ function formatRelativeTime(value: string | null): string {
   }).format(new Date(value));
 }
 
-const categoryColors: Record<string, string> = {
-  task: "#1677ff",
-  wallet: "#52c41a",
-  order: "#fa8c16",
-  support: "#722ed1",
-  fragment: "#eb2f96",
-  system: "#8c8c8c",
-};
+function getMessageCategoryToneClass(category: H5MessageItem["category"]): string {
+  return `h5-member-msg-detail-category-${category}`;
+}
 
 function MessageDetailOverlay({
   item,
@@ -91,8 +86,7 @@ function MessageDetailOverlay({
       >
         <div className="h5-member-msg-detail-head">
           <span
-            className="h5-member-msg-detail-category"
-            style={{ color: categoryColors[item.category] ?? "#8c8c8c" }}
+            className={`h5-member-msg-detail-category ${getMessageCategoryToneClass(item.category)}`}
           >
             {getMessageCategoryLabel(item.category)}
           </span>
@@ -121,9 +115,17 @@ export function MessagesPage({
   onRetry,
 }: MessagesPageProps): JSX.Element {
   const [detailMessage, setDetailMessage] = useState<H5MessageItem | null>(null);
+  const unreadInFeed = useMemo(() => messages.filter((item) => !item.isRead).length, [messages]);
+  const importantMessages = useMemo(() => messages.filter((item) => isImportantMessage(item)), [messages]);
+  const priorityUnreadCount = useMemo(
+    () => importantMessages.filter((item) => !item.isRead).length,
+    [importantMessages],
+  );
+  const readCount = Math.max(0, messages.length - unreadInFeed);
+  const nextStepLabel = unreadMessageCount > 0 ? t("messages.overviewNextStepUnread") : t("messages.overviewNextStepClear");
 
   const messageSections = useMemo(() => {
-    const important = messages.filter((item) => isImportantMessage(item));
+    const important = importantMessages;
     const other = messages.filter((item) => !isImportantMessage(item));
 
     return [
@@ -157,7 +159,7 @@ export function MessagesPage({
         groups: buildMessageGroups(other),
       },
     ];
-  }, [messages, onNavigate]);
+  }, [importantMessages, messages, onNavigate]);
 
   const handleItemClick = useCallback(
     async (item: H5MessageItem) => {
@@ -197,6 +199,46 @@ export function MessagesPage({
   return (
     <PullToRefresh onRefresh={async () => onPageChange(1)}>
       <section className="h5-card-stack">
+        <article className="h5-card h5-member-message-overview-card">
+          <SectionHeader title={t("messages.overviewTitle")} meta={t("messages.overviewMeta")} />
+
+          <div className="h5-member-message-overview-grid">
+            <div className="h5-member-message-overview-metric">
+              <span>{t("messages.overviewUnreadLabel")}</span>
+              <strong>{unreadMessageCount}</strong>
+            </div>
+            <div className="h5-member-message-overview-metric">
+              <span>{t("messages.overviewPriorityLabel")}</span>
+              <strong>{priorityUnreadCount}</strong>
+            </div>
+            <div className="h5-member-message-overview-metric">
+              <span>{t("messages.overviewReadLabel")}</span>
+              <strong>{readCount}</strong>
+            </div>
+            <div className="h5-member-message-overview-metric">
+              <span>{t("messages.overviewNextStepLabel")}</span>
+              <strong>{nextStepLabel}</strong>
+            </div>
+          </div>
+
+          <div className="h5-member-quick-grid">
+            <QuickActionCard
+              title={t("messages.taskShortcutTitle")}
+              body={t("messages.taskShortcutBody")}
+              icon={<ProfileOutlined />}
+              meta={t("messages.taskShortcutMeta")}
+              onClick={() => onNavigate("/h5/tasks")}
+            />
+            <QuickActionCard
+              title={t("messages.supportShortcutTitle")}
+              body={t("messages.supportShortcutBody")}
+              icon={<CustomerServiceOutlined />}
+              meta={t("messages.supportShortcutMeta")}
+              onClick={() => onNavigate("/h5/tickets/new")}
+            />
+          </div>
+        </article>
+
         <article className="h5-card">
           <SectionHeader
             title={t("messages.messageCenter")}

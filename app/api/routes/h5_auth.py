@@ -119,6 +119,10 @@ async def refresh_h5_member_session(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    if not tokens.session_token:
+        tokens.session_token = request.cookies.get(settings.h5_member_session_cookie_name) or ""
+    if not tokens.refresh_token:
+        tokens.refresh_token = request.cookies.get(settings.h5_member_refresh_cookie_name) or ""
     _set_auth_cookies(response=response, tokens=tokens, settings=settings)
     return auth_service.build_auth_response(context)
 

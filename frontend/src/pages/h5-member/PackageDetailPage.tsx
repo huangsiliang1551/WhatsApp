@@ -57,9 +57,24 @@ export function PackageDetailPage({
           : t("tasks.productRunning");
   const progressSteps = [
     { key: "ordering", label: t("tasks.progressOrdering") },
-    { key: "paying", label: t("tasks.progressPaying", { amount: formatMoney(balanceProduct?.price ?? 0, balanceProduct?.currency ?? "USD") }) },
+    {
+      key: "paying",
+      label: t("tasks.progressPaying", {
+        amount: formatMoney(balanceProduct?.price ?? 0, balanceProduct?.currency ?? "USD"),
+      }),
+    },
     { key: "paid", label: t("tasks.progressPaid") },
     { key: "checking", label: t("tasks.progressChecking") },
+  ];
+  const balanceLabelParts = [
+    {
+      label: t("tasks.needAmount", { amount: "" }).replace(/[:：]\s*$/, ""),
+      value: formatMoney(balanceProduct?.price ?? 0, balanceProduct?.currency ?? "USD"),
+    },
+    {
+      label: t("tasks.currentBalance", { amount: "" }).replace(/[:：]\s*$/, ""),
+      value: formatMoney(instance.systemBalance),
+    },
   ];
 
   function getProductStatusLabel(status: H5TaskProductStatus): string {
@@ -190,7 +205,7 @@ export function PackageDetailPage({
               cls = "active";
               icon = <LoadingOutlined />;
             } else {
-              icon = <span style={{ opacity: 0.3 }}>⬜</span>;
+              icon = <span aria-hidden="true" className="h5-progress-step-icon-placeholder">○</span>;
             }
             return (
               <div className={`h5-progress-step ${cls}`} key={step.key}>
@@ -206,7 +221,7 @@ export function PackageDetailPage({
           ) : null}
           {progressFailed ? (
             <>
-              <p style={{ color: "#ff4d4f", textAlign: "center", marginTop: 12, fontSize: 14 }}>
+              <p className="h5-package-progress-status h5-package-progress-status-error">
                 <CloseCircleOutlined /> {progressFailureReason ?? t("common.failed")}
               </p>
               <div className="h5-member-card-actions">
@@ -229,7 +244,7 @@ export function PackageDetailPage({
               </div>
             </>
           ) : current > 4 ? (
-            <p style={{ color: "#52c41a", textAlign: "center", marginTop: 12, fontSize: 14 }}>
+            <p className="h5-package-progress-status h5-package-progress-status-success">
               <CheckCircleOutlined /> {t("common.success")}
             </p>
           ) : null}
@@ -246,18 +261,20 @@ export function PackageDetailPage({
           <div className="h5-balance-dialog-icon"><WarningOutlined /></div>
           <h3>{t("tasks.insufficientBalance")}</h3>
           <div className="h5-balance-dialog-amounts">
-            <span>
-              <span className="amount-value">{formatMoney(balanceProduct.price, balanceProduct.currency)}</span>
-              <span className="amount-label">{t("tasks.needAmount", { amount: "" }).replace(": ¥", "")}</span>
-            </span>
-            <span>
-              <span className="amount-value">{formatMoney(instance.systemBalance)}</span>
-              <span className="amount-label">{t("tasks.currentBalance", { amount: "" }).replace(": ¥", "")}</span>
-            </span>
+            {balanceLabelParts.map((item) => (
+              <span key={item.label}>
+                <span className="amount-value">{item.value}</span>
+                <span className="amount-label">{item.label}</span>
+              </span>
+            ))}
           </div>
           <div className="h5-member-card-actions">
-            <button className="seed-button" onClick={() => onNavigate("/h5/wallet")} type="button">{t("tasks.goRecharge")}</button>
-            <button className="seed-button seed-button-secondary" onClick={() => setShowBalanceDialog(false)} type="button">{t("common.cancel")}</button>
+            <button className="seed-button" onClick={() => onNavigate("/h5/wallet")} type="button">
+              {t("tasks.goRecharge")}
+            </button>
+            <button className="seed-button seed-button-secondary" onClick={() => setShowBalanceDialog(false)} type="button">
+              {t("common.cancel")}
+            </button>
           </div>
         </article>
       </div>
@@ -268,12 +285,16 @@ export function PackageDetailPage({
     return (
       <section className="h5-card-stack">
         <article className="h5-card h5-package-celebration">
-          <div className="h5-package-celebration-icon">🎉</div>
-          <h2>{t("tasks.packageCompleted")}</h2>
-          <p>{t("tasks.rewardSent", { amount: formatMoney(instance.rewardAmount) })}</p>
+          <div aria-hidden="true" className="h5-package-celebration-icon">🎉</div>
+          <h2>{t("serviceMessages.packageCompletedTitle", { title: instance.title })}</h2>
+          <p>{t("serviceMessages.packageCompletedBody")}</p>
           <div className="h5-package-celebration-actions">
-            <button className="seed-button" onClick={() => onNavigate("/h5/wallet")} type="button">{t("tasks.viewBalance")}</button>
-            <button className="seed-button seed-button-secondary" onClick={() => onNavigate("/h5/tasks")} type="button">{t("tasks.backToTaskList")}</button>
+            <button className="seed-button" onClick={() => onNavigate("/h5/wallet")} type="button">
+              {t("tasks.viewBalance")}
+            </button>
+            <button className="seed-button seed-button-secondary" onClick={() => onNavigate("/h5/tasks")} type="button">
+              {t("tasks.backToTaskList")}
+            </button>
           </div>
         </article>
       </section>
@@ -298,11 +319,12 @@ export function PackageDetailPage({
             { label: t("tasks.countdown"), value: formatCountdown(countdownSeconds) },
           ]}
         />
-        <div className="h5-member-progress" style={{ margin: "12px 0" }}>
+        <div className="h5-member-progress h5-package-summary-progress">
           <div className="h5-member-progress-fill" style={{ width: `${progressPercent}%` }} />
         </div>
         <div className="h5-package-reward-row">
-          🎁 {t("tasks.expectedCommission", { amount: formatMoney(totalCommission) })}
+          <span aria-hidden="true" className="h5-package-reward-icon">💰</span>
+          <span>{t("tasks.expectedCommission", { amount: formatMoney(totalCommission) })}</span>
         </div>
         <p className="h5-package-note-copy">{t("tasks.detailRewardArrival")}</p>
         <div className="h5-package-balance-row">
@@ -310,7 +332,7 @@ export function PackageDetailPage({
           <strong>{formatMoney(instance.systemBalance)}</strong>
         </div>
         {claimOnly ? (
-          <div className="h5-member-card-actions" style={{ marginTop: 12 }}>
+          <div className="h5-member-card-actions h5-package-inline-actions">
             <button className="seed-button" onClick={() => onOpenClaimDialog?.(instance.id)} type="button">
               {t("shell.confirmClaimBtn")}
             </button>
@@ -435,7 +457,7 @@ export function PackageDetailPage({
           <span>{t("tasks.detailCountdownNotice")}</span>
           <span>{t("tasks.detailBalanceNotice")}</span>
         </div>
-        <div className="h5-member-card-actions" style={{ marginTop: 12 }}>
+        <div className="h5-member-card-actions h5-package-inline-actions">
           <button className="seed-button" onClick={() => onNavigate("/h5/tickets/new")} type="button">
             {t("tasks.contactSupport")}
           </button>

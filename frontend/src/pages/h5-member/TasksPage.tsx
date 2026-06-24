@@ -56,7 +56,7 @@ export function TasksPage({
           <p className="h5-signin-goal">{t("tasks.signInGoal", { n: goalDays, amount: goalReward.toFixed(2) })}</p>
           <div className="h5-signin-progress-row">
             <div className="h5-member-progress">
-              <div className="h5-member-progress-fill" style={{ width: "100%", background: "#52c41a" }} />
+              <div className="h5-member-progress-fill h5-signin-progress-fill-complete" style={{ width: "100%" }} />
             </div>
             <span className="h5-signin-count">{t("tasks.consecutiveDays", { n: consecutiveDays })}</span>
           </div>
@@ -73,7 +73,7 @@ export function TasksPage({
         <p className="h5-signin-goal">{t("tasks.signInGoal", { n: goalDays, amount: goalReward.toFixed(2) })}</p>
         <div className="h5-signin-progress-row">
           <div className="h5-member-progress">
-            <div className="h5-member-progress-fill" style={{ width: `${progress}%` }} />
+            <div className="h5-member-progress-fill h5-signin-progress-fill-active" style={{ width: `${progress}%` }} />
           </div>
           <span className="h5-signin-count">{`${consecutiveDays}/${goalDays}`}</span>
         </div>
@@ -171,11 +171,11 @@ export function TasksPage({
           ]}
         />
 
-        <div className="h5-member-progress" style={{ marginTop: 12 }}>
+        <div className="h5-member-progress h5-task-card-progress">
           <div className="h5-member-progress-fill" style={{ width: `${progress}%` }} />
         </div>
 
-        <div className="h5-member-card-actions" style={{ marginTop: 12 }}>
+        <div className="h5-member-card-actions h5-task-card-actions">
           <button className="seed-button" onClick={handlePrimaryAction} type="button">
             {isAvailable ? t("tasks.claim") : t("tasks.viewPackage")}
           </button>
@@ -306,7 +306,7 @@ export function TasksPage({
 
         {error ? (
           <article className="h5-card">
-            <p style={{ color: "var(--color-error, #ff4d4f)", fontSize: 14 }}>{error}</p>
+            <p className="h5-task-error-copy">{error}</p>
           </article>
         ) : null}
 

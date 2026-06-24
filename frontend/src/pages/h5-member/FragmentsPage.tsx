@@ -6,7 +6,7 @@ import {
   formatTimestamp,
   getShippingStatusLabel, ShippingFormState,
 } from "./sharedUtils";
-import { CompactListRow, EmptyStateCard, SectionHeader } from "./sharedComponents";
+import { CompactListRow, DetailGrid, EmptyStateCard, SectionHeader } from "./sharedComponents";
 import { t } from "./i18n";
 import { DetailSkeleton } from "./skeletons";
 
@@ -63,6 +63,34 @@ export function FragmentsPage({
 
   return (
     <section className="h5-card-stack">
+      <article className="h5-card h5-member-fragment-overview-card">
+        <SectionHeader meta={t('fragments.overviewMeta')} title={t('fragments.overviewTitle')} />
+        <DetailGrid
+          items={[
+            {
+              label: t('fragments.overviewCollectedLabel'),
+              value: `${fragmentCompletion.completed}/${fragmentCompletion.total}`,
+            },
+            {
+              label: t('fragments.overviewMissingLabel'),
+              value: fragmentCompletion.missing > 0 ? t('fragments.missing', { count: fragmentCompletion.missing }) : t('fragments.canExchange'),
+            },
+            {
+              label: t('fragments.overviewShippingLabel'),
+              value: latestShippingOrder ? getShippingStatusLabel(latestShippingOrder.status) : t('fragments.noShipping'),
+            },
+            {
+              label: t('fragments.overviewNextStepLabel'),
+              value: canExchangeFragments
+                ? t('fragments.overviewNextStepAddress')
+                : latestShippingOrder
+                  ? t('fragments.overviewNextStepShipping')
+                  : t('fragments.overviewNextStepCollect'),
+            },
+          ]}
+        />
+      </article>
+
       <article className="h5-card h5-member-fragment-hero">
         <SectionHeader
           action={
@@ -99,6 +127,30 @@ export function FragmentsPage({
               <small>{item.rarity}</small>
             </article>
           ))}
+        </div>
+      </article>
+
+      <article className="h5-card h5-member-fragment-prep-card">
+        <SectionHeader meta={t('fragments.prepMeta')} title={t('fragments.prepTitle')} />
+        <div className="h5-card-stack">
+          <CompactListRow
+            title={t('fragments.prepReceiverTitle')}
+            subtitle={t('fragments.prepReceiverDesc')}
+            value={shippingForm.receiver ? t('common.done') : t('fragments.notCollected')}
+            tone={shippingForm.receiver ? "success" : "default"}
+          />
+          <CompactListRow
+            title={t('fragments.prepAddressTitle')}
+            subtitle={t('fragments.prepAddressDesc')}
+            value={shippingForm.addressLine ? t('common.done') : t('fragments.pendingAddress')}
+            tone={shippingForm.addressLine ? "success" : "default"}
+          />
+          <CompactListRow
+            title={t('fragments.prepShippingTitle')}
+            subtitle={t('fragments.prepShippingDesc')}
+            value={latestShippingOrder ? getShippingStatusLabel(latestShippingOrder.status) : t('fragments.noShipping')}
+            tone={latestShippingOrder ? "active" : "default"}
+          />
         </div>
       </article>
 

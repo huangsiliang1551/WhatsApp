@@ -391,6 +391,19 @@ describe("Shared utilities", () => {
     expect(css).toMatch(/@media \(max-width:\s*420px\)[\s\S]*\.h5-member-topbar-title-group span\s*\{[\s\S]*overflow:\s*hidden/);
   });
 
+  it("stacks auth support cards into a single column on narrow phones so long localized helper copy stays readable", () => {
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+
+    expect(css).toMatch(/@media \(max-width:\s*420px\)[\s\S]*\.h5-member-auth-support-grid\s*\{[\s\S]*grid-template-columns:\s*1fr/);
+  });
+
+  it("stacks message and order overview metric grids on mobile so translated KPI cards do not squeeze into two columns", () => {
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.h5-member-message-overview-grid[\s\S]*grid-template-columns:\s*1fr/);
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.h5-member-orders-overview-grid[\s\S]*grid-template-columns:\s*1fr/);
+  });
+
   it("reserves bottom cta clearance above the fixed tabbar for short mobile forms", () => {
     const css = readFileSync("src/styles/h5-member.css", "utf8");
 
@@ -477,11 +490,28 @@ describe("Shared utilities", () => {
     expect(css).toMatch(/\.h5-balance-dialog \.h5-balance-dialog-amounts span\s*\{[\s\S]*min-width:\s*112px/);
   });
 
-  it("caps promotion label columns on mobile so translated field names do not crush the value column", () => {
+  it("shrinks progress overlays and lets translated status copy wrap on 320-360px phones", () => {
     const css = readFileSync("src/styles/h5-member.css", "utf8");
 
-    expect(css).toMatch(/\.h5-member-promotion-cell\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*42%\)\s+minmax\(0,\s*1fr\)/);
-    expect(css).toMatch(/\.h5-member-promotion-cell::before\s*\{[\s\S]*overflow-wrap:\s*anywhere/);
+    expect(css).toMatch(/@media \(max-width:\s*360px\)[\s\S]*\.h5-progress-modal\s*\{[\s\S]*width:\s*min\(100%, 280px\)/);
+    expect(css).toMatch(/@media \(max-width:\s*360px\)[\s\S]*\.h5-progress-modal\s*\{[\s\S]*padding:\s*24px 16px/);
+    expect(css).toMatch(/@media \(max-width:\s*360px\)[\s\S]*\.h5-package-progress-status\s*\{[\s\S]*flex-wrap:\s*wrap/);
+  });
+
+  it("lets promotion record rows wrap translated labels inside a mobile-safe stacked card layout", () => {
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+
+    expect(css).toMatch(/\.h5-member-promotion-record-row\s+\.h5-member-list-row-title strong,\s*[\s\S]*overflow-wrap:\s*anywhere/);
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.h5-member-promotion-record-row \.h5-member-list-row\s*\{[\s\S]*padding:\s*14px/);
+    expect(css).toMatch(/@media \(max-width:\s*640px\)[\s\S]*\.h5-member-promotion-record-row \.h5-member-list-row-subtitle,[\s\S]*white-space:\s*normal/);
+  });
+
+  it("stacks invite actions and record rows on narrow phones so multilingual copy stays readable", () => {
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+
+    expect(css).toMatch(/@media \(max-width:\s*420px\)[\s\S]*\.h5-invite-actions\s*\{[\s\S]*flex-direction:\s*column/);
+    expect(css).toMatch(/@media \(max-width:\s*420px\)[\s\S]*\.h5-invite-actions button\s*\{[\s\S]*width:\s*100%/);
+    expect(css).toMatch(/@media \(max-width:\s*420px\)[\s\S]*\.h5-invite-record-row\s*\{[\s\S]*grid-template-columns:\s*1fr/);
   });
 
   it("lays out withdraw inline actions as a real flex row and stacks them on narrow phones for long translations", () => {
@@ -576,6 +606,18 @@ describe("Shared utilities", () => {
     expect(css).toMatch(/\.h5-pull-shell\s*\{/);
     expect(css).toMatch(/\.h5-pull-indicator\s*\{[\s\S]*justify-content:\s*center/);
     expect(css).toMatch(/\.h5-pull-indicator\s*\{[\s\S]*min-height:\s*40px/);
+    expect(css).toMatch(/\.h5-pull-indicator-icon\s*\{[\s\S]*margin-inline-end:\s*6px/);
+
+    fireEvent.touchStart(pullWrapper, { touches: [{ clientY: 0 }] });
+    fireEvent.touchMove(pullWrapper, { touches: [{ clientY: 120 }] });
+    fireEvent.touchEnd(pullWrapper);
+
+    await waitFor(() => {
+      const loadingText = screen.getByText(t("common.loading"));
+      const loadingIcon = loadingText.parentElement?.querySelector(".h5-pull-indicator-icon");
+      expect(loadingIcon).toBeTruthy();
+      expect(loadingIcon?.getAttribute("style")).toBeNull();
+    });
   });
 
   it("compacts profile hero and task card chrome for ultra-narrow phones", () => {
@@ -595,6 +637,14 @@ describe("Shared utilities", () => {
     expect(css).toMatch(/@media \(max-width:\s*360px\)[\s\S]*\.h5-member-wallet-balance-card \.h5-member-balance-card-actions\s*\{[\s\S]*width:\s*100%/);
   });
 
+  it("stacks package product rows on ultra-narrow phones so long titles and action buttons do not collide", () => {
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+
+    expect(css).toMatch(/@media \(max-width:\s*360px\)[\s\S]*\.h5-package-product-item\s*\{[\s\S]*align-items:\s*flex-start/);
+    expect(css).toMatch(/@media \(max-width:\s*360px\)[\s\S]*\.h5-package-product-item\s*\{[\s\S]*flex-wrap:\s*wrap/);
+    expect(css).toMatch(/@media \(max-width:\s*360px\)[\s\S]*\.h5-package-product-btn\s*\{[\s\S]*width:\s*100%/);
+  });
+
   it("keeps wallet balance labels on their local typography instead of inheriting summary-card hero sizing", () => {
     const css = readFileSync("src/styles/h5-member.css", "utf8");
 
@@ -602,6 +652,246 @@ describe("Shared utilities", () => {
     expect(css).toMatch(/\.h5-member-wallet-balance-card \.h5-member-balance-card-label\s*\{[\s\S]*color:\s*#64748b/);
     expect(css).toMatch(/\.h5-member-wallet-balance-card \.h5-member-balance-card-value\s*\{[\s\S]*font-size:\s*18px/);
     expect(css).toMatch(/\.h5-member-wallet-balance-card \.h5-member-balance-card-value\s*\{[\s\S]*color:\s*#0f172a/);
+  });
+
+  it("uses dedicated infinite-scroll feedback classes instead of inline loader and end-state styles", async () => {
+    const { InfiniteScroll } = await import("./sharedComponents");
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+    const onLoadMore = vi.fn();
+
+    const { rerender } = render(
+      <InfiniteScroll hasMore loading onLoadMore={onLoadMore}>
+        <div>Feed content</div>
+      </InfiniteScroll>,
+    );
+
+    const sentinel = document.querySelector(".h5-infinite-scroll-sentinel") as HTMLDivElement | null;
+    const loadingState = screen.getByText(t("common.loading")).closest(".h5-infinite-scroll-loading");
+    const loadingIcon = loadingState?.querySelector(".h5-infinite-scroll-loading-icon");
+
+    expect(sentinel).toBeTruthy();
+    expect(sentinel?.getAttribute("style")).toBeNull();
+    expect(loadingState).toBeTruthy();
+    expect(loadingState?.getAttribute("style")).toBeNull();
+    expect(loadingIcon).toBeTruthy();
+    expect(css).toMatch(/\.h5-infinite-scroll-sentinel\s*\{[\s\S]*height:\s*1px/);
+    expect(css).toMatch(/\.h5-infinite-scroll-loading\s*\{[\s\S]*text-align:\s*center/);
+    expect(css).toMatch(/\.h5-infinite-scroll-loading-icon\s*\{[\s\S]*margin-inline-end:\s*6px/);
+
+    rerender(
+      <InfiniteScroll hasMore={false} loading={false} onLoadMore={onLoadMore}>
+        <div>Feed content</div>
+      </InfiniteScroll>,
+    );
+
+    const endState = screen.getByText(t("common.noMore")).closest(".h5-infinite-scroll-end");
+
+    expect(endState).toBeTruthy();
+    expect(endState?.getAttribute("style")).toBeNull();
+    expect(css).toMatch(/\.h5-infinite-scroll-end\s*\{[\s\S]*font-size:\s*13px/);
+  });
+
+  it("uses dedicated error-boundary fallback classes instead of inline positioning and button sizing", async () => {
+    const { ErrorBoundary } = await import("./ErrorBoundary");
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    function ThrowingChild(): JSX.Element {
+      throw new Error("render failed");
+    }
+
+    render(
+      <ErrorBoundary>
+        <ThrowingChild />
+      </ErrorBoundary>,
+    );
+
+    const shell = screen.getByText(t("errorBoundary.title")).closest("section");
+    const refreshButton = screen.getByRole("button", { name: t("errorBoundary.refresh") });
+
+    expect(shell).toBeTruthy();
+    expect(shell?.className).toContain("h5-error-boundary-shell");
+    expect(shell?.getAttribute("style")).toBeNull();
+    expect(refreshButton.className).toContain("h5-error-boundary-refresh");
+    expect(refreshButton.getAttribute("style")).toBeNull();
+    expect(css).toMatch(/\.h5-error-boundary-shell\s*\{[\s\S]*justify-content:\s*center/);
+    expect(css).toMatch(/\.h5-error-boundary-refresh\s*\{[\s\S]*min-width:\s*120px/);
+
+    errorSpy.mockRestore();
+  });
+
+  it("uses dedicated skeleton variant classes instead of inline placeholder sizing across shared loading states", async () => {
+    const { HomeSkeleton } = await import("./skeletons/HomeSkeleton");
+    const { ListSkeleton } = await import("./skeletons/ListSkeleton");
+    const { DetailSkeleton } = await import("./skeletons/DetailSkeleton");
+    const { ProfileSkeleton } = await import("./skeletons/ProfileSkeleton");
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+
+    const { container } = render(
+      <>
+        <HomeSkeleton />
+        <ListSkeleton count={2} />
+        <DetailSkeleton />
+        <ProfileSkeleton />
+      </>,
+    );
+
+    expect(container.querySelector(".h5-skeleton-card-home-hero")).toBeTruthy();
+    expect(container.querySelector(".h5-skeleton-card-list-item")).toBeTruthy();
+    expect(container.querySelector(".h5-skeleton-card-detail-hero")).toBeTruthy();
+    expect(container.querySelector(".h5-skeleton-card-profile-hero")).toBeTruthy();
+    expect(container.querySelector(".h5-skeleton-profile-hero-copy")).toBeTruthy();
+    expect(container.querySelector(".h5-skeleton-grid-profile-actions")).toBeTruthy();
+
+    container.querySelectorAll<HTMLElement>(".h5-skeleton-card, .h5-skeleton-row, .h5-skeleton-grid, .h5-skeleton-profile-hero-copy")
+      .forEach((node) => {
+        expect(node.getAttribute("style")).toBeNull();
+      });
+
+    expect(css).toMatch(/\.h5-skeleton-card-home-hero\s*\{[\s\S]*height:\s*100px/);
+    expect(css).toMatch(/\.h5-skeleton-card-list-item\s*\{[\s\S]*height:\s*80px/);
+    expect(css).toMatch(/\.h5-skeleton-card-detail-hero\s*\{[\s\S]*height:\s*180px/);
+    expect(css).toMatch(/\.h5-skeleton-card-profile-hero\s*\{[\s\S]*display:\s*flex/);
+    expect(css).toMatch(/\.h5-skeleton-grid-profile-actions\s*\{[\s\S]*margin-top:\s*8px/);
+  });
+
+  it("uses dedicated image-viewer zoom cursor classes instead of inline cursor styling", async () => {
+    const { ImageViewer } = await import("./ImageViewer");
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+    const timeMarks = [1000, 1200, 1200, 1200];
+    const dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => timeMarks.shift() ?? 1200);
+
+    const { container } = render(
+      <ImageViewer
+        images={["https://example.com/proof-a.jpg", "https://example.com/proof-b.jpg"]}
+        onClose={() => undefined}
+      />,
+    );
+
+    const content = container.querySelector(".h5-image-viewer-content") as HTMLDivElement | null;
+    const image = container.querySelector(".h5-image-viewer-img") as HTMLImageElement | null;
+
+    expect(content).toBeTruthy();
+    expect(image).toBeTruthy();
+    expect(image?.className).not.toContain("h5-image-viewer-img-zoomed");
+    expect(image?.getAttribute("style") ?? "").toContain("transform:");
+    expect(image?.getAttribute("style") ?? "").not.toContain("cursor:");
+
+    fireEvent.click(content!);
+    fireEvent.click(content!);
+
+    await waitFor(() => {
+      expect((container.querySelector(".h5-image-viewer-img") as HTMLImageElement | null)?.className).toContain("h5-image-viewer-img-zoomed");
+    });
+    expect(image?.getAttribute("style") ?? "").not.toContain("cursor:");
+    expect(css).toMatch(/\.h5-image-viewer-img\s*\{[\s\S]*cursor:\s*default/);
+    expect(css).toMatch(/\.h5-image-viewer-img-zoomed\s*\{[\s\S]*cursor:\s*grab/);
+
+    dateNowSpy.mockRestore();
+  });
+
+  it("uses a dedicated close icon in the image viewer instead of raw fallback glyph text", async () => {
+    const { ImageViewer } = await import("./ImageViewer");
+
+    const { container } = render(
+      <ImageViewer
+        images={["https://example.com/proof-a.jpg"]}
+        onClose={() => undefined}
+      />,
+    );
+
+    const closeButton = container.querySelector(".h5-image-viewer-close") as HTMLButtonElement | null;
+    const closeIcon = container.querySelector(".h5-image-viewer-close .anticon-close");
+
+    expect(closeIcon).toBeTruthy();
+    expect(closeButton).toBeTruthy();
+    expect(closeButton?.textContent?.trim()).toBe("");
+  });
+
+  it("uses a dedicated hidden input class in media uploader instead of inline display rules", async () => {
+    const { MediaUploader } = await import("./MediaUploader");
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+    const { container } = render(
+      <MediaUploader accept="image/*" compress={false} multiple onUpload={() => undefined} />,
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+
+    expect(input).toBeTruthy();
+    expect(input?.className).toContain("h5-media-input");
+    expect(input?.getAttribute("style")).toBeNull();
+    expect(css).toMatch(/\.h5-media-input\s*\{[\s\S]*display:\s*none/);
+  });
+
+  it("renders compression size copy with a dedicated arrow node instead of loose fallback text", async () => {
+    const createObjectUrl = vi.fn(() => "blob:test");
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: createObjectUrl,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: revokeObjectUrl,
+    });
+
+    const originalImage = globalThis.Image;
+    const originalGetContext = HTMLCanvasElement.prototype.getContext;
+    const originalToBlob = HTMLCanvasElement.prototype.toBlob;
+
+    class MockImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      width = 1600;
+      height = 900;
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+
+    Object.defineProperty(globalThis, "Image", {
+      configurable: true,
+      writable: true,
+      value: MockImage,
+    });
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      drawImage: vi.fn(),
+    })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    HTMLCanvasElement.prototype.toBlob = vi.fn((callback: BlobCallback) => {
+      callback?.(new Blob(["compressed"], { type: "image/jpeg" }));
+    }) as typeof HTMLCanvasElement.prototype.toBlob;
+
+    const { MediaUploader } = await import("./MediaUploader");
+    const largeFile = new File([new Uint8Array(1024 * 1024 + 32)], "proof-large.png", { type: "image/png" });
+    const { container } = render(
+      <MediaUploader accept="image/*" multiple={false} onUpload={() => undefined} />,
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(input).toBeTruthy();
+    fireEvent.change(input!, { target: { files: [largeFile] } });
+
+    await waitFor(() => {
+      const arrow = container.querySelector(".h5-media-compression-arrow");
+      const sizeCopy = container.querySelector(".h5-media-preview-size");
+
+      expect(arrow).toBeTruthy();
+      expect(arrow?.textContent).toBe("->");
+      expect(sizeCopy?.textContent).toContain("1.0 MB");
+      expect(sizeCopy?.textContent).toContain("10 B");
+    });
+
+    Object.defineProperty(globalThis, "Image", {
+      configurable: true,
+      writable: true,
+      value: originalImage,
+    });
+    HTMLCanvasElement.prototype.getContext = originalGetContext;
+    HTMLCanvasElement.prototype.toBlob = originalToBlob;
   });
 });
 
@@ -668,6 +958,99 @@ describe("MessagesPage", () => {
     expect(screen.getByText(t("messages.otherMessages"))).toBeTruthy();
     expect(screen.getByText("Task update")).toBeTruthy();
     expect(screen.getByText("Fragment drop")).toBeTruthy();
+  });
+
+  it("surfaces an inbox overview and service shortcuts before grouped message sections", async () => {
+    const { MessagesPage } = await import("./MessagesPage");
+    const onNavigate = vi.fn();
+
+    render(
+      <MessagesPage
+        messages={[
+          {
+            id: "msg-task",
+            category: "task",
+            title: "Task update",
+            body: "Complete your current package",
+            createdAt: "2026-06-23T08:00:00.000Z",
+            isRead: false,
+          },
+          {
+            id: "msg-wallet",
+            category: "wallet",
+            title: "Wallet review",
+            body: "Balance settlement completed",
+            createdAt: "2026-06-22T08:00:00.000Z",
+            isRead: true,
+          },
+        ]}
+        unreadMessageCount={1}
+        actionName={null}
+        siteKey="mall-cn"
+        loading={false}
+        error={null}
+        currentPage={1}
+        totalMessages={2}
+        onMarkAllRead={vi.fn().mockResolvedValue(undefined)}
+        onOpenMessage={vi.fn().mockResolvedValue(undefined)}
+        onNavigate={onNavigate}
+        onPageChange={() => undefined}
+        onRetry={() => undefined}
+      />,
+    );
+
+    const overviewHeading = screen.getByText(t("messages.overviewTitle"));
+    const importantHeading = screen.getByText(t("messages.importantNotice"));
+
+    expect(overviewHeading.compareDocumentPosition(importantHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText(t("messages.overviewUnreadLabel"))).toBeTruthy();
+    expect(screen.getByText(t("messages.overviewPriorityLabel"))).toBeTruthy();
+    expect(screen.getByText(t("messages.overviewReadLabel"))).toBeTruthy();
+    expect(screen.getByText(t("messages.overviewNextStepLabel"))).toBeTruthy();
+
+    fireEvent.click(screen.getByText(t("messages.taskShortcutTitle")));
+    fireEvent.click(screen.getByText(t("messages.supportShortcutTitle")));
+
+    expect(onNavigate).toHaveBeenNthCalledWith(1, "/h5/tasks");
+    expect(onNavigate).toHaveBeenNthCalledWith(2, "/h5/tickets/new");
+  });
+
+  it("uses dedicated message category tone classes inside the detail overlay instead of inline colors", async () => {
+    const { MessagesPage } = await import("./MessagesPage");
+
+    const { container } = render(
+      <MessagesPage
+        messages={[
+          {
+            id: "msg-support",
+            category: "support",
+            title: "Support update",
+            body: "A new reply is waiting",
+            createdAt: "2026-06-23T08:00:00.000Z",
+            isRead: false,
+          },
+        ]}
+        unreadMessageCount={1}
+        actionName={null}
+        siteKey="mall-cn"
+        loading={false}
+        error={null}
+        currentPage={1}
+        totalMessages={1}
+        onMarkAllRead={vi.fn().mockResolvedValue(undefined)}
+        onOpenMessage={vi.fn().mockResolvedValue(undefined)}
+        onNavigate={() => undefined}
+        onPageChange={() => undefined}
+        onRetry={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Support update"));
+
+    const categoryBadge = container.querySelector(".h5-member-msg-detail-category");
+
+    expect(categoryBadge?.className).toContain("h5-member-msg-detail-category-support");
+    expect(categoryBadge?.getAttribute("style")).toBeNull();
   });
 
   it("does not render a duplicate in-page mark all read button when the shell owns the primary action", async () => {
@@ -980,6 +1363,83 @@ describe("OrdersPage", () => {
     expect(screen.queryByText(/处理中/)).toBeNull();
   });
 
+  it("surfaces an order overview and resolution shortcuts before filters and order rows", async () => {
+    storage.set("h5-lang", "en-US");
+    const { OrdersPage } = await import("./OrdersPage");
+    const onNavigate = vi.fn();
+
+    render(
+      <OrdersPage
+        filteredOrders={[
+          {
+            id: "order-paid",
+            orderNo: "ORD-PAID",
+            packageId: "pkg-1",
+            packageTitle: "Growth Package",
+            productName: "Paid Product",
+            amount: 32,
+            currency: "USD",
+            status: "paid",
+            createdAt: "2026-06-23T09:00:00.000Z",
+            sourceLabel: "Growth Package",
+          },
+          {
+            id: "order-processing",
+            orderNo: "ORD-PROCESSING",
+            packageId: "pkg-2",
+            packageTitle: "Promotion Package",
+            productName: "Processing Product",
+            amount: 20,
+            currency: "USD",
+            status: "processing",
+            createdAt: "2026-06-23T10:00:00.000Z",
+            sourceLabel: "Promotion Package",
+          },
+          {
+            id: "order-failed",
+            orderNo: "ORD-FAILED",
+            packageId: "pkg-3",
+            packageTitle: "Rookie Package",
+            productName: "Failed Product",
+            amount: 12,
+            currency: "USD",
+            status: "failed",
+            createdAt: "2026-06-23T11:00:00.000Z",
+            sourceLabel: "Rookie Package",
+          },
+        ]}
+        orderFilter="all"
+        siteKey="mall-us"
+        onNavigate={onNavigate}
+        onSetOrderFilter={vi.fn()}
+        ordersLoading={false}
+        ordersError={null}
+        ordersPage={1}
+        ordersTotal={3}
+        onOrderPageChange={() => undefined}
+        onRetryOrders={() => undefined}
+      />,
+    );
+
+    const overviewHeading = screen.getByText(t("orders.overviewTitle"));
+    const overviewCard = overviewHeading.closest("article");
+    const filtersHeading = screen.getByRole("button", { name: t("orders.filterAll") });
+    const firstOrder = screen.getByText("Paid Product");
+
+    expect(overviewHeading.compareDocumentPosition(filtersHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(filtersHeading.compareDocumentPosition(firstOrder)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(overviewCard?.textContent).toContain(t("orders.overviewPaidLabel"));
+    expect(overviewCard?.textContent).toContain(t("orders.overviewProcessingLabel"));
+    expect(overviewCard?.textContent).toContain(t("orders.overviewFailedLabel"));
+    expect(overviewCard?.textContent).toContain(t("orders.overviewNextStepLabel"));
+
+    fireEvent.click(screen.getByText(t("orders.overviewTaskShortcutTitle")));
+    fireEvent.click(screen.getByText(t("orders.overviewSupportShortcutTitle")));
+
+    expect(onNavigate).toHaveBeenNthCalledWith(1, "/h5/tasks");
+    expect(onNavigate).toHaveBeenNthCalledWith(2, "/h5/tickets/new");
+  });
+
   it("stacks order filters into a compact multi-row layout on ultra-narrow phones", () => {
     const css = readFileSync("src/styles/h5-member.css", "utf8");
 
@@ -1243,6 +1703,55 @@ describe("TasksPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: t("home.actionContinue") }));
     expect(onNavigate).toHaveBeenCalledWith("/h5/tasks/package/pkg-active");
+  });
+
+  it("uses dedicated task progress, error, and action spacing classes instead of inline card chrome", async () => {
+    storage.set("h5-lang", "en-US");
+    const { TasksPage } = await import("./TasksPage");
+
+    const { container } = render(
+      <TasksPage
+        signInStatus={{
+          consecutiveDays: 7,
+          todaySignedIn: true,
+          goalDays: 7,
+          goalReward: 5,
+          isCompleted: true,
+        }}
+        taskInstances={[
+          {
+            id: "pkg-active",
+            title: "Active Growth Package",
+            description: "desc",
+            type: "growth",
+            status: "active",
+            rewardRatio: 0.18,
+            rewardAmount: 36,
+            products: [],
+            completedCount: 1,
+            totalCount: 3,
+            systemBalance: 120,
+            currentCommission: 12,
+            totalCommission: 36,
+            countdownSeconds: 7200,
+            completionWindowHours: 24,
+          } as any,
+        ]}
+        actionName={null}
+        loading={false}
+        error="Task center temporarily unavailable"
+        onSignIn={vi.fn().mockResolvedValue(undefined)}
+        onNavigate={vi.fn()}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onOpenClaimDialog={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".h5-signin-progress-fill-complete")).toBeTruthy();
+    expect(container.querySelector(".h5-task-card-progress")).toBeTruthy();
+    expect(container.querySelector(".h5-task-card-actions")).toBeTruthy();
+    expect(container.querySelector(".h5-task-error-copy")).toBeTruthy();
+    expect(container.querySelector(".h5-task-card-progress")?.getAttribute("style") ?? "").not.toContain("margin-top");
   });
 });
 
@@ -1524,6 +2033,93 @@ describe("PackageDetailPage", () => {
     expect(screen.getByText(t("tasks.detailRemainingLabel", { done: 1, total: 4 }))).toBeTruthy();
   });
 
+  it("does not leak mojibake placeholders in reward copy, progress states, or completion states", async () => {
+    storage.set("h5-lang", "en-US");
+    const { PackageDetailPage } = await import("./PackageDetailPage");
+
+    const activeView = render(
+      <PackageDetailPage
+        instance={{
+          id: "pkg-no-mojibake",
+          title: "Growth Package",
+          description: "desc",
+          type: "growth",
+          status: "active",
+          rewardRatio: 0.12,
+          rewardAmount: 48,
+          completedCount: 1,
+          totalCount: 4,
+          systemBalance: 100,
+          currentCommission: 12,
+          totalCommission: 48,
+          countdownSeconds: 3661,
+          products: [
+            {
+              id: "prod-1",
+              productName: "Product 1",
+              imageUrl: "",
+              price: 20,
+              currency: "USD",
+              status: "available",
+            },
+          ],
+        } as any}
+        actionName={null}
+        onStartProduct={vi.fn().mockResolvedValue({ success: true })}
+        onRetryProduct={vi.fn().mockResolvedValue({ success: true })}
+        onNavigate={vi.fn()}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(activeView.container.textContent).not.toMatch(/馃|猬/);
+
+    fireEvent.click(screen.getByRole("button", { name: t("tasks.productAvailable") }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    expect(activeView.container.textContent).not.toMatch(/馃|猬/);
+    activeView.unmount();
+
+    const completedView = render(
+      <PackageDetailPage
+        instance={{
+          id: "pkg-complete-clean",
+          title: "Growth Package",
+          description: "desc",
+          type: "growth",
+          status: "completed",
+          rewardRatio: 0.12,
+          rewardAmount: 48,
+          completedCount: 1,
+          totalCount: 1,
+          systemBalance: 100,
+          currentCommission: 48,
+          totalCommission: 48,
+          countdownSeconds: 0,
+          products: [
+            {
+              id: "prod-complete",
+              productName: "Product 1",
+              imageUrl: "",
+              price: 20,
+              currency: "USD",
+              status: "completed",
+            },
+          ],
+        } as any}
+        actionName={null}
+        onStartProduct={vi.fn().mockResolvedValue({ success: true })}
+        onRetryProduct={vi.fn().mockResolvedValue({ success: true })}
+        onNavigate={vi.fn()}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(completedView.container.textContent).not.toMatch(/馃|猬/);
+  });
+
   it("routes completed-package balance actions to the earnings wallet path", async () => {
     const { PackageDetailPage } = await import("./PackageDetailPage");
     const onNavigate = vi.fn();
@@ -1565,6 +2161,50 @@ describe("PackageDetailPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: t("tasks.viewBalance") }));
     expect(onNavigate).toHaveBeenCalledWith("/h5/wallet");
+  });
+
+  it("uses package-specific completion copy instead of a generic success banner", async () => {
+    storage.set("h5-lang", "en-US");
+    const { PackageDetailPage } = await import("./PackageDetailPage");
+
+    render(
+      <PackageDetailPage
+        instance={{
+          id: "pkg-complete-copy",
+          title: "Growth Package",
+          description: "desc",
+          type: "growth",
+          status: "completed",
+          rewardRatio: 0.12,
+          rewardAmount: 48,
+          completedCount: 4,
+          totalCount: 4,
+          systemBalance: 100,
+          currentCommission: 48,
+          totalCommission: 48,
+          countdownSeconds: 0,
+          products: [
+            {
+              id: "prod-finish",
+              productName: "Finished Product",
+              imageUrl: "",
+              price: 20,
+              currency: "USD",
+              status: "completed",
+            },
+          ],
+        } as any}
+        actionName={null}
+        onStartProduct={vi.fn().mockResolvedValue({ success: true })}
+        onRetryProduct={vi.fn().mockResolvedValue({ success: true })}
+        onNavigate={vi.fn()}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText(t("serviceMessages.packageCompletedTitle", { title: "Growth Package" }))).toBeTruthy();
+    expect(screen.getByText(t("serviceMessages.packageCompletedBody"))).toBeTruthy();
+    expect(screen.queryByText(t("tasks.packageCompleted"))).toBeNull();
   });
 
   it("preserves full media preview filenames for long uploads", async () => {
@@ -1650,6 +2290,76 @@ describe("PromotionPage", () => {
     cleanup();
   });
 
+  it("surfaces a promotion program summary and mobile-safe invitee records instead of table headers", async () => {
+    storage.set("h5-lang", "en-US");
+    const { PromotionPage } = await import("./PromotionPage");
+
+    render(
+      <PromotionPage
+        dashboard={{
+          site: {
+            site_key: "mall-cn",
+            brand_name: "Mall",
+            tagline: "tagline",
+            accent_color: "#1677ff",
+          },
+          member: {
+            accountId: "38271456",
+            accountIdMasked: "38****56",
+            phone: "13800000000",
+            publicUserId: "h5-38271456",
+            displayName: "Demo Member",
+            inviteCode: "INV-ABCD1234",
+            createdAt: "2026-06-20T00:00:00.000Z",
+          },
+          wallet: {
+            currency: "USD",
+            systemBalance: 120,
+            taskBalance: 36,
+            withdrawThreshold: 100,
+            shortfallAmount: 0,
+            canWithdraw: true,
+          },
+          unreadCount: 1,
+          pendingClaimCount: 1,
+          activeCount: 1,
+          expiringCount: 0,
+          recentMessages: [],
+          leaderboard: [],
+          verification: {
+            currentStatus: "approved",
+            hasActiveRequest: false,
+          },
+          fragments: {
+            totalCount: 3,
+            completedCount: 1,
+            missingCount: 2,
+            canExchange: false,
+            shippingOrderCount: 0,
+            latestShippingStatus: null,
+            rewardName: null,
+          },
+        }}
+        siteKey="mall-cn"
+        onNavigate={() => undefined}
+        onCopyText={vi.fn().mockResolvedValue(undefined)}
+        loading={false}
+        error={null}
+      />,
+    );
+
+    const summaryHeading = screen.getAllByText(t("promotion.programTitle"))[0];
+    const actionsHeading = screen.getAllByText(t("promotion.actionsTitle"))[0];
+    const recordsHeading = screen.getAllByText(t("promotion.inviteeList"))[0];
+
+    expect(summaryHeading.compareDocumentPosition(actionsHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(actionsHeading.compareDocumentPosition(recordsHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getAllByText(t("promotion.linkGenerated")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(t("promotion.qualifiedRate")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("columnheader", { name: t("promotion.colSequence") })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: t("promotion.colUserId") })).toBeNull();
+  });
+
   it("renders settlement and delay guidance for promotion tasks", async () => {
     storage.set("h5-lang", "en-US");
     const { PromotionPage } = await import("./PromotionPage");
@@ -1712,13 +2422,9 @@ describe("PromotionPage", () => {
     expect(screen.getByText(t("promotion.rewardBalanceValue"))).toBeTruthy();
     expect(screen.getByText(t("promotion.validityWindow"))).toBeTruthy();
     expect(screen.getByText(t("promotion.delayNotice"))).toBeTruthy();
-
-    const inviteeRows = screen.getAllByRole("row").slice(1);
-    expect(inviteeRows.length).toBeGreaterThan(0);
-    expect(inviteeRows[0]?.querySelector(`[data-label="${t("promotion.colSequence")}"]`)).toBeTruthy();
-    expect(inviteeRows[0]?.querySelector(`[data-label="${t("promotion.colUserId")}"]`)).toBeTruthy();
-    expect(inviteeRows[0]?.querySelector(`[data-label="${t("promotion.colRegisteredAt")}"]`)).toBeTruthy();
-    expect(inviteeRows[0]?.querySelector(`[data-label="${t("promotion.colHasRecharged")}"]`)).toBeTruthy();
+    expect(screen.getAllByText(t("promotion.followupTitle")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(t("promotion.hasRecharged")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(t("promotion.notRecharged")).length).toBeGreaterThan(0);
   });
 });
 
@@ -1758,7 +2464,7 @@ describe("InvitePage", () => {
 
     expect(screen.getByText("已邀请")).toBeTruthy();
     expect(screen.getByText("已获得")).toBeTruthy();
-    expect(screen.getByText("剩余名额")).toBeTruthy();
+    expect(screen.getAllByText(/剩余名额|邀请进度|总名额/).length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toContain("Invited:");
     expect(document.body.textContent).not.toContain("路");
   });
@@ -1823,6 +2529,74 @@ describe("InvitePage", () => {
     expect(document.body.textContent).not.toContain("¥US$");
     expect(screen.getAllByText(/Earn \$2\.00 for each registered friend/).length).toBeGreaterThan(0);
   });
+
+  it("surfaces an invite program summary before the action card and records list", async () => {
+    storage.set("h5-lang", "en-US");
+    const { InvitePage } = await import("./InvitePage");
+
+    render(
+      <InvitePage
+        inviteInfo={{
+          inviteCode: "INV-ABCD1234",
+          inviteLink: "https://example.com/invite/INV-ABCD1234",
+          invitedCount: 3,
+          earnedAmount: 8,
+          maxInvites: 20,
+          remainingInvites: 17,
+        }}
+        inviteRecords={[]}
+        loading={false}
+        error={null}
+        onCopyText={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    const programHeading = screen.getAllByText(t("tasks.inviteProgramTitle"))[0];
+    const actionHeading = screen.getAllByText(t("tasks.inviteMyLink"))[0];
+    const recordsHeading = screen.getAllByText(t("tasks.inviteRecords"))[0];
+
+    expect(programHeading.compareDocumentPosition(actionHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(actionHeading.compareDocumentPosition(recordsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByText(t("tasks.inviteCapacity")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(t("tasks.inviteProgress")).length).toBeGreaterThan(0);
+  });
+
+  it("renders invite records with structured status and timestamp copy instead of legacy separators", async () => {
+    storage.set("h5-lang", "en-US");
+    const { InvitePage } = await import("./InvitePage");
+
+    render(
+      <InvitePage
+        inviteInfo={{
+          inviteCode: "INV-ABCD1234",
+          inviteLink: "https://example.com/invite/INV-ABCD1234",
+          invitedCount: 3,
+          earnedAmount: 8,
+          maxInvites: 20,
+          remainingInvites: 17,
+        }}
+        inviteRecords={[
+          {
+            id: "inv-1",
+            userIdMasked: "US***42",
+            type: "registration",
+            rewardAmount: 2,
+            createdAt: "2026-06-23T09:00:00.000Z",
+          },
+        ]}
+        loading={false}
+        error={null}
+        onCopyText={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(document.body.textContent).not.toContain(" 路 ");
+    expect(screen.getByText("US***42")).toBeTruthy();
+    expect(screen.getByText(t("tasks.inviteRecordRegistered"))).toBeTruthy();
+    expect(screen.getAllByText(/\+\$?2(?:\.00)?/).length).toBeGreaterThan(0);
+  });
 });
 
 describe("LeaderboardPage", () => {
@@ -1849,7 +2623,35 @@ describe("LeaderboardPage", () => {
     const listHeading = screen.getByText("Leaderboard");
     expect(summaryHeading.compareDocumentPosition(listHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getAllByText("US***88").length).toBeGreaterThan(0);
-    expect(screen.getByText("Masked accounts only")).toBeTruthy();
+    expect(screen.getAllByText("Masked accounts only").length).toBeGreaterThan(0);
+  });
+
+  it("surfaces a ranking overview before the top performer and full leaderboard list", async () => {
+    storage.set("h5-lang", "en-US");
+    const { LeaderboardPage } = await import("./LeaderboardPage");
+
+    render(
+      <LeaderboardPage
+        leaderboard={[
+          { rank: 1, accountIdMasked: "US***88", amount: 1280, currency: "USD" },
+          { rank: 2, accountIdMasked: "US***42", amount: 920, currency: "USD" },
+          { rank: 3, accountIdMasked: "US***12", amount: 760, currency: "USD" },
+        ]}
+        loading={false}
+        error={null}
+      />,
+    );
+
+    const overviewHeading = screen.getByText(t("leaderboard.overviewTitle"));
+    const summaryHeading = screen.getByText(t("leaderboard.topPerformer"));
+    const listHeading = screen.getByText(t("leaderboard.title"));
+
+    expect(overviewHeading.compareDocumentPosition(summaryHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(summaryHeading.compareDocumentPosition(listHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText(t("leaderboard.overviewLeaderLabel"))).toBeTruthy();
+    expect(screen.getByText(t("leaderboard.overviewRunnerUpLabel"))).toBeTruthy();
+    expect(screen.getByText(t("leaderboard.overviewSpreadLabel"))).toBeTruthy();
+    expect(screen.getByText(t("leaderboard.overviewPrivacyLabel"))).toBeTruthy();
   });
 });
 
@@ -2114,6 +2916,82 @@ describe("HomePage", () => {
     expect(screen.getByText(t("home.statusVerification", { status: t("verification.statusApproved") }))).toBeTruthy();
     expect(screen.getByText(t("home.statusAlerts", { count: 3 }))).toBeTruthy();
     expect(screen.getByRole("button", { name: t("home.actionGoWithdraw") })).toBeTruthy();
+  });
+
+  it("routes the home status avatar to the profile center path", async () => {
+    storage.set("h5-lang", "en-US");
+    const { HomePage } = await import("./HomePage");
+    const onNavigate = vi.fn();
+
+    render(
+      <HomePage
+        dashboard={{
+          site: {
+            site_key: "mall-cn",
+            brand_name: "Mall",
+            tagline: "tagline",
+            accent_color: "#1677ff",
+          },
+          member: {
+            accountId: "38271456",
+            accountIdMasked: "38****56",
+            phone: "13800000000",
+            publicUserId: "h5-38271456",
+            displayName: "Demo Member",
+            inviteCode: "INV-ABCD1234",
+            createdAt: "2026-06-20T00:00:00.000Z",
+          },
+          wallet: {
+            currency: "USD",
+            systemBalance: 120,
+            taskBalance: 36,
+            withdrawThreshold: 100,
+            shortfallAmount: 0,
+            canWithdraw: true,
+          },
+          unreadCount: 3,
+          pendingClaimCount: 1,
+          activeCount: 1,
+          expiringCount: 0,
+          recentMessages: [],
+          leaderboard: [],
+          verification: {
+            currentStatus: "approved",
+            hasActiveRequest: false,
+          },
+          fragments: {
+            totalCount: 3,
+            completedCount: 1,
+            missingCount: 2,
+            canExchange: false,
+            shippingOrderCount: 0,
+            latestShippingStatus: null,
+            rewardName: null,
+          },
+        }}
+        session={null}
+        memberPhoneMasked="138****0000"
+        focusTaskPackage={null}
+        primaryHomeAction={{
+          title: t("home.actionCanWithdraw"),
+          description: t("home.actionCanWithdrawDesc"),
+          buttonLabel: t("home.actionGoWithdraw"),
+          kind: "withdraw",
+        }}
+        unreadMessageCount={3}
+        siteKey="mall-cn"
+        actionName={null}
+        homeWalletBalance={null}
+        notificationCount={3}
+        onNavigate={onNavigate}
+        onOpenClaimDialog={vi.fn()}
+        onShowTransferAllConfirm={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t("profile.title") }));
+
+    expect(onNavigate).toHaveBeenCalledWith("/h5/me");
   });
 
   it("renders growth-home sections in the expected order", async () => {
@@ -2680,6 +3558,75 @@ describe("WithdrawPage", () => {
     expect(document.querySelector(".h5-member-wallet-balance-hero .h5-member-section-heading strong")?.textContent).toBe(
       t("withdraw.snapshotTitle"),
     );
+  });
+
+  it("uses dedicated withdrawal status icon classes instead of inline icon sizing and color styles", async () => {
+    storage.set("h5-lang", "en-US");
+    const { WithdrawPage } = await import("./WithdrawPage");
+
+    const { container, rerender } = render(
+      <WithdrawPage
+        effectiveWalletSummary={{
+          currency: "USD",
+          systemBalance: 320,
+          taskBalance: 86,
+          withdrawThreshold: 100,
+          shortfallAmount: 0,
+          canWithdraw: true,
+        }}
+        withdrawAmount="100"
+        withdrawRequests={[
+          {
+            id: "wd-1",
+            amount: 80,
+            currency: "USD",
+            status: "reviewing",
+            createdAt: "2026-06-23T09:00:00.000Z",
+          } as any,
+        ]}
+        maxWithdrawAmount={320}
+        actionName={null}
+        onWithdrawAmountChange={vi.fn()}
+        onWithdraw={vi.fn().mockResolvedValue(undefined)}
+        onShowTransferAllConfirm={vi.fn()}
+        onSetMaxWithdraw={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".h5-withdraw-status-flow-icon")).toBeTruthy();
+    expect(container.querySelector(".h5-withdraw-status-flow-icon")?.getAttribute("style")).toBeNull();
+
+    rerender(
+      <WithdrawPage
+        effectiveWalletSummary={{
+          currency: "USD",
+          systemBalance: 320,
+          taskBalance: 86,
+          withdrawThreshold: 100,
+          shortfallAmount: 0,
+          canWithdraw: true,
+        }}
+        withdrawAmount="100"
+        withdrawRequests={[
+          {
+            id: "wd-2",
+            amount: 80,
+            currency: "USD",
+            status: "rejected",
+            createdAt: "2026-06-23T09:00:00.000Z",
+          } as any,
+        ]}
+        maxWithdrawAmount={320}
+        actionName={null}
+        onWithdrawAmountChange={vi.fn()}
+        onWithdraw={vi.fn().mockResolvedValue(undefined)}
+        onShowTransferAllConfirm={vi.fn()}
+        onSetMaxWithdraw={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".h5-withdraw-status-flow-icon-rejected")).toBeTruthy();
+    expect(container.querySelector(".h5-withdraw-status-flow-icon-rejected")?.getAttribute("style")).toBeNull();
   });
 });
 
@@ -3283,6 +4230,56 @@ describe("FragmentsPage", () => {
     cleanup();
   });
 
+  it("surfaces a fragment overview and shipping checklist before the exchange form", async () => {
+    storage.set("h5-lang", "en-US");
+    const { FragmentsPage } = await import("./FragmentsPage");
+
+    render(
+      <FragmentsPage
+        fragmentOverview={{
+          inventory: [
+            { id: "frag-1", name: "Gold Shard", owned: 2, required: 5, rarity: "rare" },
+          ],
+          dropLogs: [],
+          shippingOrders: [],
+        } as any}
+        fragmentCompletion={{ completed: 1, total: 3, missing: 2, progress: 34 }}
+        canExchangeFragments={false}
+        latestShippingOrder={null}
+        fragmentStageTitle={t("fragments.stageCollect")}
+        fragmentStageDescription={t("fragments.stageKeepCollecting")}
+        shippingForm={{
+          receiver: "",
+          phone: "",
+          province: "",
+          city: "",
+          addressLine: "",
+        }}
+        actionName={null}
+        fragmentsLoading={false}
+        fragmentsError={null}
+        onCheckIn={vi.fn().mockResolvedValue(undefined)}
+        onExchange={vi.fn().mockResolvedValue(undefined)}
+        onShippingFormChange={vi.fn()}
+        onRetry={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const overviewHeading = screen.getByText(t("fragments.overviewTitle"));
+    const prepHeading = screen.getByText(t("fragments.prepTitle"));
+    const stageHeading = screen.getByText(t("fragments.stageCollect"));
+
+    expect(overviewHeading.compareDocumentPosition(prepHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(prepHeading.compareDocumentPosition(stageHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText(t("fragments.overviewCollectedLabel"))).toBeTruthy();
+    expect(screen.getByText(t("fragments.overviewMissingLabel"))).toBeTruthy();
+    expect(screen.getByText(t("fragments.overviewShippingLabel"))).toBeTruthy();
+    expect(screen.getByText(t("fragments.overviewNextStepLabel"))).toBeTruthy();
+    expect(screen.getByText(t("fragments.prepReceiverTitle"))).toBeTruthy();
+    expect(screen.getByText(t("fragments.prepAddressTitle"))).toBeTruthy();
+    expect(screen.getByText(t("fragments.prepShippingTitle"))).toBeTruthy();
+  });
+
   it("renders a localized retry action in the error state", async () => {
     storage.set("h5-lang", "en-US");
     const { FragmentsPage } = await import("./FragmentsPage");
@@ -3323,6 +4320,94 @@ describe("FragmentsPage", () => {
 describe("SettingsPage", () => {
   afterEach(() => {
     cleanup();
+  });
+
+  it("surfaces an account overview and security checklist before the editable forms", async () => {
+    storage.set("h5-lang", "en-US");
+    const { SettingsPage } = await import("./SettingsPage");
+
+    const dashboard = {
+      site: {
+        site_key: "mall-us",
+        brand_name: "Mall",
+        tagline: "tagline",
+        accent_color: "#1677ff",
+      },
+      member: {
+        accountId: "38271456",
+        accountIdMasked: "38****56",
+        phone: "13800000000",
+        publicUserId: "h5-38271456",
+        displayName: "Demo Member",
+        inviteCode: "INV-ABCD1234",
+        createdAt: "2026-06-20T00:00:00.000Z",
+      },
+      wallet: {
+        currency: "USD",
+        systemBalance: 120,
+        taskBalance: 36,
+        withdrawThreshold: 100,
+        shortfallAmount: 0,
+        canWithdraw: true,
+      },
+      unreadCount: 1,
+      pendingClaimCount: 1,
+      activeCount: 1,
+      expiringCount: 0,
+      recentMessages: [],
+      leaderboard: [],
+      verification: {
+        currentStatus: "approved",
+        hasActiveRequest: false,
+      },
+      fragments: {
+        totalCount: 3,
+        completedCount: 1,
+        missingCount: 2,
+        canExchange: false,
+        shippingOrderCount: 0,
+        latestShippingStatus: null,
+        rewardName: null,
+      },
+    } as any;
+
+    render(
+      <SettingsPage
+        dashboard={dashboard}
+        settingsPhone="13800000000"
+        settingsAvatarUrl={null}
+        settingsCurrentPassword=""
+        settingsNextPassword=""
+        settingsConfirmPassword=""
+        settingsCurrentPasswordVisible={false}
+        settingsNextPasswordVisible={false}
+        settingsConfirmPasswordVisible={false}
+        actionName={null}
+        onPhoneChange={vi.fn()}
+        onAvatarChange={vi.fn().mockResolvedValue(undefined)}
+        onSaveProfile={vi.fn().mockResolvedValue(undefined)}
+        onCurrentPasswordChange={vi.fn()}
+        onCurrentPasswordToggle={vi.fn()}
+        onNextPasswordChange={vi.fn()}
+        onNextPasswordToggle={vi.fn()}
+        onConfirmPasswordChange={vi.fn()}
+        onConfirmPasswordToggle={vi.fn()}
+        onChangePassword={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const overviewHeading = screen.getByText(t("settings.overviewTitle"));
+    const profileHeading = screen.getByText(t("settings.title"));
+    const checklistHeading = screen.getByText(t("settings.securityChecklistTitle"));
+    const passwordHeading = screen.getAllByText(t("settings.changePassword"))[0];
+
+    expect(overviewHeading.compareDocumentPosition(profileHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(checklistHeading.compareDocumentPosition(passwordHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText(t("settings.overviewVerificationLabel"))).toBeTruthy();
+    expect(screen.getByText(t("settings.overviewMemberSinceLabel"))).toBeTruthy();
+    expect(screen.getByText(t("settings.securityPhoneTitle"))).toBeTruthy();
+    expect(screen.getByText(t("settings.securityPasswordTitle"))).toBeTruthy();
+    expect(screen.getByText(t("settings.securityReviewTitle"))).toBeTruthy();
   });
 
   it("renders localized success messages after saving profile and changing password", async () => {

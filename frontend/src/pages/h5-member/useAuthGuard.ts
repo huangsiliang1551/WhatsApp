@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { sessionManager } from "../../services/h5SessionManager";
+import { buildH5Path } from "./sharedUtils";
 
 export type H5MemberInfo = {
   accountId: string;
@@ -43,6 +44,13 @@ export function useAuthGuard(
     setIsLoading(false);
 
     if (!auth && redirectToLogin && onNavigate) {
+      const currentUrl = new URL(currentPath, "http://localhost");
+      const siteKey = currentUrl.searchParams.get("site_key")?.trim();
+      if (siteKey) {
+        onNavigate(buildH5Path("/h5/login", siteKey, { redirect: currentPath }));
+        return;
+      }
+
       const encodedPath = encodeURIComponent(currentPath);
       onNavigate(`/h5/login?redirect=${encodedPath}`);
     }

@@ -29,6 +29,7 @@ export type H5SiteBrand = {
   brand_name: string;
   tagline: string;
   accent_color: string;
+  default_language?: string;
 };
 
 export type H5MemberSession = {
@@ -38,6 +39,7 @@ export type H5MemberSession = {
   displayName: string;
   inviteCode: string;
   avatarUrl?: string | null;
+  languageCode?: string;
 };
 
 export type H5MemberProfile = H5MemberSession & {
@@ -334,6 +336,8 @@ type BackendMemberAuthResponse = {
     createdAt: string;
     displayName?: string | null;
     inviteCode?: string | null;
+    languageCode?: string | null;
+    language_code?: string | null;
     memberNo?: string | null;
     phone: string;
     publicUserId: string;
@@ -341,6 +345,8 @@ type BackendMemberAuthResponse = {
   site: {
     siteKey: string;
     brandName: string;
+    defaultLanguage?: string | null;
+    default_language?: string | null;
   };
 };
 
@@ -351,6 +357,8 @@ type BackendMemberHomeResponse = {
     createdAt: string;
     displayName?: string | null;
     inviteCode?: string | null;
+    languageCode?: string | null;
+    language_code?: string | null;
     memberNo?: string | null;
     phone: string;
     publicUserId: string;
@@ -358,6 +366,8 @@ type BackendMemberHomeResponse = {
   site: {
     siteKey: string;
     brandName: string;
+    defaultLanguage?: string | null;
+    default_language?: string | null;
   };
   wallet: {
     systemBalance: number | null;
@@ -878,6 +888,14 @@ function getBackendUnavailableError(): Error {
   return createServiceError("authServiceUnavailable");
 }
 
+function hasBackendAuthCookies(): boolean {
+  if (typeof document === "undefined") {
+    return false;
+  }
+  const cookie = document.cookie || "";
+  return cookie.includes("h5_member_session=") || cookie.includes("h5_member_refresh=");
+}
+
 async function refreshBackendAuthSession(): Promise<boolean> {
   try {
     const response = await requestJson<BackendMemberAuthResponse>("/api/h5/auth/refresh", {
@@ -1001,6 +1019,7 @@ function buildSessionFromAuthPayload(payload: BackendMemberAuthResponse): H5Memb
     displayName: payload.member.displayName?.trim() || payload.member.publicUserId,
     inviteCode: payload.member.inviteCode?.trim() || generateInviteCode(memberNo),
     avatarUrl: null,
+    languageCode: payload.member.languageCode ?? payload.member.language_code ?? undefined,
   };
 }
 
@@ -1054,6 +1073,7 @@ function mapSiteBrandFromBackend(site: BackendMemberAuthResponse["site"]): H5Sit
     ...base,
     site_key: site.siteKey,
     brand_name: site.brandName,
+    default_language: site.defaultLanguage ?? site.default_language ?? base.default_language,
   };
 }
 
@@ -1881,6 +1901,13 @@ export async function getCurrentMemberSession(): Promise<H5MemberSession | null>
       ensureSeededStorage();
       return readSession();
     }
+    return null;
+  }
+  if (!hasBackendAuthCookies()) {
+    if (isLegacyFallbackEnabled()) {
+      return stored;
+    }
+    writeSession(null);
     return null;
   }
   const authResponse = await tryBackendAuthRequest<BackendMemberAuthResponse>(() =>
@@ -3895,15 +3922,26 @@ export async function getMessagesApi(params: { page?: number; size?: number; con
   return { items: mockMsgs.slice((page - 1) * size, page * size), total: mockMsgs.length };
 }
 
-export async function sendMessageApi(conversationId: string, content: string, type: string = 'text'): Promise<H5ChatMessage> {
+export async function sendMessageApi(
+  conversationId: string,
+  content: string,
+  type: string = 'text',
+  imageUrl?: string,
+): Promise<H5ChatMessage> {
   if (apiMode === 'real') {
-    const res = await h5Api.post('/api/h5/messages', { conversation_id: conversationId, content, type });
+    const res = await h5Api.post('/api/h5/messages', {
+      conversation_id: conversationId,
+      content,
+      type,
+      image_url: imageUrl,
+    });
     return res.data;
   }
   return {
     id: `mock-${Date.now()}`,
     content,
     type: type as 'text' | 'image',
+    image_url: imageUrl,
     direction: 'outbound',
     status: 'sent',
     timestamp: new Date().toISOString(),

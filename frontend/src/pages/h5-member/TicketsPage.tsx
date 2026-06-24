@@ -51,6 +51,9 @@ export function TicketsPage({
   const ticketCategoryLabels = getTicketCategoryLabels();
   const canSubmitNewTicket = ticketDraft.subject.trim().length > 0 && ticketDraft.description.trim().length > 0;
   const canSubmitReply = ticketReply.trim().length > 0;
+  const openCount = tickets.filter((ticket) => ticket.status === "open" || ticket.status === "in_progress").length;
+  const waitingCount = tickets.filter((ticket) => ticket.status === "pending_user").length;
+  const resolvedCount = tickets.filter((ticket) => ticket.status === "resolved" || ticket.status === "closed").length;
 
   if (page === "new") {
     return (
@@ -62,6 +65,33 @@ export function TicketsPage({
             <span className="h5-member-inline-pill">{t("tickets.helpTicket")}</span>
             <span className="h5-member-inline-pill">{t("tickets.complaint")}</span>
             <span className="h5-member-inline-pill">{t("tickets.taskAppeal")}</span>
+          </div>
+        </article>
+
+        <article className="h5-card h5-member-ticket-overview-card">
+          <SectionHeader meta={t("tickets.prepMeta")} title={t("tickets.prepTitle")} />
+          <div className="h5-card-stack">
+            <CompactListRow
+              badge={ticketDraft.subject.trim() ? t("tickets.yes") : t("tickets.no")}
+              sideNote={t("tickets.subject")}
+              subtitle={t("tickets.prepSubjectDesc")}
+              title={t("tickets.prepSubjectTitle")}
+              tone={ticketDraft.subject.trim() ? "success" : "default"}
+            />
+            <CompactListRow
+              badge={ticketDraft.description.trim() ? t("tickets.yes") : t("tickets.no")}
+              sideNote={t("tickets.description")}
+              subtitle={t("tickets.prepContextDesc")}
+              title={t("tickets.prepContextTitle")}
+              tone={ticketDraft.description.trim() ? "success" : "default"}
+            />
+            <CompactListRow
+              badge={ticketPriorityLabels[ticketDraft.priority]}
+              sideNote={ticketCategoryLabels[ticketDraft.category]}
+              subtitle={t("tickets.prepResponseDesc")}
+              title={t("tickets.prepResponseTitle")}
+              tone="active"
+            />
           </div>
         </article>
 
@@ -183,6 +213,28 @@ export function TicketsPage({
 
   return (
     <section className="h5-card-stack">
+      <article className="h5-card h5-member-ticket-overview-card">
+        <SectionHeader meta={t("tickets.overviewMeta")} title={t("tickets.overviewTitle")} />
+        <div className="h5-member-detail-grid">
+          <article className="h5-member-detail-card">
+            <span className="h5-member-detail-label">{t("tickets.openCount")}</span>
+            <strong className="h5-member-detail-value">{String(openCount)}</strong>
+          </article>
+          <article className="h5-member-detail-card">
+            <span className="h5-member-detail-label">{t("tickets.waitingCount")}</span>
+            <strong className="h5-member-detail-value">{String(waitingCount)}</strong>
+          </article>
+          <article className="h5-member-detail-card">
+            <span className="h5-member-detail-label">{t("tickets.resolvedCount")}</span>
+            <strong className="h5-member-detail-value">{String(resolvedCount)}</strong>
+          </article>
+          <article className="h5-member-detail-card">
+            <span className="h5-member-detail-label">{t("tickets.nextStepTitle")}</span>
+            <strong className="h5-member-detail-value">{tickets.length > 0 ? t("tickets.nextStepValue") : t("tickets.newTicket")}</strong>
+          </article>
+        </div>
+      </article>
+
       <article className="h5-card">
         <SectionHeader
           meta={t("tickets.messageCount", { count: tickets.length })}

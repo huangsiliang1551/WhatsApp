@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal
 import hashlib
 import hmac
 import re
@@ -296,7 +295,8 @@ class H5MemberAuthService:
         now = utc_now()
         total_refresh_ttl = timedelta(days=self._settings.h5_member_refresh_ttl_days)
         remaining = auth_session.refresh_expires_at - now
-        if remaining <= total_refresh_ttl * Decimal("0.25"):
+        renewal_threshold = timedelta(seconds=total_refresh_ttl.total_seconds() * 0.25)
+        if remaining <= renewal_threshold:
             auth_session.refresh_expires_at = now + total_refresh_ttl
             self._session.add(auth_session)
             self._session.commit()

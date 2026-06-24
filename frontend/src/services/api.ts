@@ -4293,9 +4293,29 @@ export interface CustomerSummaryResponse {
   customer: { id: string; public_user_id: string; display_name: string | null; language: string; created_at: string | null; lifecycle_status: string; registration_ip: string | null; registration_ips: string[]; multi_ip: boolean };
   wallet: { balance: number; total_recharged: number; total_withdrawn: number; recent_transactions: Array<{ type: string; amount: number; direction: string; created_at: string | null }> };
   member_status: { verification: { status: string; request_type?: string; updated_at?: string }; whatsapp_binding: { status: string; phone_number?: string; updated_at?: string } };
+  member_profile: CustomerMemberProfileSummary | null;
   conversations: { total: number; open: number; items: Array<Record<string, unknown>> };
   tickets: { total: number; open: number; items: Array<Record<string, unknown>> };
   tags: string[];
+}
+
+export interface CustomerMemberProfileSummary {
+  member_profile_id: string | null;
+  member_no: string | null;
+  current_owner_agency_id: string | null;
+  current_owner_staff_user_id: string | null;
+  current_owner_agency_member_id: string | null;
+  current_owner_assignment_id: string | null;
+  owner_assigned_at: string | null;
+  current_ai_agent_id: string | null;
+  current_ai_assignment_id: string | null;
+  ai_assigned_at: string | null;
+  registration_entry_link_id: string | null;
+  registration_ai_agent_id: string | null;
+  registration_staff_user_id: string | null;
+  registration_channel: string | null;
+  registration_source_type: string | null;
+  attribution_status: string;
 }
 
 export async function getCustomerSummary(customerId: string, accountId?: string): Promise<CustomerSummaryResponse> {

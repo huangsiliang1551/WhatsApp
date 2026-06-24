@@ -158,6 +158,74 @@ describe("TicketsPage", () => {
     expect(onNavigate).toHaveBeenCalledWith("/h5/tickets/new");
   });
 
+  it("surfaces a support overview summary before the ticket list", async () => {
+    await renderTicketsPage({
+      page: "list",
+      tickets: [
+        {
+          id: "101",
+          account_id: "acc-1",
+          public_user_id: "u-1",
+          subject: "Withdrawal review taking longer than expected",
+          status: "open",
+          priority: "high",
+          category: "help",
+          content_preview: "Need help checking the current review queue.",
+          source: "h5",
+          linked_task_instance_id: null,
+          created_at: "2026-06-23T09:00:00.000Z",
+          updated_at: "2026-06-23T09:00:00.000Z",
+          last_reply_at: "2026-06-23T10:00:00.000Z",
+        },
+        {
+          id: "102",
+          account_id: "acc-1",
+          public_user_id: "u-1",
+          subject: "Task appeal waiting on review",
+          status: "pending_user",
+          priority: "normal",
+          category: "task_appeal",
+          content_preview: "Need to provide screenshot evidence.",
+          source: "h5",
+          linked_task_instance_id: null,
+          created_at: "2026-06-22T09:00:00.000Z",
+          updated_at: "2026-06-22T09:00:00.000Z",
+          last_reply_at: "2026-06-22T10:00:00.000Z",
+        },
+      ] as never,
+    });
+
+    const overviewHeading = screen.getByText(t("tickets.overviewTitle"));
+    const listHeading = screen.getByText(t("tickets.title"));
+    const firstTicket = screen.getByText("Withdrawal review taking longer than expected");
+
+    expect(overviewHeading.compareDocumentPosition(listHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(listHeading.compareDocumentPosition(firstTicket)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getAllByText(t("tickets.openCount")).length).toBeGreaterThan(0);
+    expect(screen.getByText(t("tickets.waitingCount"))).toBeTruthy();
+    expect(screen.getByText(t("tickets.resolvedCount"))).toBeTruthy();
+  });
+
+  it("renders a submission checklist before the new-ticket form", async () => {
+    await renderTicketsPage({
+      page: "new",
+      ticketDraft: {
+        category: "help",
+        priority: "normal",
+        subject: "",
+        description: "",
+      },
+    });
+
+    const prepHeading = screen.getByText(t("tickets.prepTitle"));
+    const submitHeading = screen.getAllByText(t("tickets.submitTicket"))[0];
+
+    expect(prepHeading.compareDocumentPosition(submitHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText(t("tickets.prepSubjectTitle"))).toBeTruthy();
+    expect(screen.getByText(t("tickets.prepContextTitle"))).toBeTruthy();
+    expect(screen.getByText(t("tickets.prepResponseTitle"))).toBeTruthy();
+  });
+
   it("treats resolved tickets as read-only and hides the reply composer", async () => {
     await renderTicketsPage({
       page: "detail",

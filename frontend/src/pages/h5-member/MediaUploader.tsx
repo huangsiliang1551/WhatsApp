@@ -1,8 +1,7 @@
-import { type JSX, useState, useRef, useCallback } from "react";
-import { InboxOutlined, CloseOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined } from "@ant-design/icons";
-import { t } from "./i18n";
+import { CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, InboxOutlined, LoadingOutlined } from "@ant-design/icons";
+import { type JSX, useCallback, useRef, useState } from "react";
 
-// ─── Types ─────────────────────────────────────────────────────
+import { t } from "./i18n";
 
 export interface UploadedFile {
   id: string;
@@ -25,48 +24,61 @@ export interface MediaUploaderProps {
   compress?: boolean;
 }
 
-// ─── Image compression utility ─────────────────────────────────
-
 async function compressImage(file: File, maxWidth = 1200, quality = 0.8): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
+
     img.onload = () => {
       URL.revokeObjectURL(url);
       const canvas = document.createElement("canvas");
       let { width, height } = img;
+
       if (width > maxWidth) {
         height = (height * maxWidth) / width;
         width = maxWidth;
       }
+
       canvas.width = width;
       canvas.height = height;
+
       const ctx = canvas.getContext("2d");
-      if (!ctx) { reject(new Error("Canvas not supported")); return; }
+      if (!ctx) {
+        reject(new Error("Canvas not supported"));
+        return;
+      }
+
       ctx.drawImage(img, 0, 0, width, height);
       canvas.toBlob((blob) => {
-        if (blob) resolve(blob);
-        else reject(new Error("Compression failed"));
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error("Compression failed"));
+        }
       }, "image/jpeg", quality);
     };
+
     img.onerror = () => reject(new Error("Image load failed"));
     img.src = url;
   });
 }
 
 let fileIdCounter = 0;
+
 function nextFileId(): string {
   fileIdCounter += 1;
   return `media-${Date.now()}-${fileIdCounter}`;
 }
 
 function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
-
-// ─── Component ─────────────────────────────────────────────────
 
 export function MediaUploader({
   accept = "image/*",
@@ -84,57 +96,74 @@ export function MediaUploader({
 
   const maxSizeBytes = maxSizeMB * 1024 * 1024;
 
-  const processFiles = useCallback(async (rawFiles: FileList | File[]) => {
-    const fileArray = Array.from(rawFiles).filter((f) => {
-      // File type validation
-      if (accept !== "*/*") {
-        const acceptTypes = accept.split(",").map((a) => a.trim());
-        const matchesType = acceptTypes.some((type) => {
-          if (type.endsWith("/*")) {
-            const category = type.replace("/*", "");
-            return f.type.startsWith(category + "/");
+  const processFiles = useCallback(
+    async (rawFiles: FileList | File[]) => {
+      const fileArray = Array.from(rawFiles).filter((file) => {
+        if (accept !== "*/*") {
+          const acceptTypes = accept.split(",").map((item) => item.trim());
+          const matchesType = acceptTypes.some((type) => {
+            if (type.endsWith("/*")) {
+              const category = type.replace("/*", "");
+              return file.type.startsWith(`${category}/`);
+            }
+            return file.type === type;
+          });
+
+          if (!matchesType) {
+            onError?.(t("media.typeError", { name: file.name, accept }));
+            return false;
           }
-          return f.type === type;
-        });
-        if (!matchesType) {
-          onError?.(t("media.typeError", { name: f.name, accept }));
+        }
+
+        if (file.size > maxSizeBytes) {
+          onError?.(t("media.sizeError", { name: file.name, maxSize: String(maxSizeMB) }));
           return false;
         }
+
+        return true;
+      });
+
+      if (!fileArray.length) {
+        return;
       }
-      // File size validation
-      if (f.size > maxSizeBytes) {
-        onError?.(t("media.sizeError", { name: f.name, maxSize: String(maxSizeMB) }));
-        return false;
-      }
-      return true;
-    });
 
-    if (fileArray.length === 0) return;
+      setIsCompressing(true);
+      const processed: UploadedFile[] = [];
 
-    setIsCompressing(true);
-    const processed: UploadedFile[] = [];
+      for (const file of fileArray) {
+        const id = nextFileId();
+        const shouldCompress = compress && file.size > 1024 * 1024 && file.type.startsWith("image/");
 
-    for (const file of fileArray) {
-      const id = nextFileId();
-      const shouldCompress = compress && file.size > 1024 * 1024 && file.type.startsWith("image/");
-
-      if (shouldCompress) {
-        try {
-          const compressedBlob = await compressImage(file);
-          const compressedFile = new File([compressedBlob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
-          const url = URL.createObjectURL(compressedFile);
-          processed.push({
-            id,
-            file: compressedFile,
-            url,
-            name: compressedFile.name,
-            size: file.size,
-            compressedSize: compressedFile.size,
-            progress: 0,
-            status: "pending",
-          });
-        } catch {
-          // Fall back to original
+        if (shouldCompress) {
+          try {
+            const compressedBlob = await compressImage(file);
+            const compressedFile = new File([compressedBlob], file.name.replace(/\.[^.]+$/, ".jpg"), {
+              type: "image/jpeg",
+            });
+            const url = URL.createObjectURL(compressedFile);
+            processed.push({
+              id,
+              file: compressedFile,
+              url,
+              name: compressedFile.name,
+              size: file.size,
+              compressedSize: compressedFile.size,
+              progress: 0,
+              status: "pending",
+            });
+          } catch {
+            const url = URL.createObjectURL(file);
+            processed.push({
+              id,
+              file,
+              url,
+              name: file.name,
+              size: file.size,
+              progress: 0,
+              status: "pending",
+            });
+          }
+        } else {
           const url = URL.createObjectURL(file);
           processed.push({
             id,
@@ -146,46 +175,42 @@ export function MediaUploader({
             status: "pending",
           });
         }
-      } else {
-        const url = URL.createObjectURL(file);
-        processed.push({
-          id,
-          file,
-          url,
-          name: file.name,
-          size: file.size,
-          progress: 0,
-          status: "pending",
-        });
       }
-    }
 
-    setIsCompressing(false);
+      setIsCompressing(false);
 
-    setFiles((prev) => {
-      const updated = multiple ? [...prev, ...processed] : processed;
-      return updated;
-    });
+      setFiles((prev) => (multiple ? [...prev, ...processed] : processed));
 
-    // Reset input
-    if (inputRef.current) {
-      inputRef.current.value = "";
-    }
-  }, [accept, maxSizeBytes, maxSizeMB, multiple, compress, onError]);
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+    },
+    [accept, compress, maxSizeBytes, maxSizeMB, multiple, onError],
+  );
 
-  const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const rawFiles = event.target.files;
-    if (!rawFiles || rawFiles.length === 0) return;
-    void processFiles(rawFiles);
-  }, [processFiles]);
+  const handleFileSelect = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const rawFiles = event.target.files;
+      if (!rawFiles || rawFiles.length === 0) {
+        return;
+      }
+      void processFiles(rawFiles);
+    },
+    [processFiles],
+  );
 
-  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDragOver(false);
-    const droppedFiles = event.dataTransfer.files;
-    if (droppedFiles.length === 0) return;
-    void processFiles(droppedFiles);
-  }, [processFiles]);
+  const handleDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      setIsDragOver(false);
+      const droppedFiles = event.dataTransfer.files;
+      if (!droppedFiles.length) {
+        return;
+      }
+      void processFiles(droppedFiles);
+    },
+    [processFiles],
+  );
 
   const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -199,80 +224,68 @@ export function MediaUploader({
 
   const handleRemove = useCallback((id: string) => {
     setFiles((prev) => {
-      const removed = prev.find((f) => f.id === id);
+      const removed = prev.find((file) => file.id === id);
       if (removed) {
         URL.revokeObjectURL(removed.url);
       }
-      return prev.filter((f) => f.id !== id);
+      return prev.filter((file) => file.id !== id);
     });
   }, []);
 
   const handleCancelUpload = useCallback((id: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== id));
+    setFiles((prev) => prev.filter((file) => file.id !== id));
   }, []);
 
   const handleUpload = useCallback(() => {
-    setFiles((prev) => {
-      const updated = prev.map((f) => {
-        if (f.status === "pending") {
-          return { ...f, status: "uploading" as const, progress: 0 };
-        }
-        return f;
-      });
-      return updated;
-    });
+    setFiles((prev) =>
+      prev.map((file) => (file.status === "pending" ? { ...file, status: "uploading" as const, progress: 0 } : file)),
+    );
 
-    // Simulate progress and then mark as done
     setTimeout(() => {
-      setFiles((prev) => {
-        const updated = prev.map((f) => {
-          if (f.status === "uploading") {
-            return { ...f, progress: 50 };
-          }
-          return f;
-        });
-        return updated;
-      });
+      setFiles((prev) =>
+        prev.map((file) => (file.status === "uploading" ? { ...file, progress: 50 } : file)),
+      );
     }, 200);
 
     setTimeout(() => {
       setFiles((prev) => {
-        const uploaded = prev.filter((f) => f.status === "uploading").map((f) => ({
-          ...f,
-          progress: 100,
-          status: "done" as const,
-        }));
-        const rest = prev.filter((f) => f.status !== "uploading");
+        const uploaded = prev
+          .filter((file) => file.status === "uploading")
+          .map((file) => ({ ...file, progress: 100, status: "done" as const }));
+        const rest = prev.filter((file) => file.status !== "uploading");
         const result = [...rest, ...uploaded];
-        onUpload(result.filter((f) => f.status === "done"));
+        onUpload(result.filter((file) => file.status === "done"));
         return result;
       });
     }, 600);
   }, [onUpload]);
 
-  const hasPendingFiles = files.some((f) => f.status === "pending");
-  const hasUploadingFiles = files.some((f) => f.status === "uploading");
+  const hasPendingFiles = files.some((file) => file.status === "pending");
+  const hasUploadingFiles = files.some((file) => file.status === "uploading");
 
   return (
     <div className="h5-media-uploader">
-      {/* Drop zone */}
       <div
         className={`h5-media-dropzone ${isDragOver ? "h5-media-dropzone-active" : ""}`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            inputRef.current?.click();
+          }
+        }}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") inputRef.current?.click(); }}
       >
         <input
           ref={inputRef}
-          type="file"
           accept={accept}
+          className="h5-media-input"
           multiple={multiple}
-          style={{ display: "none" }}
           onChange={handleFileSelect}
+          type="file"
         />
         <InboxOutlined className="h5-media-dropzone-icon" />
         <p className="h5-media-dropzone-text">{t("media.dragDrop")}</p>
@@ -280,14 +293,12 @@ export function MediaUploader({
         <p className="h5-media-dropzone-hint">{t("media.sizeLimit", { maxSize: String(maxSizeMB) })}</p>
       </div>
 
-      {/* Compression progress */}
       {isCompressing ? (
         <div className="h5-media-compression-info">
           <LoadingOutlined /> {t("media.compressing")}
         </div>
       ) : null}
 
-      {/* Upload action buttons */}
       {files.length > 0 ? (
         <div className="h5-media-actions">
           <button
@@ -296,69 +307,58 @@ export function MediaUploader({
             onClick={handleUpload}
             type="button"
           >
-            {hasUploadingFiles ? t("media.uploading") : t("media.upload", { count: files.filter((f) => f.status === "pending").length })}
+            {hasUploadingFiles ? t("media.uploading") : t("media.upload", { count: files.filter((file) => file.status === "pending").length })}
           </button>
         </div>
       ) : null}
 
-      {/* Preview grid */}
       {preview && files.length > 0 ? (
         <div className="h5-media-preview-grid">
           {files.map((file) => (
             <div className="h5-media-preview-item" key={file.id}>
-              {/* Thumbnail */}
               {file.file.type.startsWith("image/") ? (
-                <img
-                  alt={file.name}
-                  className="h5-media-preview-thumb"
-                  src={file.url}
-                />
+                <img alt={file.name} className="h5-media-preview-thumb" src={file.url} />
               ) : (
                 <div className="h5-media-preview-thumb h5-media-preview-file-icon">
                   <InboxOutlined />
                 </div>
               )}
 
-              {/* File name */}
-              <p className="h5-media-preview-name" title={file.name}>{file.name}</p>
+              <p className="h5-media-preview-name" title={file.name}>
+                {file.name}
+              </p>
 
-              {/* Size info */}
               <p className="h5-media-preview-size">
                 {formatFileSize(file.size)}
                 {file.compressedSize != null ? (
                   <span className="h5-media-compression-info">
-                    {" → "}{formatFileSize(file.compressedSize)}
-                    {" "}{t("media.compressInfo", { ratio: formatFileSize(file.size - file.compressedSize) })}
+                    <span aria-hidden="true" className="h5-media-compression-arrow">-&gt;</span>
+                    {formatFileSize(file.compressedSize)}
+                    {" "}
+                    {t("media.compressInfo", { ratio: formatFileSize(file.size - file.compressedSize) })}
                   </span>
                 ) : null}
               </p>
 
-              {/* Progress bar */}
-              {(file.status === "uploading" || file.status === "done") ? (
+              {file.status === "uploading" || file.status === "done" ? (
                 <div className="h5-media-progress-bar">
-                  <div
-                    className="h5-media-progress-fill"
-                    style={{ width: `${file.progress}%` }}
-                  />
+                  <div className="h5-media-progress-fill" style={{ width: `${file.progress}%` }} />
                 </div>
               ) : null}
 
-              {/* Status icon */}
               <div className="h5-media-preview-status">
-                {file.status === "uploading" ? (
-                  <LoadingOutlined className="h5-media-status-uploading" />
-                ) : file.status === "done" ? (
-                  <CheckCircleOutlined className="h5-media-status-done" />
-                ) : file.status === "error" ? (
-                  <CloseCircleOutlined className="h5-media-status-error" />
-                ) : null}
+                {file.status === "uploading" ? <LoadingOutlined className="h5-media-status-uploading" /> : null}
+                {file.status === "done" ? <CheckCircleOutlined className="h5-media-status-done" /> : null}
+                {file.status === "error" ? <CloseCircleOutlined className="h5-media-status-error" /> : null}
               </div>
 
-              {/* Remove button (only for pending files) */}
               {file.status === "pending" ? (
                 <button
                   className="h5-media-remove-btn"
-                  onClick={(e) => { e.stopPropagation(); handleRemove(file.id); }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleRemove(file.id);
+                  }}
                   title={t("media.remove")}
                   type="button"
                 >
@@ -366,11 +366,13 @@ export function MediaUploader({
                 </button>
               ) : null}
 
-              {/* Cancel upload button */}
               {file.status === "uploading" ? (
                 <button
                   className="h5-media-cancel-btn"
-                  onClick={(e) => { e.stopPropagation(); handleCancelUpload(file.id); }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleCancelUpload(file.id);
+                  }}
                   title={t("media.cancel")}
                   type="button"
                 >

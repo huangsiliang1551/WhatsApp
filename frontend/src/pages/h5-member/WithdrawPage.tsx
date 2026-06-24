@@ -43,7 +43,7 @@ function WithdrawStatusFlow({ status }: { status: H5WithdrawRequest["status"] })
   if (status === "rejected") {
     return (
       <div className="h5-withdraw-status-flow-rejected">
-        <CloseCircleFilled style={{ color: "var(--h5-color-danger, #ff4d4f)", fontSize: 20 }} />
+        <CloseCircleFilled className="h5-withdraw-status-flow-icon h5-withdraw-status-flow-icon-rejected" />
         <span>{t("withdraw.statusRejected")}</span>
       </div>
     );
@@ -55,7 +55,7 @@ function WithdrawStatusFlow({ status }: { status: H5WithdrawRequest["status"] })
         <span className="h5-withdraw-status-flow-step-group" key={step.key}>
           {idx > 0 ? <span className="h5-withdraw-status-flow-connector" /> : null}
           <span className={`h5-withdraw-status-flow-step ${idx < currentIdx ? "completed" : "current"}`}>
-            <step.icon style={{ fontSize: 16 }} />
+            <step.icon className="h5-withdraw-status-flow-icon" />
             <span>{step.label}</span>
           </span>
         </span>

@@ -4,19 +4,19 @@ export function HomeSkeleton(): JSX.Element {
   return (
     <div className="h5-skeleton-page">
       <div className="h5-skeleton-section">
-        <div className="h5-skeleton-card" style={{ height: 100 }}>
-          <div className="h5-skeleton-row" style={{ width: '40%' }} />
-          <div className="h5-skeleton-row" style={{ width: '60%', marginTop: 12 }} />
+        <div className="h5-skeleton-card h5-skeleton-card-home-hero">
+          <div className="h5-skeleton-row h5-skeleton-row-home-title" />
+          <div className="h5-skeleton-row h5-skeleton-row-home-subtitle" />
         </div>
         <div className="h5-skeleton-grid">
-          <div className="h5-skeleton-card" style={{ height: 80 }} />
-          <div className="h5-skeleton-card" style={{ height: 80 }} />
+          <div className="h5-skeleton-card h5-skeleton-card-home-stat" />
+          <div className="h5-skeleton-card h5-skeleton-card-home-stat" />
         </div>
       </div>
       <div className="h5-skeleton-section">
-        <div className="h5-skeleton-row" style={{ width: '30%' }} />
-        <div className="h5-skeleton-card" style={{ height: 120, marginTop: 8 }} />
-        <div className="h5-skeleton-card" style={{ height: 120, marginTop: 8 }} />
+        <div className="h5-skeleton-row h5-skeleton-row-section-title" />
+        <div className="h5-skeleton-card h5-skeleton-card-home-task h5-skeleton-card-stacked" />
+        <div className="h5-skeleton-card h5-skeleton-card-home-task h5-skeleton-card-stacked" />
       </div>
     </div>
   );

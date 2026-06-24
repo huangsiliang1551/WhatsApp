@@ -1,13 +1,14 @@
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import timedelta
 from io import BytesIO
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.settings import get_settings
-from app.db.models import AppUser, InviteCode, UserReferral
+from app.db.models import AppUser, InviteCode, MemberAuthSession, UserReferral, utc_now
 
 
 def _operator_headers(*account_ids: str) -> dict[str, str]:
@@ -241,6 +242,36 @@ def test_h5_member_register_me_logout_and_login(client: TestClient) -> None:
     )
     assert login_response.status_code == 200, login_response.text
     assert login_response.json()["member"]["memberNo"] == member["memberNo"]
+
+
+def test_h5_member_refresh_renews_near_expiry_session_without_500(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    _create_site(client, account_id="acct-h5-auth-refresh", site_key="h5-auth-refresh")
+
+    _register_member(
+        client,
+        site_key="h5-auth-refresh",
+        phone="+8613900012345",
+        display_name="Refresh Member",
+    )
+
+    with db_session_factory() as session:
+        auth_session = session.query(MemberAuthSession).order_by(MemberAuthSession.created_at.desc()).first()
+        assert auth_session is not None
+        auth_session.refresh_expires_at = utc_now() + timedelta(days=7)
+        session.add(auth_session)
+        session.commit()
+
+    response = client.post("/api/h5/auth/refresh")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["member"]["siteKey"] == "h5-auth-refresh"
+
+    me_response = client.get("/api/h5/auth/me")
+    assert me_response.status_code == 200, me_response.text
+    assert me_response.json()["member"]["siteKey"] == "h5-auth-refresh"
 
 
 def test_h5_member_numbers_are_eight_digits_and_unique_within_account(client: TestClient) -> None:

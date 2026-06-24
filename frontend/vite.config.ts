@@ -1,12 +1,44 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { shouldServeH5AppShell } from "./src/dev/spaFallback";
+
+function h5SpaFallbackPlugin() {
+  return {
+    name: "h5-spa-fallback",
+    configureServer(server: {
+      config: { root: string };
+      middlewares: { use: (handler: (req: { method?: string; url?: string }, res: { statusCode: number; setHeader: (name: string, value: string) => void; end: (body: string) => void }, next: (error?: unknown) => void) => void | Promise<void>) => void };
+      transformIndexHtml: (url: string, html: string) => Promise<string>;
+    }) {
+      server.middlewares.use(async (req, res, next) => {
+        const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+        if (!shouldServeH5AppShell({ method: req.method ?? "GET", pathname })) {
+          next();
+          return;
+        }
+
+        try {
+          const indexHtml = await readFile(path.resolve(server.config.root, "index.html"), "utf8");
+          const html = await server.transformIndexHtml(req.url ?? pathname, indexHtml);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.end(html);
+        } catch (error) {
+          next(error);
+        }
+      });
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiProxyTarget = env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8000";
 
   return {
-    plugins: [react()],
+    plugins: [react(), h5SpaFallbackPlugin()],
     build: {
       rollupOptions: {
         output: {

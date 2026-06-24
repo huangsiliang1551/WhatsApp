@@ -171,6 +171,70 @@ describe("useAuthGuard", () => {
     expect(screen.getByTestId("wallet-auth").textContent).toBe("guest");
     expect(onNavigate).toHaveBeenCalledWith("/h5/login?redirect=%2Fh5%2Fwallet");
   });
+
+  it("preserves the active site_key when redirecting an unauthenticated multi-site route to login", () => {
+    const onNavigate = vi.fn();
+    vi.mocked(sessionManager.isAuthenticated).mockReturnValue(false);
+    vi.mocked(sessionManager.getUserInfo).mockReturnValue(null);
+
+    function MultiSiteRedirectTestComponent() {
+      const { isAuthenticated } = useAuthGuard(true, "/h5/orders?site_key=mall-es", onNavigate);
+      return <span data-testid="multi-site-auth">{isAuthenticated ? "authed" : "guest"}</span>;
+    }
+
+    render(<MultiSiteRedirectTestComponent />);
+
+    expect(screen.getByTestId("multi-site-auth").textContent).toBe("guest");
+    expect(onNavigate).toHaveBeenCalledWith("/h5/login?site_key=mall-es&redirect=%2Fh5%2Forders%3Fsite_key%3Dmall-es");
+  });
+
+  it("surfaces onboarding, benefits, and support context around the login form", async () => {
+    storage.set("h5-lang", "en");
+
+    const { LoginPage } = await import("./LoginPage");
+    render(
+      <LoginPage
+        page="login"
+        siteKey="mall-cn"
+        loginPhone=""
+        loginPassword=""
+        loginPasswordVisible={false}
+        registerPhone=""
+        registerPassword=""
+        registerPasswordVisible={false}
+        registerConfirmPassword=""
+        registerConfirmPasswordVisible={false}
+        rememberMe
+        onRememberMeChange={vi.fn()}
+        actionName={null}
+        loginError={null}
+        onLoginPhoneChange={vi.fn()}
+        onLoginPasswordChange={vi.fn()}
+        onLoginPasswordToggle={vi.fn()}
+        onRegisterPhoneChange={vi.fn()}
+        onRegisterPasswordChange={vi.fn()}
+        onRegisterPasswordToggle={vi.fn()}
+        onRegisterConfirmPasswordChange={vi.fn()}
+        onRegisterConfirmPasswordToggle={vi.fn()}
+        onLogin={vi.fn(async () => undefined)}
+        onRegister={vi.fn(async () => undefined)}
+        onNavigate={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "Mobile-first member portal covering tasks, wallet, messages, tickets, and fragments.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Task Packages")).toBeTruthy();
+    expect(screen.getByText("Dual Balance Wallet")).toBeTruthy();
+    expect(screen.getByText("Fragment Collection")).toBeTruthy();
+    expect(screen.getByText("Ticket Support")).toBeTruthy();
+    expect(screen.getByText("Quick access for preview and QA review")).toBeTruthy();
+    expect(screen.getByText("Self-service reset is not available. Contact support via ticket.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Submit Issue" })).toBeTruthy();
+  });
 });
 
 describe("LoginPage", () => {

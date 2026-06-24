@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     AppUser,
     Conversation,
+    MemberProfile,
     MemberVerificationRequest,
     MemberWhatsAppBindingRequest,
     Ticket,
@@ -31,16 +32,18 @@ class CustomerSummaryService:
         customer_id: str,
         account_id: str | None = None,
     ) -> dict:
-        customer, conversations, tickets, wallet, member_status = await asyncio.gather(
+        customer, conversations, tickets, wallet, member_status, member_profile = await asyncio.gather(
             self._get_customer(customer_id, account_id),
             self._get_conversations(customer_id, account_id),
             self._get_tickets(customer_id, account_id),
             self._get_wallet(customer_id, account_id),
             self._get_member_status(customer_id, account_id),
+            self._get_member_profile(customer_id, account_id),
         )
         return {
             "customer": customer,
             "member_status": member_status,
+            "member_profile": member_profile,
             "conversations": conversations,
             "tickets": tickets,
             "wallet": wallet,
@@ -207,3 +210,78 @@ class CustomerSummaryService:
             if c.get("tags"):
                 tags.update(c["tags"])
         return sorted(tags)
+
+    async def _get_member_profile(
+        self, customer_id: str, account_id: str | None = None
+    ) -> dict:
+        """返回当前 MemberProfile 的归属快照（spec 5.7）。
+
+        customer_id 既可能是 AppUser.id，也可能是 public_user_id。
+        同一 account 下两者都能命中（spec 5.7 唯一约束 (account_id, user_id)）。
+        """
+        from sqlalchemy import or_
+
+        # Step 1: 先用 AppUser.id 找到 user 行（兼容 customer_id 直接传 id）
+        user_query = select(AppUser).where(AppUser.id == customer_id)
+        if account_id:
+            user_query = user_query.where(AppUser.account_id == account_id)
+        user = self._session.execute(user_query).scalar_one_or_none()
+        if user is None:
+            # Step 2: fallback 到 public_user_id
+            user_query = select(AppUser).where(AppUser.public_user_id == customer_id)
+            if account_id:
+                user_query = user_query.where(AppUser.account_id == account_id)
+            user = self._session.execute(user_query).scalar_one_or_none()
+        if user is None:
+            return self._empty_member_profile()
+
+        profile_query = select(MemberProfile).where(MemberProfile.user_id == user.id)
+        if account_id:
+            profile_query = profile_query.where(MemberProfile.account_id == account_id)
+        member = self._session.execute(profile_query).scalar_one_or_none()
+        if member is None:
+            return self._empty_member_profile()
+
+        return {
+            "member_profile_id": member.id,
+            "member_no": member.member_no,
+            "current_owner_agency_id": member.current_owner_agency_id,
+            "current_owner_staff_user_id": member.current_owner_staff_user_id,
+            "current_owner_agency_member_id": member.current_owner_agency_member_id,
+            "current_owner_assignment_id": member.current_owner_assignment_id,
+            "owner_assigned_at": (
+                member.owner_assigned_at.isoformat() if member.owner_assigned_at else None
+            ),
+            "current_ai_agent_id": member.current_ai_agent_id,
+            "current_ai_assignment_id": member.current_ai_assignment_id,
+            "ai_assigned_at": (
+                member.ai_assigned_at.isoformat() if member.ai_assigned_at else None
+            ),
+            "registration_entry_link_id": member.registration_entry_link_id,
+            "registration_ai_agent_id": member.registration_ai_agent_id,
+            "registration_staff_user_id": member.registration_staff_user_id,
+            "registration_channel": member.registration_channel,
+            "registration_source_type": member.registration_source_type,
+            "attribution_status": member.attribution_status,
+        }
+
+    @staticmethod
+    def _empty_member_profile() -> dict:
+        return {
+            "member_profile_id": None,
+            "member_no": None,
+            "current_owner_agency_id": None,
+            "current_owner_staff_user_id": None,
+            "current_owner_agency_member_id": None,
+            "current_owner_assignment_id": None,
+            "owner_assigned_at": None,
+            "current_ai_agent_id": None,
+            "current_ai_assignment_id": None,
+            "ai_assigned_at": None,
+            "registration_entry_link_id": None,
+            "registration_ai_agent_id": None,
+            "registration_staff_user_id": None,
+            "registration_channel": None,
+            "registration_source_type": None,
+            "attribution_status": "unattributed",
+        }

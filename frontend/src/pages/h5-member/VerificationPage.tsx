@@ -90,6 +90,37 @@ export function VerificationPage({
       if (!latest) return request;
       return new Date(request.updatedAt).getTime() > new Date(latest.updatedAt).getTime() ? request : latest;
     }, null);
+  const latestDocumentCount = latestStatusRequest?.documents.length ?? 0;
+  const hasIdentityReady = verificationName.trim().length > 0;
+
+  const prepChecklistCard = (
+    <article className="h5-card h5-member-verification-prep-card">
+      <SectionHeader meta={t("verification.prepMeta")} title={t("verification.prepTitle")} />
+      <div className="h5-card-stack">
+        <CompactListRow
+          badge={hasIdentityReady ? t("verification.yes") : t("verification.no")}
+          sideNote={t("verification.requestType")}
+          subtitle={t("verification.prepIdentityDesc")}
+          title={t("verification.prepIdentityTitle")}
+          tone={hasIdentityReady ? "success" : "default"}
+        />
+        <CompactListRow
+          badge={latestDocumentCount > 0 ? t("verification.documentsCount", { count: latestDocumentCount }) : t("verification.waitingUpload")}
+          sideNote={t("verification.photoLabel")}
+          subtitle={t("verification.prepPhotoDesc")}
+          title={t("verification.prepPhotoTitle")}
+          tone={latestDocumentCount > 0 ? "success" : "active"}
+        />
+        <CompactListRow
+          badge={statusHeadline}
+          sideNote={latestStatusRequest ? formatTimestamp(latestStatusRequest.updatedAt) : t("verification.noRecord")}
+          subtitle={t("verification.prepReviewDesc")}
+          title={t("verification.prepReviewTitle")}
+          tone={statusTone}
+        />
+      </div>
+    </article>
+  );
 
   const currentRequestCard = (
     <article className="h5-card">
@@ -212,6 +243,13 @@ export function VerificationPage({
         <p className="h5-member-verification-hint">{t("verification.uploadNote")}</p>
         <div className="h5-member-card-actions">
           <button
+            className="h5-secondary-button"
+            onClick={() => _onNavigate("/h5/tickets/new")}
+            type="button"
+          >
+            {t("verification.openSupport")}
+          </button>
+          <button
             className="h5-primary-button"
             disabled={isSubmitting || !verificationName.trim()}
             type="submit"
@@ -252,6 +290,7 @@ export function VerificationPage({
           <p className="h5-member-verification-hint">{t("verification.uploadNote")}</p>
         </div>
       </article>
+      {prepChecklistCard}
       {focusedVerificationRequest ? currentRequestCard : null}
       {submitRequestCard}
       {!focusedVerificationRequest ? currentRequestCard : null}

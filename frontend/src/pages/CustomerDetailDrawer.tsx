@@ -519,32 +519,27 @@ export function CustomerDetailDrawer({
   };
 
   const renderAttribution = () => {
-    // summary 来自 /api/customers/{id}/summary，可能包含 member_profile 字段。
-    // profile 来自 CustomerProfile service。优先用 profile；缺字段时显示"未归属 / 未绑定 AI / 无入口"。
-    const member = (summary as unknown as { member_profile?: Record<string, unknown> | null })
-      ?.member_profile;
-    const ownerId =
-      (member?.current_owner_staff_user_id as string | null | undefined) ?? null;
-    const ownerAgencyId =
-      (member?.current_owner_agency_id as string | null | undefined) ?? null;
-    const aiId = (member?.current_ai_agent_id as string | null | undefined) ?? null;
-    const aiAssignmentId =
-      (member?.current_ai_assignment_id as string | null | undefined) ?? null;
-    const entryLinkId =
-      (member?.registration_entry_link_id as string | null | undefined) ?? null;
-    const channel =
-      (member?.registration_channel as string | null | undefined) ?? null;
-    const sourceType =
-      (member?.registration_source_type as string | null | undefined) ?? null;
-    const status = (member?.attribution_status as string | null | undefined) ?? null;
-    const ownerAssignedAt =
-      (member?.owner_assigned_at as string | null | undefined) ?? null;
-    const aiAssignedAt =
-      (member?.ai_assigned_at as string | null | undefined) ?? null;
-    if (!member) {
+    // summary 来自 /api/customers/{id}/summary，含 member_profile 字段（spec 5.7）。
+    const member = summary?.member_profile ?? null;
+    const ownerId = member?.current_owner_staff_user_id ?? null;
+    const ownerAgencyId = member?.current_owner_agency_id ?? null;
+    const ownerAssignmentId = member?.current_owner_assignment_id ?? null;
+    const aiId = member?.current_ai_agent_id ?? null;
+    const aiAssignmentId = member?.current_ai_assignment_id ?? null;
+    const entryLinkId = member?.registration_entry_link_id ?? null;
+    const registrationAiId = member?.registration_ai_agent_id ?? null;
+    const registrationStaffId = member?.registration_staff_user_id ?? null;
+    const channel = member?.registration_channel ?? null;
+    const sourceType = member?.registration_source_type ?? null;
+    const status = member?.attribution_status ?? null;
+    const ownerAssignedAt = member?.owner_assigned_at ?? null;
+    const aiAssignedAt = member?.ai_assigned_at ?? null;
+    const memberNo = member?.member_no ?? null;
+    const memberProfileId = member?.member_profile_id ?? null;
+    if (!member || !memberProfileId) {
       return (
         <Empty
-          description="该客户尚未加载 member_profile 概览（API 未返回）。请等待客户概览加载完成或联系管理员扩展 API。"
+          description="该客户尚未生成 MemberProfile（未走 H5 注册流 / 未绑定 AI / 未分配客服）"
           style={{ marginTop: 48 }}
         />
       );
@@ -557,8 +552,18 @@ export function CustomerDetailDrawer({
           title="当前人力归属"
           bordered
           items={[
-            { key: "owner", label: "客服", children: ownerId ?? "未归属" },
+            { key: "member_no", label: "会员号", children: memberNo ?? "—" },
+            {
+              key: "owner",
+              label: "客服",
+              children: ownerId ? <Tag color="geekblue">{ownerId}</Tag> : <Tag>未归属</Tag>,
+            },
             { key: "owner_agency", label: "代理商", children: ownerAgencyId ?? "—" },
+            {
+              key: "owner_assignment",
+              label: "Assignment ID",
+              children: ownerAssignmentId ?? "—",
+            },
             {
               key: "owner_assigned_at",
               label: "开始时间",
@@ -585,10 +590,12 @@ export function CustomerDetailDrawer({
         <Descriptions
           size="small"
           column={1}
-          title="注册入口"
+          title="注册入口（首单归因）"
           bordered
           items={[
             { key: "entry_link", label: "EntryLink", children: entryLinkId ?? "无入口" },
+            { key: "reg_ai", label: "注册时 AI", children: registrationAiId ?? "—" },
+            { key: "reg_staff", label: "注册时 Staff", children: registrationStaffId ?? "—" },
             { key: "channel", label: "渠道", children: channel ?? "—" },
             { key: "source_type", label: "来源类型", children: sourceType ?? "—" },
           ]}

@@ -359,6 +359,12 @@
   padding-top: 16px;
 }
 
+.h5-member-auth-form-tip {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .h5-member-auth-brand-row {
   display: flex;
   justify-content: space-between;
@@ -545,6 +551,45 @@
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
 }
 
+.h5-member-auth-remember-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #64748b;
+  cursor: pointer;
+  user-select: none;
+}
+
+.h5-member-auth-link-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.h5-member-auth-inline-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.h5-member-auth-inline-link:hover {
+  color: #1459c7;
+}
+
+.h5-member-auth-error {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #fff1f2;
+  color: #be123c;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* ===== Hero 元信息 ===== */
 .h5-member-hero-meta {
   display: flex;
@@ -686,6 +731,14 @@
   border-radius: inherit;
   background: linear-gradient(90deg, #1677ff 0%, #60a5fa 100%);
   transition: width 220ms ease;
+}
+
+.h5-signin-progress-fill-active {
+  background: linear-gradient(90deg, #ff7a00 0%, #f59e0b 100%);
+}
+
+.h5-signin-progress-fill-complete {
+  background: linear-gradient(90deg, #52c41a 0%, #84cc16 100%);
 }
 
 .h5-member-progress-fill-failed {
@@ -1764,6 +1817,94 @@
 }
 
 /* Message list */
+.h5-member-message-overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
+.h5-member-message-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.h5-member-message-overview-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid #dbe4f0;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.h5-member-message-overview-metric span,
+.h5-member-message-overview-metric strong {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+.h5-member-message-overview-metric span {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.h5-member-message-overview-metric strong {
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.h5-member-orders-overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
+.h5-member-orders-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.h5-member-orders-overview-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid #dbe4f0;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.h5-member-orders-overview-metric span,
+.h5-member-orders-overview-metric strong {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+.h5-member-orders-overview-metric span {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.h5-member-orders-overview-metric strong {
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
 .h5-member-msg-list {
   display: flex;
   flex-direction: column;
@@ -2007,6 +2148,30 @@
   line-height: 1.2;
 }
 
+.h5-member-msg-detail-category-task {
+  color: #1677ff;
+}
+
+.h5-member-msg-detail-category-wallet {
+  color: #52c41a;
+}
+
+.h5-member-msg-detail-category-order {
+  color: #fa8c16;
+}
+
+.h5-member-msg-detail-category-support {
+  color: #722ed1;
+}
+
+.h5-member-msg-detail-category-fragment {
+  color: #eb2f96;
+}
+
+.h5-member-msg-detail-category-system {
+  color: #8c8c8c;
+}
+
 .h5-member-msg-detail-close {
   display: inline-flex;
   align-items: center;
@@ -2066,6 +2231,11 @@
 .h5-member-ticket-summary-card {
   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   box-shadow: 0 14px 32px rgba(37, 99, 235, 0.06);
+}
+
+.h5-member-ticket-overview-card {
+  border-color: rgba(22, 119, 255, 0.18);
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
 }
 
 .h5-member-ticket-summary-copy {
@@ -2381,6 +2551,18 @@
 }
 
 /* ===== 设置 ===== */
+.h5-member-settings-overview-card,
+.h5-member-settings-checklist-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.h5-member-settings-overview-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
 .h5-member-settings-avatar-row {
   display: flex;
   align-items: center;
@@ -2501,17 +2683,59 @@
 }
 
 /* ===== 推广 ===== */
-.h5-member-promotion-hero {
+.h5-member-promotion-program-card {
   padding-top: 16px;
   background: linear-gradient(180deg, #ffffff 0%, #f2f7ff 100%);
   box-shadow: 0 18px 36px rgba(37, 99, 235, 0.08);
 }
 
-.h5-member-promotion-link-box {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+.h5-member-promotion-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.h5-member-promotion-hero-icon {
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #1677ff 0%, #60a5fa 100%);
+  color: #ffffff;
+  font-size: 20px;
+  flex: 0 0 auto;
+  box-shadow: 0 16px 28px rgba(37, 99, 235, 0.2);
+}
+
+.h5-member-promotion-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.h5-member-promotion-copy strong {
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.h5-member-promotion-copy p {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.h5-member-promotion-link-box {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
   margin-top: 14px;
   padding: 12px;
   border: 1px solid #dbe4f0;
@@ -2527,7 +2751,8 @@
   overflow-wrap: anywhere;
 }
 
-.h5-member-promotion-code-row {
+.h5-member-promotion-code-row,
+.h5-member-promotion-actions-foot {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -2538,66 +2763,29 @@
   padding-top: 16px;
 }
 
-.h5-member-promotion-table {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+.h5-member-promotion-record-list {
+  gap: 12px;
+}
+
+.h5-member-promotion-record-row {
   border: 1px solid #dbe4f0;
-  border-radius: 16px;
-  background: #ffffff;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.06);
 }
 
-.h5-member-promotion-table-row {
-  display: grid;
-  grid-template-columns: 64px minmax(94px, 1fr) minmax(132px, 1.2fr) 82px;
-  gap: 10px;
-  align-items: center;
-  min-width: 0;
-  padding: 12px;
-  border-bottom: 1px solid #eef2f7;
-  color: #475569;
-  font-size: 12px;
+.h5-member-promotion-record-row .h5-member-list-row {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-.h5-member-promotion-table-row:last-child {
-  border-bottom: 0;
-}
-
-.h5-member-promotion-table-row span,
-.h5-member-promotion-table-row strong {
-  min-width: 0;
+.h5-member-promotion-record-row .h5-member-list-row-title strong,
+.h5-member-promotion-record-row .h5-member-list-row-subtitle,
+.h5-member-promotion-record-row .h5-member-list-row-note,
+.h5-member-promotion-record-row .h5-member-list-row-action {
   overflow-wrap: anywhere;
-}
-
-.h5-member-promotion-cell::before {
-  content: none;
-}
-
-.h5-member-promotion-table-head {
-  background: #f8fbff;
-  color: #64748b;
-  font-weight: 700;
-}
-
-.h5-member-promotion-status-paid,
-.h5-member-promotion-status-pending {
-  display: inline-flex;
-  justify-content: center;
-  width: fit-content;
-  min-width: 64px;
-  padding: 5px 8px;
-  border-radius: 999px;
-  font-weight: 700;
-}
-
-.h5-member-promotion-status-paid {
-  color: #047857;
-  background: #ecfdf5;
-}
-
-.h5-member-promotion-status-pending {
-  color: #b45309;
-  background: #fffbeb;
+  hyphens: auto;
 }
 
 /* ===== 钱包 ===== */
@@ -2756,6 +2944,11 @@
   line-height: 1.4;
 }
 
+.h5-withdraw-status-flow-icon {
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+
 .h5-withdraw-status-flow-step.completed {
   color: #1677ff;
   background: #edf4ff;
@@ -2769,6 +2962,11 @@
   color: #b91c1c;
   background: #fef2f2;
   border-color: rgba(239, 68, 68, 0.22);
+}
+
+.h5-withdraw-status-flow-icon-rejected {
+  color: var(--h5-color-danger, #ff4d4f);
+  font-size: 20px;
 }
 
 .h5-member-wallet-threshold-bar span {
@@ -2897,6 +3095,18 @@
 }
 
 /* ===== 碎片 ===== */
+.h5-member-fragment-overview-card,
+.h5-member-fragment-prep-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.h5-member-fragment-overview-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
 .h5-member-fragment-hero {
   box-shadow: 0 18px 36px rgba(37, 99, 235, 0.08);
 }
@@ -2932,6 +3142,14 @@
   font-size: 28px;
 }
 
+.h5-member-whatsapp-summary-icon-bound {
+  color: #25d366;
+}
+
+.h5-member-whatsapp-summary-icon-unbound {
+  color: #94a3b8;
+}
+
 .h5-member-whatsapp-bind-copy,
 .h5-member-whatsapp-error,
 .h5-chat-header-info strong,
@@ -2950,13 +3168,32 @@
 }
 
 .h5-member-whatsapp-error {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   color: #ff4d4f;
   font-size: 13px;
   padding: 8px 0;
 }
 
+.h5-member-whatsapp-error-icon,
+.h5-member-whatsapp-loading-icon,
+.h5-chat-loading-icon,
+.h5-chat-header-whatsapp-icon {
+  margin-right: 4px;
+}
+
+.h5-member-leaderboard-overview-card,
 .h5-member-leaderboard-hero {
   padding-top: 16px;
+}
+
+.h5-member-leaderboard-overview-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
+.h5-member-leaderboard-hero {
   background: linear-gradient(180deg, #ffffff 0%, #f2f7ff 100%);
   box-shadow: 0 18px 36px rgba(37, 99, 235, 0.08);
 }
@@ -3264,6 +3501,18 @@
   margin-top: 14px;
 }
 
+.h5-error-boundary-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.h5-error-boundary-refresh {
+  width: auto;
+  min-width: 120px;
+  margin-top: 12px;
+}
+
 /* Skeleton page layout */
 .h5-skeleton-page {
   padding: 16px;
@@ -3282,6 +3531,59 @@
   background: #ffffff;
   border: 1px solid #eef2f6;
 }
+
+.h5-skeleton-card-stacked {
+  margin-top: 8px;
+}
+
+.h5-skeleton-card-home-hero {
+  height: 100px;
+}
+
+.h5-skeleton-card-home-stat {
+  height: 80px;
+}
+
+.h5-skeleton-card-home-task {
+  height: 120px;
+}
+
+.h5-skeleton-card-list-item {
+  height: 80px;
+  margin-bottom: 8px;
+}
+
+.h5-skeleton-card-detail-hero {
+  height: 180px;
+}
+
+.h5-skeleton-card-detail-section {
+  height: 140px;
+}
+
+.h5-skeleton-card-profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 120px;
+}
+
+.h5-skeleton-card-profile-summary {
+  height: 80px;
+}
+
+.h5-skeleton-card-profile-action {
+  height: 60px;
+}
+
+.h5-skeleton-profile-hero-copy {
+  flex: 1;
+}
+
+.h5-skeleton-grid-profile-actions {
+  margin-top: 8px;
+}
+
 .h5-skeleton-avatar {
   width: 56px;
   height: 56px;
@@ -3308,9 +3610,59 @@
   animation: h5-skeleton-shimmer 1.4s ease infinite;
 }
 
-.h5-skeleton-row:nth-child(1) { width: 70%; }
-.h5-skeleton-row:nth-child(2) { width: 90%; }
-.h5-skeleton-row:nth-child(3) { width: 60%; }
+.h5-skeleton-row-home-title,
+.h5-skeleton-row-profile-name {
+  width: 40%;
+}
+
+.h5-skeleton-row-home-subtitle {
+  width: 60%;
+  margin-top: 12px;
+}
+
+.h5-skeleton-row-section-title,
+.h5-skeleton-row-detail-label,
+.h5-skeleton-row-profile-summary-title {
+  width: 30%;
+}
+
+.h5-skeleton-row-list-title,
+.h5-skeleton-row-profile-summary-value {
+  width: 50%;
+}
+
+.h5-skeleton-row-list-meta,
+.h5-skeleton-row-detail-section-title,
+.h5-skeleton-row-profile-meta {
+  width: 40%;
+  margin-top: 8px;
+}
+
+.h5-skeleton-row-list-body {
+  width: 70%;
+  margin-top: 8px;
+}
+
+.h5-skeleton-row-detail-heading {
+  width: 60%;
+  height: 24px;
+  margin-top: 12px;
+}
+
+.h5-skeleton-row-detail-meta {
+  width: 40%;
+  margin-top: 12px;
+}
+
+.h5-skeleton-row-detail-section-body {
+  width: 80%;
+  margin-top: 8px;
+}
+
+.h5-skeleton-row-detail-section-foot {
+  width: 60%;
+  margin-top: 8px;
+}
 
 @keyframes h5-skeleton-shimmer {
   0% { background-position: 200% 0; }
@@ -3425,9 +3777,8 @@
     grid-template-columns: 1fr;
   }
 
-  .h5-member-promotion-link-box,
-  .h5-member-promotion-table-row {
-    grid-template-columns: 1fr;
+  .h5-member-promotion-hero {
+    flex-direction: column;
   }
 
   .h5-member-settings-avatar-row {
@@ -3435,12 +3786,14 @@
     flex-direction: column;
   }
 
-  .h5-member-promotion-table-head {
-    display: none;
+  .h5-member-promotion-record-row .h5-member-list-row {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
-  .h5-member-promotion-table-row {
-    gap: 6px;
+  .h5-member-promotion-record-row .h5-member-list-row-side {
+    width: 100%;
+    align-items: flex-start;
   }
 
   .h5-member-task-card-meta {
@@ -3557,6 +3910,11 @@
   transition: transform 120ms ease;
   will-change: transform;
   pointer-events: none;
+  cursor: default;
+}
+
+.h5-image-viewer-img-zoomed {
+  cursor: grab;
 }
 
 .h5-image-viewer-close {
@@ -3825,6 +4183,10 @@
   text-align: center;
 }
 
+.h5-media-compression-arrow {
+  margin: 0 4px;
+}
+
 .h5-media-remove-btn,
 .h5-media-cancel-btn {
   position: absolute;
@@ -3966,6 +4328,10 @@
   overflow: hidden;
 }
 
+.h5-chat-bubble-image-button {
+  cursor: pointer;
+}
+
 .h5-chat-bubble-image img {
   width: 100%;
   height: auto;
@@ -4001,11 +4367,24 @@
   line-height: 1;
 }
 
+.h5-chat-status-icon {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
 .h5-chat-status-checks {
   display: inline-flex;
   align-items: center;
   gap: 1px;
   line-height: 1;
+}
+
+.h5-chat-status-checks-delivered {
+  color: #94a3b8;
+}
+
+.h5-chat-status-checks-read {
+  color: #53bdeb;
 }
 
 .h5-chat-input-area {
@@ -4043,6 +4422,10 @@
 .h5-chat-image-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.h5-chat-file-input {
+  display: none;
 }
 
 .h5-chat-input {
@@ -4161,6 +4544,34 @@
 
 .h5-pull-indicator-refreshing {
   transition-duration: 300ms;
+}
+
+.h5-pull-indicator-icon {
+  margin-inline-end: 6px;
+}
+
+.h5-infinite-scroll-sentinel {
+  height: 1px;
+}
+
+.h5-infinite-scroll-loading {
+  padding: 16px;
+  color: #64748b;
+  text-align: center;
+}
+
+.h5-media-input {
+  display: none;
+}
+
+.h5-infinite-scroll-loading-icon {
+  margin-inline-end: 6px;
+}
+
+.h5-infinite-scroll-end {
+  padding: 20px;
+  font-size: 13px;
+  text-align: center;
 }
 
 /* ===== Sign-in Card ===== */
@@ -4323,6 +4734,17 @@
   color: #dc2626;
 }
 
+.h5-task-card-progress,
+.h5-task-card-actions {
+  margin-top: 12px;
+}
+
+.h5-task-error-copy {
+  color: var(--color-error, #ff4d4f);
+  font-size: 14px;
+  margin: 0;
+}
+
 /* ===== Package Detail - Product List ===== */
 .h5-package-product-item {
   display: flex;
@@ -4428,10 +4850,19 @@
 }
 
 .h5-package-reward-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   color: #d4380d;
   text-align: center;
   padding: 8px 0;
+  flex-wrap: wrap;
+}
+
+.h5-package-reward-icon {
+  flex: 0 0 auto;
 }
 
 .h5-package-note-copy {
@@ -4451,6 +4882,11 @@
   font-size: 13px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.h5-package-summary-progress,
+.h5-package-inline-actions {
+  margin-top: 12px;
 }
 
 /* ===== Progress Modal ===== */
@@ -4501,6 +4937,10 @@
   font-size: 16px;
 }
 
+.h5-progress-step-icon-placeholder {
+  opacity: 0.35;
+}
+
 .h5-progress-step.active {
   color: #1677ff;
   font-weight: 500;
@@ -4527,6 +4967,24 @@
   background: #1677ff;
   border-radius: 2px;
   transition: width 300ms ease;
+}
+
+.h5-package-progress-status {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.h5-package-progress-status-error {
+  color: #ff4d4f;
+}
+
+.h5-package-progress-status-success {
+  color: #52c41a;
 }
 
 /* ===== Insufficient Balance Dialog ===== */
@@ -4597,31 +5055,56 @@
 }
 
 /* ===== Invite Page ===== */
-.h5-invite-hero {
-  text-align: center;
-  padding: 24px 16px;
+.h5-invite-program-card {
+  background: linear-gradient(180deg, #fffdf7 0%, #f7fbff 100%);
+  border: 1px solid #e7edf6;
 }
 
-.h5-invite-hero .h5-invite-hero-icon {
-  font-size: 40px;
-  margin-bottom: 12px;
+.h5-invite-program-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
-.h5-invite-hero h2 {
-  font-size: 20px;
-  color: #1f2937;
-  margin: 0 0 8px;
+.h5-invite-hero-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #fff1cc 0%, #ffe4a3 100%);
+  color: #b45309;
+  font-size: 26px;
+  flex: 0 0 auto;
 }
 
-.h5-invite-hero p {
-  font-size: 14px;
-  color: #6b7280;
-  margin: 0 0 4px;
+.h5-invite-program-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.h5-invite-program-copy strong {
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.h5-invite-program-copy p {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .h5-invite-link-box {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 12px 16px;
   background: #f9fafb;
@@ -4634,8 +5117,10 @@
 
 .h5-invite-link-box span {
   flex: 1;
+  min-width: min(100%, 180px);
   color: #374151;
   font-family: monospace;
+  overflow-wrap: anywhere;
 }
 
 .h5-invite-actions {
@@ -4648,69 +5133,36 @@
   flex: 1;
 }
 
-.h5-invite-stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 112px), 1fr));
-  gap: 12px;
-  padding: 16px 0;
-}
-
-.h5-invite-stat-card {
-  text-align: center;
-  padding: 12px 8px;
-  background: #f9fafb;
-  border-radius: 10px;
-}
-
-.h5-invite-stat-card strong {
-  display: block;
-  font-size: 20px;
-  color: #1f2937;
-  margin-bottom: 4px;
-}
-
-.h5-invite-stat-card span {
-  font-size: 12px;
-  color: #6b7280;
-}
-
-.h5-invite-record-item {
+.h5-invite-action-foot {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.h5-invite-record-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid #f3f4f6;
-  font-size: 14px;
+  align-items: flex-start;
 }
 
-.h5-invite-record-item:last-child {
-  border-bottom: none;
+.h5-invite-record-row .h5-member-list-row {
+  min-width: 0;
 }
 
-.h5-invite-record-item .h5-invite-record-icon {
-  font-size: 20px;
-  flex-shrink: 0;
-}
-
-.h5-invite-record-item .h5-invite-record-info {
-  flex: 1;
-}
-
-.h5-invite-record-item .h5-invite-record-info strong {
-  display: block;
-  font-size: 14px;
-  color: #1f2937;
-}
-
-.h5-invite-record-item .h5-invite-record-info span {
-  font-size: 12px;
-  color: #9ca3af;
-}
-
-.h5-invite-record-item .h5-invite-record-reward {
-  font-weight: 600;
-  color: #52c41a;
-  font-size: 14px;
+.h5-invite-record-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-top: 6px;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 18px;
+  flex: 0 0 auto;
 }
 
 /* ===== Profile sign-in button ===== */
@@ -5058,7 +5510,9 @@
   .h5-task-focus-grid,
   .h5-member-home-section-grid,
   .h5-member-earnings-summary-grid,
-  .h5-member-wallet-readiness-grid {
+  .h5-member-wallet-readiness-grid,
+  .h5-member-message-overview-grid,
+  .h5-member-orders-overview-grid {
     grid-template-columns: 1fr;
   }
 
@@ -5067,24 +5521,19 @@
     padding-inline: 10px;
   }
 
-  .h5-member-promotion-table-row {
-    gap: 10px;
+  .h5-member-promotion-record-row .h5-member-list-row {
+    padding: 14px;
   }
 
-  .h5-member-promotion-cell {
-    display: grid;
-    grid-template-columns: minmax(0, 42%) minmax(0, 1fr);
-    gap: 10px;
-    align-items: start;
+  .h5-member-promotion-record-row .h5-member-list-row-title strong {
+    white-space: normal;
+    text-overflow: clip;
   }
 
-  .h5-member-promotion-cell::before {
-    content: attr(data-label);
-    color: #64748b;
-    font-weight: 700;
-    line-height: 1.4;
-    overflow-wrap: anywhere;
-    hyphens: auto;
+  .h5-member-promotion-record-row .h5-member-list-row-subtitle,
+  .h5-member-promotion-record-row .h5-member-list-row-note,
+  .h5-member-promotion-record-row .h5-member-list-row-action {
+    white-space: normal;
   }
 }
 
@@ -5109,6 +5558,10 @@
 @media (max-width: 420px) {
   .h5-network-banner {
     top: calc(88px + env(safe-area-inset-top, 0px));
+  }
+
+  .h5-member-auth-support-grid {
+    grid-template-columns: 1fr;
   }
 
   .h5-member-topbar {
@@ -5195,6 +5648,18 @@
   .h5-member-orders-filters .h5-member-segmented-chip {
     flex: 1 1 calc(50% - 8px);
     min-width: 0;
+  }
+
+  .h5-invite-actions {
+    flex-direction: column;
+  }
+
+  .h5-invite-actions button {
+    width: 100%;
+  }
+
+  .h5-invite-record-row {
+    grid-template-columns: 1fr;
   }
 
   .h5-member-card-actions > * {
@@ -5289,6 +5754,15 @@
 @media (max-width: 360px) {
   .h5-member-content {
     padding-inline: 12px;
+  }
+
+  .h5-package-product-item {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .h5-package-product-btn {
+    width: 100%;
   }
 
   .h5-member-list-row {
@@ -5402,6 +5876,15 @@
     font-size: 10px;
     line-height: 1.15;
   }
+
+  .h5-progress-modal {
+    width: min(100%, 280px);
+    padding: 24px 16px;
+  }
+
+  .h5-package-progress-status {
+    flex-wrap: wrap;
+  }
 }
 
 .h5-member-msg-section,
@@ -5446,6 +5929,11 @@
   padding: 14px 16px;
   border: 1px solid #dbe4f0;
   border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.h5-member-verification-prep-card {
+  border-color: rgba(22, 119, 255, 0.16);
   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
 }
 

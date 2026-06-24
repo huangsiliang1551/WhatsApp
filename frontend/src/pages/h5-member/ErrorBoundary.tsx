@@ -52,18 +52,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       if (this.props.fallback) return this.props.fallback;
 
       return (
-        <section
-          className="h5-card-stack h5-member-auth-shell"
-          style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-        >
+        <section className="h5-card-stack h5-member-auth-shell h5-error-boundary-shell">
           <div className="h5-empty-state">
             <div className="h5-empty-icon">!</div>
             <strong className="h5-empty-title">{t("errorBoundary.title")}</strong>
             <p className="h5-empty-desc">{t("errorBoundary.description")}</p>
             <button
-              className="h5-primary-button"
+              className="h5-primary-button h5-error-boundary-refresh"
               onClick={this.handleRefresh}
-              style={{ width: "auto", minWidth: 120, marginTop: 12 }}
             >
               {t("errorBoundary.refresh")}
             </button>

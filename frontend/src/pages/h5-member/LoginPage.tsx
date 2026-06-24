@@ -100,6 +100,13 @@ export function LoginPage({
   onNavigate,
 }: LoginPageProps): JSX.Element {
   useRootScrollUnlock();
+  const isLoginPage = page === "login";
+  const authBenefits = [
+    t("auth.benefits.taskPackage"),
+    t("auth.benefits.wallet"),
+    t("auth.benefits.fragment"),
+    t("auth.benefits.support"),
+  ];
 
   const [loginPhoneError, setLoginPhoneError] = useState("");
   const [loginPhoneTouched, setLoginPhoneTouched] = useState(false);
@@ -209,7 +216,25 @@ export function LoginPage({
     <main className="h5-shell h5-member-auth-shell" style={h5ScrollableViewportStyle}>
       <section className="h5-member-auth-panel">
         <div className="h5-member-auth-logo">{siteKey.toUpperCase()}</div>
+        <section className="h5-card h5-member-auth-card">
+          <div className="h5-member-auth-brand-row">
+            <span className="h5-member-auth-brand-pill">{t("shell.brandName")}</span>
+            <span className="h5-member-auth-tip">{isLoginPage ? t("auth.loginByPassword") : t("auth.register")}</span>
+          </div>
+          <div className="h5-member-auth-heading">
+            <strong>{isLoginPage ? t("auth.loginTitle") : t("auth.registerTitle")}</strong>
+            <span>{t("auth.loginSubtitle")}</span>
+          </div>
+          <div className="h5-member-auth-benefits">
+            {authBenefits.map((benefit) => (
+              <span key={benefit}>{benefit}</span>
+            ))}
+          </div>
+        </section>
         <section className="h5-card h5-member-auth-form-card">
+          <p className="h5-member-auth-tip h5-member-auth-form-tip">
+            {isLoginPage ? t("auth.loginTip") : t("auth.registerTip")}
+          </p>
           <div className="h5-member-auth-switch">
             <button
               className={`h5-member-auth-tab ${page === "login" ? "h5-member-auth-tab-active" : ""}`}
@@ -254,8 +279,7 @@ export function LoginPage({
                 {loginPassErr ? <span className="h5-field-error">{loginPassErr}</span> : null}
               </label>
 
-              {/* Remember me row (between password and login button) */}
-              <label style={{display:"flex",flexDirection:"row",alignItems:"center",gap:"8px",fontSize:"13px",color:"#64748b",cursor:"pointer",userSelect:"none"}}>
+              <label className="h5-member-auth-remember-row">
                 <input
                   type="checkbox"
                   checked={rememberMe}
@@ -264,21 +288,20 @@ export function LoginPage({
                 <span>{t('auth.rememberMe')}</span>
               </label>
 
-              {/* Login error */}
               {loginError ? <div className="h5-member-auth-error">{loginError}</div> : null}
 
               <button className="seed-button" disabled={actionName === "login"} type="submit">
                 {actionName === "login" ? t('auth.loginSubmitting') : t('auth.login')}
               </button>
 
-              {/* Forgot password (text link, right-aligned below button) */}
-              <div style={{textAlign:"right",marginTop:"10px"}}>
-                <span
+              <div className="h5-member-auth-link-row">
+                <button
+                  className="h5-member-auth-inline-link"
                   onClick={() => onNavigate("/h5/tickets/new")}
-                  style={{fontSize:"13px",color:"#94a3b8",cursor:"pointer",textDecoration:"none"}}
+                  type="button"
                 >
                   {t('auth.forgotPasswordLink')}
-                </span>
+                </button>
               </div>
             </form>
           ) : (
@@ -335,8 +358,37 @@ export function LoginPage({
             </form>
           )}
         </section>
-
-
+        <section className="h5-card h5-member-auth-support-card">
+          <div className="h5-member-auth-support-head">
+            <div>
+              <strong>{t("auth.demoAccount")}</strong>
+              <span>{t("auth.demoAccountDesc")}</span>
+            </div>
+            <code>{siteKey.toUpperCase()}</code>
+          </div>
+          <div className="h5-member-auth-support-grid">
+            <div className="h5-member-auth-support-item">
+              <strong>{t("auth.forgotPassword")}</strong>
+              <span>{t("auth.forgotPasswordDesc")}</span>
+            </div>
+            <div className="h5-member-auth-support-item">
+              <strong>{isLoginPage ? t("auth.noAccount") : t("auth.hasAccount")}</strong>
+              <span>{isLoginPage ? t("auth.noAccountDesc") : t("auth.hasAccountDesc")}</span>
+            </div>
+          </div>
+          <div className="h5-member-auth-support-actions">
+            <button className="seed-button seed-button-secondary" onClick={() => onNavigate("/h5/tickets/new")} type="button">
+              {t("auth.newTicket")}
+            </button>
+            <button
+              className="seed-button"
+              onClick={() => onNavigate(isLoginPage ? "/h5/register" : "/h5/login")}
+              type="button"
+            >
+              {isLoginPage ? t("auth.goRegister") : t("auth.goLogin")}
+            </button>
+          </div>
+        </section>
       </section>
     </main>
   );

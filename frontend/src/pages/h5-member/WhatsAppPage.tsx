@@ -11,7 +11,7 @@ import {
 
 import type { H5ChatMessage, H5WhatsAppBinding } from "../../services/h5Member";
 import { formatTimestamp, getCurrentLocale } from "./sharedUtils";
-import { DetailGrid, SectionHeader } from "./sharedComponents";
+import { CompactListRow, DetailGrid, SectionHeader } from "./sharedComponents";
 import { t } from "./i18n";
 import { ImageViewer } from "./ImageViewer";
 import { ProfileSkeleton } from "./skeletons";
@@ -26,7 +26,7 @@ type WhatsAppPageProps = {
   chatMessages: H5ChatMessage[];
   chatLoading: boolean;
   chatHasMore: boolean;
-  onSendMessage: (content: string, type?: string) => Promise<void>;
+  onSendMessage: (content: string, type?: string, imageUrl?: string) => Promise<void>;
   onLoadMoreMessages: () => Promise<void>;
   onRefreshMessages: () => Promise<void>;
   onBack?: () => void;
@@ -55,16 +55,16 @@ function formatChatTime(iso: string): string {
 
 function ChatStatusIcon({ status }: { status: H5ChatMessage["status"] }): JSX.Element | null {
   if (status === "sending") {
-    return <LoadingOutlined style={{ fontSize: 12, color: "#94a3b8" }} />;
+    return <LoadingOutlined className="h5-chat-status-icon h5-chat-status-icon-sending" />;
   }
 
   if (status === "sent") {
-    return <CheckOutlined style={{ fontSize: 12, color: "#94a3b8" }} />;
+    return <CheckOutlined className="h5-chat-status-icon h5-chat-status-icon-sent" />;
   }
 
   if (status === "delivered") {
     return (
-      <span className="h5-chat-status-checks" style={{ color: "#94a3b8" }}>
+      <span className="h5-chat-status-checks h5-chat-status-checks-delivered">
         <CheckOutlined />
         <CheckOutlined />
       </span>
@@ -73,7 +73,7 @@ function ChatStatusIcon({ status }: { status: H5ChatMessage["status"] }): JSX.El
 
   if (status === "read") {
     return (
-      <span className="h5-chat-status-checks" style={{ color: "#53bdeb" }}>
+      <span className="h5-chat-status-checks h5-chat-status-checks-read">
         <CheckOutlined />
         <CheckOutlined />
       </span>
@@ -204,9 +204,10 @@ export function WhatsAppPage({
         return;
       }
 
+      const previewUrl = URL.createObjectURL(file);
       setSending(true);
       try {
-        await onSendMessage(t("chat.image"), "image");
+        await onSendMessage(t("chat.image"), "image", previewUrl);
       } finally {
         setSending(false);
         if (fileInputRef.current) {
@@ -278,9 +279,8 @@ export function WhatsAppPage({
       <div className={`h5-chat-bubble ${isInbound ? "h5-chat-bubble-inbound" : "h5-chat-bubble-outbound"}`} key={message.id}>
         {isImage && message.image_url ? (
           <div
-            className="h5-chat-bubble-image"
+            className="h5-chat-bubble-image h5-chat-bubble-image-button"
             onClick={() => setImageViewerUrl(message.image_url ?? null)}
-            style={{ cursor: "pointer" }}
           >
             <img alt={t("chat.image")} src={message.image_url} />
           </div>
@@ -313,7 +313,7 @@ export function WhatsAppPage({
           <div className="h5-chat-header-info">
             <strong>{t("chat.title")}</strong>
             <span>
-              <WhatsAppOutlined style={{ color: "#25D366", marginRight: 4 }} />
+              <WhatsAppOutlined className="h5-chat-header-whatsapp-icon" />
               {whatsAppBinding?.phoneNumber ?? ""}
             </span>
           </div>
@@ -322,7 +322,7 @@ export function WhatsAppPage({
         <div className="h5-chat-messages" onScroll={handleScroll} ref={messagesContainerRef}>
           {chatLoading && chatMessages.length === 0 ? (
             <div className="h5-chat-loading">
-              <LoadingOutlined style={{ marginRight: 6 }} />
+              <LoadingOutlined className="h5-chat-loading-icon" />
               {t("chat.loading")}
             </div>
           ) : null}
@@ -345,7 +345,7 @@ export function WhatsAppPage({
           >
             <PictureOutlined />
           </button>
-          <input accept="image/*" onChange={handleImageSelect} ref={fileInputRef} style={{ display: "none" }} type="file" />
+          <input accept="image/*" className="h5-chat-file-input" onChange={handleImageSelect} ref={fileInputRef} type="file" />
           <textarea
             className="h5-chat-input"
             disabled={sending}
@@ -369,7 +369,7 @@ export function WhatsAppPage({
   return (
     <section className="h5-card-stack">
       <article className="h5-card h5-member-whatsapp-summary-card">
-        <div className="h5-member-whatsapp-summary-icon" style={{ color: isBound ? "#25D366" : "#94a3b8" }}>
+        <div className={`h5-member-whatsapp-summary-icon ${isBound ? "h5-member-whatsapp-summary-icon-bound" : "h5-member-whatsapp-summary-icon-unbound"}`}>
           <WhatsAppOutlined />
         </div>
         <SectionHeader meta={bindingStatusLabel} title={t("whatsapp.title")} />
@@ -391,10 +391,47 @@ export function WhatsAppPage({
         />
       </article>
 
+      {!isBound ? (
+        <article className="h5-card h5-member-whatsapp-bind-card">
+          <SectionHeader meta={t("whatsapp.readinessMeta")} title={t("whatsapp.readinessTitle")} />
+          <div className="h5-card-stack">
+            <CompactListRow
+              badge={whatsappPhone.trim() ? bindingStatusLabel : t("whatsapp.notBound")}
+              sideNote={t("whatsapp.bindPhoneLabel")}
+              subtitle={t("whatsapp.readinessPhoneDesc")}
+              title={t("whatsapp.readinessPhoneTitle")}
+              tone={whatsappPhone.trim() ? "active" : "default"}
+            />
+            <CompactListRow
+              badge={bindingStatusLabel}
+              sideNote={formatTimestamp(whatsAppBinding?.requestedAt ?? whatsAppBinding?.lastUpdatedAt ?? null)}
+              subtitle={t("whatsapp.readinessReviewDesc")}
+              title={t("whatsapp.readinessReviewTitle")}
+              tone={isPendingBinding ? "active" : "default"}
+            />
+            <CompactListRow
+              badge={t("whatsapp.openBinding")}
+              sideNote={t("whatsapp.boundStatus")}
+              subtitle={t("whatsapp.readinessNotifyDesc")}
+              title={t("whatsapp.readinessNotifyTitle")}
+              tone="success"
+            />
+          </div>
+        </article>
+      ) : null}
+
       {isPendingBinding ? (
         <article className="h5-card h5-member-whatsapp-bind-card">
           <SectionHeader meta={t("whatsapp.pending")} title={t("whatsapp.pendingTitle")} />
           <p className="muted h5-member-whatsapp-bind-copy">{t("whatsapp.pendingDesc")}</p>
+          <div className="h5-card-stack">
+            <CompactListRow
+              sideNote={formatTimestamp(whatsAppBinding?.requestedAt ?? whatsAppBinding?.lastUpdatedAt ?? null)}
+              subtitle={t("whatsapp.pendingChecklistDesc")}
+              title={t("whatsapp.pendingChecklistTitle")}
+              tone="active"
+            />
+          </div>
         </article>
       ) : null}
 
@@ -417,7 +454,7 @@ export function WhatsAppPage({
             </label>
             {apiError ? (
               <div className="h5-member-whatsapp-error">
-                <CloseCircleOutlined style={{ marginRight: 4 }} />
+                <CloseCircleOutlined className="h5-member-whatsapp-error-icon" />
                 {apiError}
               </div>
             ) : null}
@@ -425,7 +462,7 @@ export function WhatsAppPage({
               <button className="h5-primary-button" disabled={isApiAction || apiLoading || !whatsappPhone.trim()} type="submit">
                 {isApiAction || apiLoading ? (
                   <>
-                    <LoadingOutlined style={{ marginRight: 6 }} />
+                    <LoadingOutlined className="h5-member-whatsapp-loading-icon" />
                     {t("whatsapp.processing")}
                   </>
                 ) : (

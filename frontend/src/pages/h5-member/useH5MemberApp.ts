@@ -1142,10 +1142,13 @@ export function useH5MemberApp(
 
   // ── H52-016: Chat handlers ────────────────────────────────────
 
-  async function handleSendMessage(content: string, type: string = 'text'): Promise<void> {
+  async function handleSendMessage(content: string, type: string = 'text', imageUrl?: string): Promise<void> {
     try {
-      const sent = await sendMessageApi('default', content, type);
-      setChatMessages((prev) => [...prev, sent]);
+      const sent = await sendMessageApi('default', content, type, imageUrl);
+      const normalizedSent = type === "image" && imageUrl && !sent.image_url
+        ? { ...sent, image_url: imageUrl }
+        : sent;
+      setChatMessages((prev) => [...prev, normalizedSent]);
       setChatTotal((prev) => prev + 1);
     } catch (actionError) {
       if (handleAuthRequiredActionError(actionError)) return;

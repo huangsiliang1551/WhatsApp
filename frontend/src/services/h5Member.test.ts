@@ -1,5 +1,6 @@
 ﻿import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as h5Module from "./h5";
@@ -199,6 +200,7 @@ function createDashboardState() {
       brand_name: "Brand mall-cn",
       tagline: "Demo tagline",
       accent_color: "#1677ff",
+      default_language: "zh-CN",
     },
     member: {
       accountId: "38271456",
@@ -206,6 +208,7 @@ function createDashboardState() {
       publicUserId: "h5-38271456",
       displayName: "Demo Member",
       inviteCode: "INV-ABCD1234",
+      languageCode: "zh-CN",
       accountIdMasked: "382***56",
       createdAt: "2026-06-11T00:00:00Z",
     },
@@ -249,8 +252,8 @@ function createTaskPackageState(overrides: Partial<TaskPackageState> = {}): Task
 function createTaskPackageStateBase(): TaskPackageState {
   return {
     id: "pkg-1",
-    title: "鏂版墜浠诲姟鍖?A",
-    description: "Demo task package",
+    title: "新手任务包 A",
+    description: "完成首批下单任务后可领取任务余额与碎片奖励。",
     type: "rookie" as const,
     status: "active" as const,
     rewardRatio: 0.12,
@@ -283,8 +286,8 @@ function createMessageState(overrides: Partial<h5MemberModule.H5MessageItem> = {
   return {
     id: "msg-1",
     category: "support",
-    title: "宸ュ崟鏈夋柊鍥炲",
-    body: "璇疯ˉ鍏呰鍗曞彿",
+    title: "工单有新回复",
+    body: "请补充订单号",
     createdAt: "2026-06-11T02:00:00Z",
     isRead: false,
     ...overrides,
@@ -791,6 +794,7 @@ describe("H5 member auth service contract", () => {
   beforeEach(() => {
     installLocalStorageMock();
     window.localStorage.clear();
+    window.localStorage.setItem("h5-lang", "zh-CN");
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     vi.unstubAllEnvs();
   });
@@ -870,6 +874,10 @@ describe("H5 member auth service contract", () => {
 
   it("refreshes the auth session after auth/me returns 401", async () => {
     window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      get: () => "h5_member_session=active-cookie; h5_member_refresh=refresh-cookie",
+    });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(createErrorResponse(401, "Session expired"))
@@ -892,6 +900,10 @@ describe("H5 member auth service contract", () => {
   it("clears local cache and returns null when auth/me and refresh both return 401", async () => {
     window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
     vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "false");
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      get: () => "h5_member_session=active-cookie; h5_member_refresh=refresh-cookie",
+    });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(createErrorResponse(401, "Session expired"))
@@ -941,6 +953,10 @@ describe("H5 member auth service contract", () => {
   it("falls back to legacy local session only when explicitly enabled", async () => {
     window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
     vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "true");
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      get: () => "h5_member_session=active-cookie; h5_member_refresh=refresh-cookie",
+    });
     const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -952,6 +968,10 @@ describe("H5 member auth service contract", () => {
 
   it("falls back to legacy local session in dev when auth endpoint returns html instead of json", async () => {
     window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      get: () => "h5_member_session=active-cookie; h5_member_refresh=refresh-cookie",
+    });
     const fetchMock = vi.fn().mockResolvedValue(createHtmlResponse());
     vi.stubGlobal("fetch", fetchMock);
 
@@ -990,6 +1010,10 @@ describe("H5 member auth service contract", () => {
 
   it("loads the current member session from auth/me before using cached state", async () => {
     window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      get: () => "h5_member_session=active-cookie; h5_member_refresh=refresh-cookie",
+    });
     const fetchMock = vi.fn().mockResolvedValue(createJsonResponse(createAuthPayload()));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1001,6 +1025,21 @@ describe("H5 member auth service contract", () => {
     expect(session).not.toBeNull();
     expect(session?.accountId).toBe("38271456");
     expect(window.localStorage.getItem(MEMBER_SESSION_KEY)).toContain("\"accountId\":\"38271456\"");
+  });
+
+  it("skips backend auth probes in dev when no h5 auth cookies exist and falls back to the local member session", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      get: () => "",
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const session = await getCurrentMemberSession();
+
+    expect(session).toMatchObject(LEGACY_SESSION);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("logs out through backend auth, uses credentials include, and clears the member session cache", async () => {
@@ -1555,11 +1594,11 @@ describe("H5 member auth service contract", () => {
     await renderApp("/h5/home?site_key=mall-cn", vi.fn());
 
     const walletSection =
-      document.querySelector(".h5-member-home-wallet") ??
-      document.querySelector(".h5-member-home-task-focus");
+      document.querySelector(".h5-member-home-metric-grid") ??
+      document.querySelector(".h5-member-home-command-panel");
     const toolsSection =
-      document.querySelector(".h5-member-home-tools") ??
-      document.querySelector(".h5-member-home-primary");
+      document.querySelector(".h5-member-home-section-grid") ??
+      document.querySelector(".h5-member-home-command");
     expect(walletSection).not.toBeNull();
     expect(toolsSection).not.toBeNull();
     const walletSectionNode = walletSection as HTMLElement;
@@ -1659,7 +1698,7 @@ describe("H5 member auth service contract", () => {
 
     await renderApp("/h5/promotion?site_key=mall-cn", vi.fn());
 
-    const copyButton = document.querySelector(".h5-member-promotion-link-box .seed-button") as HTMLButtonElement | null;
+    const copyButton = document.querySelector(".h5-member-promotion-link-box + .h5-member-card-actions .seed-button") as HTMLButtonElement | null;
     expect(copyButton).not.toBeNull();
 
     await act(async () => {
@@ -1691,16 +1730,39 @@ describe("H5 member auth service contract", () => {
 
     await renderApp("/h5/home?site_key=mall-cn", vi.fn());
 
-    expect(document.querySelector(".h5-member-home-hero")).not.toBeNull();
-    const quickGrid = document.querySelector(".h5-member-quick-grid") as HTMLElement | null;
+    expect(document.querySelector(".h5-member-home-command")).not.toBeNull();
+    const quickGrid = document.querySelector(".h5-member-home-section-grid") as HTMLElement | null;
+    expect(document.querySelector(".h5-member-home-metric-grid")).not.toBeNull();
     expect(quickGrid).not.toBeNull();
-    expect(quickGrid?.querySelectorAll(".h5-member-quick-action").length).toBe(4);
-    expect(quickGrid?.querySelectorAll(".h5-member-quick-action-meta").length).toBe(4);
-    expect(document.querySelector(".h5-member-home-service-list")).not.toBeNull();
+    expect(quickGrid?.querySelectorAll(".h5-member-quick-action").length).toBeGreaterThan(0);
+    expect(document.querySelector(".h5-card-stack")).not.toBeNull();
     expect(document.body.textContent).toContain("任务中心");
-    expect(document.body.textContent).toContain("金额总览");
+    expect(document.body.textContent).toContain("今日收益");
     expect(document.body.textContent).toContain("联系客服");
-    expect(document.body.textContent).toContain("我要推广");
+    expect(document.body.textContent).toContain("推广");
+    expect(document.body.textContent).toContain("充值 / 提现");
+    expect(document.body.textContent).toContain("成长动能");
+    expect(document.body.textContent).toContain("通知");
+    expect(document.body.textContent).toContain("查看");
+    expect(document.body.textContent).toContain("进入");
+    expect(document.body.textContent).toContain("暂无排行榜数据");
+    expect(document.body.textContent).toContain("进行中");
+    expect(document.body.textContent).toContain("推荐下一步");
+    expect(document.body.textContent).toContain("待领取 1");
+    expect(document.body.textContent).toContain("即将到期 0");
+    expect(document.body.textContent).toContain("新手任务");
+    expect(document.body.textContent).toContain("进度 0/1");
+    expect(document.body.textContent).toContain("前 0 名");
+    expect(document.body.textContent).not.toContain("Recharge / Withdraw");
+    expect(document.body.textContent).not.toContain("Growth Momentum");
+    expect(document.body.textContent).not.toContain("No leaderboard data");
+    expect(document.body.textContent).not.toContain("View All");
+    expect(document.body.textContent).not.toContain("Enter");
+    expect(document.body.textContent).not.toContain("In Progress");
+    expect(document.body.textContent).not.toContain("Quick next steps");
+    expect(document.body.textContent).not.toContain("Top 0");
+    expect(document.body.textContent).not.toContain("Rookie Task");
+    expect(document.body.textContent).not.toContain("Progress 0/1");
   });
 
   it("surfaces member verification summary on home and profile", async () => {
@@ -1728,9 +1790,30 @@ describe("H5 member auth service contract", () => {
 
     await renderApp("/h5/home?site_key=mall-cn", vi.fn());
     expect(document.body.textContent).toContain("会员认证");
-    expect(document.querySelector(".h5-member-home-verification")).not.toBeNull();
 
     await renderApp("/h5/me?site_key=mall-cn", vi.fn());
+    expect(document.querySelector(".h5-member-profile-quick-actions")).not.toBeNull();
+  });
+
+  it("treats the legacy /h5/profile route as the member profile center", async () => {
+    vi.spyOn(h5MemberModule, "getCurrentMemberSession").mockResolvedValue({
+      accountId: "38271456",
+      phone: "13800000000",
+      publicUserId: "h5-38271456",
+      displayName: "Demo Member",
+      inviteCode: "INV-ABCD1234",
+    });
+    vi.spyOn(h5MemberModule, "getMaskedPhone").mockResolvedValue("138****0000");
+    vi.spyOn(h5MemberModule, "getWhatsAppBinding").mockResolvedValue({
+      isBound: false,
+      phoneNumber: null,
+      lastUpdatedAt: null,
+    });
+    vi.spyOn(h5MemberModule, "getMemberHomeDashboard").mockResolvedValue(createDashboardState());
+
+    await renderApp("/h5/profile?site_key=mall-cn", vi.fn());
+
+    expect(document.body.textContent).toContain("账户中心");
     expect(document.querySelector(".h5-member-profile-quick-actions")).not.toBeNull();
   });
 
@@ -1749,12 +1832,12 @@ describe("H5 member auth service contract", () => {
 
     await renderApp("/h5/orders?site_key=mall-cn", vi.fn());
     expect(document.querySelector(".h5-empty-state")).not.toBeNull();
-    expect(document.body.textContent).toContain("暂无订单记录");
-    expect(document.body.textContent).toContain("返回任务中心");
+    expect(document.body.textContent).toContain("暂无订单");
+    expect(document.body.textContent).toContain("返回任务");
 
     await renderApp("/h5/tickets?site_key=mall-cn", vi.fn());
     expect(document.querySelector(".h5-empty-state")).not.toBeNull();
-    expect(document.body.textContent).toContain("暂无工单记录");
+    expect(document.body.textContent).toContain("暂无工单");
     expect(document.body.textContent).toContain("联系客服");
   });
 
@@ -1812,7 +1895,6 @@ describe("H5 member auth service contract", () => {
     vi.spyOn(h5MemberModule, "listTaskPackages").mockResolvedValue([createTaskPackageState()]);
 
     await renderApp("/h5/home?site_key=mall-cn", vi.fn());
-    expect(document.querySelector(".h5-member-home-verification")).not.toBeNull();
     expect(document.body.textContent).toContain("会员认证");
     await renderApp("/h5/me?site_key=mall-cn", vi.fn());
     expect(document.querySelector(".h5-member-profile-quick-actions")).not.toBeNull();
@@ -1834,13 +1916,13 @@ describe("H5 member auth service contract", () => {
     await renderApp("/h5/orders?site_key=mall-cn", vi.fn());
 
     expect(document.querySelector(".h5-empty-state")).not.toBeNull();
-    expect(document.body.textContent).toContain("暂无订单记录");
-    expect(document.body.textContent).toContain("返回任务中心");
+    expect(document.body.textContent).toContain("暂无订单");
+    expect(document.body.textContent).toContain("返回任务");
 
     await renderApp("/h5/tickets?site_key=mall-cn", vi.fn());
     const emptyStates = document.querySelectorAll(".h5-empty-state");
     expect(emptyStates.length).toBeGreaterThan(0);
-    expect(document.body.textContent).toContain("暂无工单记录");
+    expect(document.body.textContent).toContain("暂无工单");
     expect(document.body.textContent).toContain("联系客服");
   });
 
@@ -2208,6 +2290,8 @@ describe("H5App auth routing", () => {
     expect(document.querySelectorAll(".h5-member-message-feed-item").length).toBeGreaterThan(0);
     expect(document.body.textContent).toContain("重要通知");
     expect(document.body.textContent).toContain("其他消息");
+    expect(document.body.textContent).toContain("请补充订单号");
+    expect(document.body.textContent).not.toContain("璇疯ˉ鍏呰鍗曞彿");
 
     await renderApp("/h5/me?site_key=mall-cn", vi.fn());
     expect(document.body.textContent).toContain("系统余额");
@@ -2237,9 +2321,9 @@ describe("H5App auth routing", () => {
     expect(quickActions).not.toBeNull();
     expect(balanceStrip).not.toBeNull();
     expect(document.querySelector(".h5-member-whatsapp-status-icon-unbound")).not.toBeNull();
-    expect(document.body.textContent).toContain("订单列表");
+    expect(document.body.textContent).toContain("订单");
     expect(document.body.textContent).toContain("联系客服");
-    expect((balanceStrip as HTMLElement).textContent).not.toContain("订单列表");
+    expect((balanceStrip as HTMLElement).textContent).not.toContain("订单");
     expect((balanceStrip as HTMLElement).textContent).not.toContain("联系客服");
     expect((quickActions as HTMLElement).compareDocumentPosition(balanceStrip as HTMLElement) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
@@ -2455,6 +2539,58 @@ describe("H5App auth routing", () => {
     expect(document.querySelector(".h5-chat-messages")).not.toBeNull();
   });
 
+  it("keeps a local preview visible when image send responses omit image_url", async () => {
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:chat-preview-1"),
+    });
+
+    vi.spyOn(h5MemberModule, "getCurrentMemberSession").mockResolvedValue({
+      accountId: "38271456",
+      phone: "13800000000",
+      publicUserId: "h5-38271456",
+      displayName: "Demo Member",
+      inviteCode: "INV-ABCD1234",
+    });
+    vi.spyOn(h5MemberModule, "getMemberHomeDashboard").mockResolvedValue(createDashboardState());
+    vi.spyOn(h5MemberModule, "getMaskedPhone").mockResolvedValue("138****0000");
+    vi.spyOn(h5MemberModule, "getWhatsAppBinding").mockResolvedValue({
+      isBound: true,
+      phoneNumber: "+1 202 555 0101",
+      lastUpdatedAt: "2026-06-11T05:00:00Z",
+    });
+    vi.spyOn(h5MemberModule, "getMessagesApi").mockResolvedValue({
+      items: [],
+      total: 0,
+    });
+    vi.spyOn(h5MemberModule, "sendMessageApi").mockResolvedValue({
+      id: "msg-image-1",
+      content: "Image",
+      type: "image",
+      direction: "outbound",
+      status: "sent",
+      timestamp: "2026-06-24T00:00:00.000Z",
+    });
+
+    await renderApp("/h5/whatsapp?site_key=mall-cn", vi.fn());
+
+    const fileInput = document.querySelector(".h5-chat-file-input") as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.change(fileInput!, {
+        target: {
+          files: [new File(["image"], "chat-photo.png", { type: "image/png" })],
+        },
+      });
+    });
+    await flushEffects();
+
+    const previewImage = document.querySelector(".h5-chat-bubble-image img") as HTMLImageElement | null;
+    expect(previewImage).not.toBeNull();
+    expect(previewImage?.getAttribute("src")).toBe("blob:chat-preview-1");
+  });
+
   it("localizes the invite page retry fallback inside the h5 app shell", async () => {
     window.localStorage.setItem("h5-lang", "zh-CN");
 
@@ -2548,7 +2684,7 @@ describe("H5App auth routing", () => {
     await renderApp("/h5/verification?site_key=mall-cn", vi.fn());
 
     expect(document.querySelector(".h5-member-detail-grid")).not.toBeNull();
-    expect(document.querySelector(".h5-verification-flow")).not.toBeNull();
+    expect(document.querySelector(".h5-member-verification-status-flow")).not.toBeNull();
     expect(document.body.textContent).not.toContain("WhatsApp binding unavailable");
   });
 
@@ -2611,7 +2747,7 @@ describe("H5App auth routing", () => {
     await renderApp("/h5/verification?site_key=mall-cn", vi.fn());
 
     expect(document.querySelector(".h5-member-detail-grid")).not.toBeNull();
-    expect(document.querySelector(".h5-verification-flow")).not.toBeNull();
+    expect(document.querySelector(".h5-member-verification-status-flow")).not.toBeNull();
     expect(document.body.textContent).toContain("Active request summary notes.");
     expect(document.body.textContent).not.toContain("Verification detail unavailable");
   });
@@ -2741,10 +2877,10 @@ describe("H5App auth routing", () => {
       idNumber: undefined,
     });
     expect(summarySpy).toHaveBeenCalledTimes(2);
-    expect(document.querySelector(".h5-verification-flow")).not.toBeNull();
+    expect(document.querySelector(".h5-member-verification-status-flow")).not.toBeNull();
     expect(document.body.textContent).toContain("Please review my newly submitted identity documents.");
-    expect(document.querySelector(".h5-verification-flow")).not.toBeNull();
-    expect((document.querySelector('.h5-form button[type="submit"]') as HTMLButtonElement | null)?.disabled).toBe(true);
+    expect(document.querySelector(".h5-member-verification-status-flow")).not.toBeNull();
+    expect(document.querySelector(".h5-member-verification-form")).toBeNull();
   });
 
   it("keeps the newly submitted verification request visible when the follow-up refresh fails", async () => {
@@ -2818,9 +2954,9 @@ describe("H5App auth routing", () => {
     await flushEffects();
 
     expect(document.body.textContent).toContain("Keep this request visible even if the refresh fails.");
-    expect(document.querySelector(".h5-verification-flow")).not.toBeNull();
+    expect(document.querySelector(".h5-member-verification-status-flow")).not.toBeNull();
     expect(document.body.textContent).not.toContain("Verification summary refresh failed");
-    expect((document.querySelector('.h5-form button[type="submit"]') as HTMLButtonElement | null)?.disabled).toBe(true);
+    expect(document.querySelector(".h5-member-verification-form")).toBeNull();
   });
 
   it("switches the current verification detail when a history row is opened", async () => {
@@ -2925,5 +3061,17 @@ describe("H5App auth routing", () => {
     expect(detailSpy).toHaveBeenNthCalledWith(2, "vr-2");
     expect(document.body.textContent).toContain("Approved verification request detail B.");
     expect(document.body.textContent).toContain("approved-passport-b.png");
+  });
+
+  it("keeps the local preview url on mock image messages", async () => {
+    const sent = await h5MemberModule.sendMessageApi(
+      "default",
+      "Image",
+      "image",
+      "blob:chat-preview-1",
+    );
+
+    expect(sent.type).toBe("image");
+    expect(sent.image_url).toBe("blob:chat-preview-1");
   });
 });

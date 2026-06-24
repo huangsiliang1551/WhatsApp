@@ -1,4 +1,6 @@
+import { CloseOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useRef, useState, type JSX } from "react";
+
 import { t } from "./i18n";
 
 interface ImageViewerProps {
@@ -32,10 +34,9 @@ export function ImageViewer({
   const total = images.length;
   const hasMultiple = total > 1;
 
-  // Keyboard handling
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      switch (e.key) {
+    (event: KeyboardEvent) => {
+      switch (event.key) {
         case "Escape":
           onClose();
           break;
@@ -55,14 +56,12 @@ export function ImageViewer({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  // Reset zoom on image change
   useEffect(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
     setShowTooltip(false);
   }, [currentIndex]);
 
-  // Long press handling
   const startLongPress = useCallback(() => {
     longPressTimer.current = setTimeout(() => {
       setShowTooltip(true);
@@ -77,41 +76,40 @@ export function ImageViewer({
     }
   }, []);
 
-  // Touch handlers
   const handleTouchStart = useCallback(
-    (e: React.TouchEvent) => {
-      if (e.touches.length === 1) {
-        const touch = e.touches[0];
+    (event: React.TouchEvent) => {
+      if (event.touches.length === 1) {
+        const touch = event.touches[0];
         touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
         panStartRef.current = { x: pan.x, y: pan.y };
         startLongPress();
-      } else if (e.touches.length === 2) {
+      } else if (event.touches.length === 2) {
         clearLongPress();
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dx = event.touches[0].clientX - event.touches[1].clientX;
+        const dy = event.touches[0].clientY - event.touches[1].clientY;
         pinchRef.current = { dist: Math.hypot(dx, dy), zoom };
         touchStartRef.current = null;
       }
     },
-    [zoom, pan, startLongPress, clearLongPress],
+    [clearLongPress, pan.x, pan.y, startLongPress, zoom],
   );
 
   const handleTouchMove = useCallback(
-    (e: React.TouchEvent) => {
-      if (e.touches.length === 2 && pinchRef.current) {
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
+    (event: React.TouchEvent) => {
+      if (event.touches.length === 2 && pinchRef.current) {
+        const dx = event.touches[0].clientX - event.touches[1].clientX;
+        const dy = event.touches[0].clientY - event.touches[1].clientY;
         const dist = Math.hypot(dx, dy);
-        const newZoom = Math.max(
+        const nextZoom = Math.max(
           MIN_ZOOM,
           Math.min(MAX_ZOOM, (dist / pinchRef.current.dist) * pinchRef.current.zoom),
         );
-        setZoom(newZoom);
-        if (newZoom <= 1) {
+        setZoom(nextZoom);
+        if (nextZoom <= 1) {
           setPan({ x: 0, y: 0 });
         }
-      } else if (e.touches.length === 1 && touchStartRef.current && zoom > 1) {
-        const touch = e.touches[0];
+      } else if (event.touches.length === 1 && touchStartRef.current && zoom > 1) {
+        const touch = event.touches[0];
         const deltaX = touch.clientX - touchStartRef.current.x;
         const deltaY = touch.clientY - touchStartRef.current.y;
         setPan({
@@ -119,15 +117,15 @@ export function ImageViewer({
           y: (panStartRef.current?.y ?? 0) + deltaY,
         });
         clearLongPress();
-      } else if (e.touches.length === 1) {
+      } else if (event.touches.length === 1) {
         clearLongPress();
       }
     },
-    [zoom, clearLongPress],
+    [clearLongPress, zoom],
   );
 
   const handleTouchEnd = useCallback(
-    (e: React.TouchEvent) => {
+    (event: React.TouchEvent) => {
       clearLongPress();
       pinchRef.current = null;
 
@@ -137,9 +135,8 @@ export function ImageViewer({
         return;
       }
 
-      // Detect swipe only when not zoomed
       if (zoom <= 1) {
-        const endTouch = e.changedTouches[0];
+        const endTouch = event.changedTouches[0];
         const deltaX = endTouch.clientX - start.x;
         const deltaY = endTouch.clientY - start.y;
 
@@ -155,10 +152,9 @@ export function ImageViewer({
       touchStartRef.current = null;
       panStartRef.current = null;
     },
-    [zoom, currentIndex, total, clearLongPress],
+    [clearLongPress, currentIndex, total, zoom],
   );
 
-  // Double-tap to toggle zoom
   const lastTapRef = useRef<number>(0);
   const handleDoubleTap = useCallback(() => {
     const now = Date.now();
@@ -175,97 +171,83 @@ export function ImageViewer({
     }
   }, [zoom]);
 
-  // Click outside image to close
   const handleOverlayClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.target === overlayRef.current) {
+    (event: React.MouseEvent) => {
+      if (event.target === overlayRef.current) {
         onClose();
       }
     },
     [onClose],
   );
 
-  // Mouse wheel zoom
-  const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
-      e.preventDefault();
-      setZoom((prev) => {
-        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev - e.deltaY * 0.002));
-        if (newZoom <= 1) setPan({ x: 0, y: 0 });
-        return newZoom;
-      });
-    },
-    [],
-  );
+  const handleWheel = useCallback((event: React.WheelEvent) => {
+    event.preventDefault();
+    setZoom((prev) => {
+      const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev - event.deltaY * 0.002));
+      if (nextZoom <= 1) {
+        setPan({ x: 0, y: 0 });
+      }
+      return nextZoom;
+    });
+  }, []);
 
-  if (!images.length) return <></>;
+  if (!images.length) {
+    return <></>;
+  }
 
   return (
     <div
       className="h5-image-viewer-overlay"
       onClick={handleOverlayClick}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onTouchMove={handleTouchMove}
+      onTouchStart={handleTouchStart}
       onWheel={handleWheel}
       ref={overlayRef}
       role="dialog"
-      aria-modal="true"
       aria-label={t("media.viewer")}
+      aria-modal="true"
     >
-      {/* Close button */}
       <button
         className="h5-image-viewer-close"
         onClick={onClose}
         type="button"
         aria-label={t("media.close")}
       >
-        ✕
+        <CloseOutlined />
       </button>
 
-      {/* Image counter */}
-      {hasMultiple && (
+      {hasMultiple ? (
         <div className="h5-image-viewer-counter">
           {currentIndex + 1} / {total}
         </div>
-      )}
+      ) : null}
 
-      {/* Image */}
-      <div
-        className="h5-image-viewer-content"
-        onClick={handleDoubleTap}
-      >
+      <div className="h5-image-viewer-content" onClick={handleDoubleTap}>
         <img
           ref={imgRef}
-          className="h5-image-viewer-img"
-          src={images[currentIndex]}
           alt=""
+          className={`h5-image-viewer-img ${zoom > 1 ? "h5-image-viewer-img-zoomed" : ""}`.trim()}
           draggable={false}
+          src={images[currentIndex]}
           style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            cursor: zoom > 1 ? "grab" : "default",
           }}
         />
       </div>
 
-      {/* Dot indicators */}
-      {hasMultiple && (
+      {hasMultiple ? (
         <div className="h5-image-viewer-dots">
-          {images.map((_, i) => (
+          {images.map((_, index) => (
             <span
-              key={i}
-              className={`h5-image-viewer-dot${i === currentIndex ? " h5-image-viewer-dot-active" : ""}`}
+              key={index}
+              className={`h5-image-viewer-dot${index === currentIndex ? " h5-image-viewer-dot-active" : ""}`}
             />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* Long press tooltip */}
-      {showTooltip && (
-        <div className="h5-image-viewer-tooltip">
-          {t("media.saveHint")}
-        </div>
-      )}
+      {showTooltip ? <div className="h5-image-viewer-tooltip">{t("media.saveHint")}</div> : null}
     </div>
   );
 }

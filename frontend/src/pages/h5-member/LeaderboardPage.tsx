@@ -3,7 +3,7 @@ import { TrophyOutlined } from "@ant-design/icons";
 
 import type { H5LeaderboardEntry } from "../../services/h5Member";
 import { formatMoney } from "./sharedUtils";
-import { CompactListRow, EmptyStateCard, SectionHeader } from "./sharedComponents";
+import { CompactListRow, DetailGrid, EmptyStateCard, SectionHeader } from "./sharedComponents";
 import { t } from "./i18n";
 import { ListSkeleton } from "./skeletons";
 
@@ -15,6 +15,13 @@ type LeaderboardPageProps = {
 
 export function LeaderboardPage({ leaderboard, loading, error }: LeaderboardPageProps): JSX.Element {
   const topPerformer = leaderboard[0] ?? null;
+  const runnerUp = leaderboard[1] ?? null;
+  const spreadValue =
+    topPerformer && runnerUp
+      ? formatMoney(topPerformer.amount - runnerUp.amount, topPerformer.currency)
+      : topPerformer
+        ? formatMoney(topPerformer.amount, topPerformer.currency)
+        : "--";
 
   if (loading) {
     return <ListSkeleton count={5} />;
@@ -40,6 +47,20 @@ export function LeaderboardPage({ leaderboard, loading, error }: LeaderboardPage
 
   return (
     <section className="h5-card-stack">
+      {topPerformer ? (
+        <article className="h5-card h5-member-leaderboard-overview-card">
+          <SectionHeader meta={t('leaderboard.overviewMeta')} title={t('leaderboard.overviewTitle')} />
+          <DetailGrid
+            items={[
+              { label: t('leaderboard.overviewLeaderLabel'), value: topPerformer.accountIdMasked },
+              { label: t('leaderboard.overviewRunnerUpLabel'), value: runnerUp?.accountIdMasked ?? "--" },
+              { label: t('leaderboard.overviewSpreadLabel'), value: spreadValue },
+              { label: t('leaderboard.overviewPrivacyLabel'), value: t('leaderboard.maskedAccountsOnly') },
+            ]}
+          />
+        </article>
+      ) : null}
+
       {topPerformer ? (
         <article className="h5-card h5-member-leaderboard-hero">
           <SectionHeader meta={t('leaderboard.maskedAccountsOnly')} title={t('leaderboard.topPerformer')} />

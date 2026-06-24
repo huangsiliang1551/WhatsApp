@@ -374,7 +374,7 @@ export function PullToRefresh({ onRefresh, children }: { onRefresh: () => Promis
           style={{ height: pullDistance }}
         >
           {refreshing ? (
-            <><LoadingOutlined style={{ marginRight: 6 }} />{t("common.loading")}</>
+            <><LoadingOutlined className="h5-pull-indicator-icon" />{t("common.loading")}</>
           ) : pullDistance > 50 ? (
             t("common.releaseToRefresh")
           ) : (
@@ -427,14 +427,14 @@ export function InfiniteScroll({
   return (
     <>
       {children}
-      <div ref={sentinelRef} style={{ height: 1 }} />
+      <div className="h5-infinite-scroll-sentinel" ref={sentinelRef} />
       {loading ? (
-        <div style={{ textAlign: "center", padding: 16, color: "#64748b" }}>
-          <LoadingOutlined style={{ marginRight: 6 }} />{t("common.loading")}
+        <div className="h5-infinite-scroll-loading">
+          <LoadingOutlined className="h5-infinite-scroll-loading-icon" />{t("common.loading")}
         </div>
       ) : null}
       {!hasMore && !loading ? (
-        <div className="muted" style={{ textAlign: "center", padding: 20, fontSize: 13 }}>
+        <div className="h5-infinite-scroll-end muted">
           {t("common.noMore")}
         </div>
       ) : null}

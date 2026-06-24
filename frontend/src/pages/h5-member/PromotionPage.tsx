@@ -7,6 +7,7 @@ import {
   type PromotionInvitee,
 } from "./sharedUtils";
 import {
+  CompactListRow,
   DetailGrid,
   EmptyStateCard,
   SectionHeader,
@@ -54,14 +55,45 @@ export function PromotionPage({
   const promotionLink = buildPromotionLink(siteKey, dashboard.member.inviteCode);
   const promotionInvitees = buildPromotionInvitees(dashboard.member.inviteCode);
   const promotionRechargeCount = promotionInvitees.filter((item) => item.hasRecharged).length;
+  const promotionPendingCount = Math.max(0, promotionInvitees.length - promotionRechargeCount);
+  const qualifiedRate =
+    promotionInvitees.length > 0
+      ? `${Math.round((promotionRechargeCount / promotionInvitees.length) * 100)}%`
+      : "0%";
 
   return (
     <section className="h5-card-stack">
-      <article className="h5-card h5-member-promotion-hero">
-        <SectionHeader meta={t('promotion.exclusiveLink')} title={t('promotion.title')} />
-        <p className="muted">{t('promotion.desc')}</p>
+      <article className="h5-card h5-member-promotion-program-card">
+        <SectionHeader meta={t('promotion.programMeta')} title={t('promotion.programTitle')} />
+        <div className="h5-member-promotion-hero">
+          <span aria-hidden="true" className="h5-member-promotion-hero-icon">
+            <LinkOutlined />
+          </span>
+          <div className="h5-member-promotion-copy">
+            <strong>{t('promotion.title')}</strong>
+            <p>{t('promotion.programDesc')}</p>
+          </div>
+        </div>
+        <div className="h5-member-promotion-code-row">
+          <span className="h5-member-inline-pill">{t('promotion.linkGenerated')}</span>
+          <span className="h5-member-inline-pill">{t('promotion.account', { masked: dashboard.member.accountIdMasked })}</span>
+        </div>
+        <DetailGrid
+          items={[
+            { label: t('promotion.inviteeCount'), value: String(promotionInvitees.length) },
+            { label: t('promotion.rechargeCount'), value: String(promotionRechargeCount) },
+            { label: t('promotion.qualifiedRate'), value: qualifiedRate },
+            { label: t('promotion.promoTask'), value: t('promotion.promoTaskValue') },
+          ]}
+        />
+      </article>
+
+      <article className="h5-card">
+        <SectionHeader meta={t('promotion.actionsMeta')} title={t('promotion.actionsTitle')} />
         <div className="h5-member-promotion-link-box">
           <span>{promotionLink}</span>
+        </div>
+        <div className="h5-member-card-actions">
           <button
             className="seed-button"
             onClick={() =>
@@ -75,64 +107,58 @@ export function PromotionPage({
           >
             {t('promotion.copyLink')}
           </button>
+          <button className="seed-button seed-button-secondary" onClick={() => onNavigate("/h5/invite")} type="button">
+            {t('promotion.openInviteCenter')}
+          </button>
         </div>
-        <div className="h5-member-promotion-code-row">
-          <span className="h5-member-inline-pill">{t('promotion.linkGenerated')}</span>
-          <span className="h5-member-inline-pill">{t('promotion.account', { masked: dashboard.member.accountIdMasked })}</span>
+        <div className="h5-member-promotion-actions-foot">
+          <span className="h5-member-inline-pill">{t('promotion.qualifiedRate')}: {qualifiedRate}</span>
+          <span className="h5-member-inline-pill">{t('promotion.noRechargeCount')}: {promotionPendingCount}</span>
         </div>
-      </article>
-
-      <article className="h5-card">
-        <SectionHeader meta={t('promotion.overview')} title={t('promotion.data')} />
-        <DetailGrid
-          items={[
-            { label: t('promotion.inviteeCount'), value: String(promotionInvitees.length) },
-            { label: t('promotion.rechargeCount'), value: String(promotionRechargeCount) },
-            { label: t('promotion.noRechargeCount'), value: String(Math.max(0, promotionInvitees.length - promotionRechargeCount)) },
-            { label: t('promotion.promoTask'), value: t('promotion.promoTaskValue') },
-          ]}
-        />
       </article>
 
       <article className="h5-card">
         <SectionHeader meta={t('promotion.rulesMeta')} title={t('promotion.rulesTitle')} />
-        <DetailGrid
-          items={[
-            { label: t('promotion.rewardBalance'), value: t('promotion.rewardBalanceValue') },
-            { label: t('promotion.validityWindow'), value: t('promotion.validityWindowValue') },
-            { label: t('promotion.delayNotice'), value: t('promotion.delayNoticeValue') },
-          ]}
-        />
+        <div className="h5-card-stack">
+          <CompactListRow
+            sideNote={t('promotion.rewardFlowTitle')}
+            subtitle={t('promotion.rewardBalanceValue')}
+            title={t('promotion.rewardBalance')}
+            tone="success"
+          />
+          <CompactListRow
+            sideNote={t('promotion.validityTitle')}
+            subtitle={t('promotion.validityWindowValue')}
+            title={t('promotion.validityWindow')}
+            tone="active"
+          />
+          <CompactListRow
+            sideNote={t('promotion.followupTitle')}
+            subtitle={t('promotion.delayNoticeValue')}
+            title={t('promotion.delayNotice')}
+          />
+        </div>
       </article>
 
       <article className="h5-card h5-member-promotion-list-card">
-        <SectionHeader meta={`${promotionInvitees.length} ${t('common.person')}`} title={t('promotion.inviteeList')} />
-        <div className="h5-member-promotion-table" role="table" aria-label={t('promotion.inviteeList')}>
-          <div className="h5-member-promotion-table-row h5-member-promotion-table-head" role="row">
-            <span role="columnheader">{t('promotion.colSequence')}</span>
-            <span role="columnheader">{t('promotion.colUserId')}</span>
-            <span role="columnheader">{t('promotion.colRegisteredAt')}</span>
-            <span role="columnheader">{t('promotion.colHasRecharged')}</span>
-          </div>
+        <SectionHeader
+          meta={t('promotion.inviteeListMeta', { count: promotionInvitees.length })}
+          title={t('promotion.inviteeList')}
+        />
+        <div className="h5-card-stack h5-member-promotion-record-list">
           {promotionInvitees.length > 0 ? (
             promotionInvitees.map((item: PromotionInvitee) => (
-              <div className="h5-member-promotion-table-row" key={`${item.sequence}-${item.userIdMasked}`} role="row">
-                <span className="h5-member-promotion-cell" data-label={t('promotion.colSequence')} role="cell">
-                  {item.sequence}
-                </span>
-                <strong className="h5-member-promotion-cell" data-label={t('promotion.colUserId')} role="cell">
-                  {item.userIdMasked}
-                </strong>
-                <span className="h5-member-promotion-cell" data-label={t('promotion.colRegisteredAt')} role="cell">
-                  {formatTimestamp(item.registeredAt)}
-                </span>
-                <span
-                  className={`h5-member-promotion-cell ${item.hasRecharged ? "h5-member-promotion-status-paid" : "h5-member-promotion-status-pending"}`}
-                  data-label={t('promotion.colHasRecharged')}
-                  role="cell"
-                >
-                  {item.hasRecharged ? t('promotion.hasRecharged') : t('promotion.notRecharged')}
-                </span>
+              <div className="h5-member-promotion-record-row" key={`${item.sequence}-${item.userIdMasked}`}>
+                <CompactListRow
+                  badge={item.hasRecharged ? t('promotion.hasRecharged') : t('promotion.notRecharged')}
+                  sideNote={
+                    t('promotion.inviteeSequence', { sequence: item.sequence })
+                  }
+                  actionLabel={item.hasRecharged ? t('promotion.rewardFlowTitle') : t('promotion.followupTitle')}
+                  subtitle={t('promotion.inviteeRegistered', { time: formatTimestamp(item.registeredAt) })}
+                  title={item.userIdMasked}
+                  tone={item.hasRecharged ? "success" : "default"}
+                />
               </div>
             ))
           ) : (
