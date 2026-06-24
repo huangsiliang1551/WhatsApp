@@ -1,0 +1,1 @@
+﻿{"task":"DO-003","status":"COMPLETE","description":"CI 流水线优化","deliverables":["新增 lint job（语法+import检查）","新增 docker-build job","现有3个 job 加 needs: [lint]","增加 promtool 规则验证步骤"],"completed_at":"2026-06-12T12:15:00Z"}

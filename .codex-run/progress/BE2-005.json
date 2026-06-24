@@ -1,0 +1,14 @@
+{
+  "id": "BE2-005",
+  "name": "Webhook 签名验证加固",
+  "status": "complete",
+  "changes": [
+    "settings.py: 添加 webhook_signature_enabled: bool 字段",
+    "webhooks.py: _receive_whatsapp_webhook_for_scope 签名验证添加 webhook_signature_enabled 开关检查",
+    "webhooks.py: receive_whatsapp_webhook_root 多WABA签名验证添加 webhook_signature_enabled 开关检查"
+  ],
+  "tests": [
+    "test_whatsapp_webhooks.py::test_webhook_signature_disabled_accepts_invalid_signature"
+  ],
+  "test_results": "3/3 passing (2 existing + 1 new)"
+}

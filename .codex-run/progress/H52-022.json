@@ -1,0 +1,1 @@
+{"task":"H52-022","phase":6,"name":"PullToRefresh + InfiniteScroll","status":"completed","files":["frontend/src/pages/h5-member/shared.tsx"],"description":"Touch-based pull-to-refresh, IntersectionObserver infinite scroll","completedAt":"2026-06-12T15:33:00Z"}

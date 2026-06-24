@@ -1,0 +1,1 @@
+﻿{"task":"DO-008","status":"COMPLETE","description":"部署文档更新","deliverables":["deployment-checklist.md 新增 Worker 健康端点检查","recovery-runbook.md 新增 Redis 备份/恢复步骤","recovery-runbook.md 新增 Worker 故障恢复步骤","CI 中新增 backup-redis.ps1 验证"],"completed_at":"2026-06-12T12:25:00Z"}

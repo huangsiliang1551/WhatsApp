@@ -1,0 +1,1 @@
+﻿{"task":"DO-001","status":"COMPLETE","description":"Prometheus 告警规则补全（4→10条）","deliverables":["alerts.yml 包含10条规则","新增 HighErrorRate, WebhookSignatureFailuresHigh, AIFallbackRateHigh, TemplateSendFailureHigh, WhatsAppWorkerDown, TranslationFailureHigh"],"completed_at":"2026-06-12T12:15:00Z"}

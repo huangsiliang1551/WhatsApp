@@ -1,0 +1,1 @@
+{"task":"AF3-017","title":"全局错误上报","phase":5,"status":"completed","files":["frontend/src/components/ErrorBoundary.tsx","frontend/src/App.tsx"],"verified":true}

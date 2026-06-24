@@ -1,0 +1,1 @@
+{"task":"H52-015","phase":4,"name":"Leaderboard + Promotion API","status":"completed","files":["frontend/src/services/h5Member.ts"],"description":"getLeaderboardApi, getPromotionsApi, joinPromotionApi - loading/error states","completedAt":"2026-06-12T15:33:00Z"}

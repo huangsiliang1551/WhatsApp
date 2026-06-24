@@ -1,0 +1,11 @@
+{
+  "task": "BFX-003: 会话备注API",
+  "status": "COMPLETE",
+  "changes": [
+    "app/db/models.py: 新增 ConversationNote 模型",
+    "app/services/conversation_note_service.py: 新增 CRUD 逻辑 (fix: Agent.agent_key 查询)",
+    "app/api/routes/conversation_notes.py: POST/GET notes 端点",
+    "alembic/versions/0067_conversation_notes.py: 迁移文件"
+  ],
+  "verification": "tests/test_conversation_notes.py: 7 tests passed"
+}

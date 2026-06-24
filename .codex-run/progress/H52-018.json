@@ -1,0 +1,1 @@
+{"task":"H52-018","phase":5,"name":"ImageViewer Component","status":"completed","files":["frontend/src/pages/h5-member/ImageViewer.tsx"],"description":"Full-screen overlay, pinch-to-zoom, swipe, keyboard support, long-press hint","completedAt":"2026-06-12T15:33:00Z"}

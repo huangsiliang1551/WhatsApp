@@ -1,0 +1,9 @@
+{
+  "task": "BFX-008: 消息状态回执",
+  "status": "COMPLETE",
+  "changes": [
+    "app/services/conversation_service.py: list_messages 返回 delivery_status 字段",
+    "app/api/routes/webhooks.py: 确认 status update 处理链路完整"
+  ],
+  "verification": "tests/test_whatsapp_webhooks.py::TestMessageDeliveryStatus: 3 tests passed"
+}

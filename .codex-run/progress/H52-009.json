@@ -1,0 +1,1 @@
+{"task":"H52-009","phase":3,"name":"Withdraw API","status":"completed","files":["frontend/src/services/h5Member.ts"],"description":"getWithdrawalsApi, submitWithdrawApi, getWithdrawDetailApi - fee calculation, status flow","completedAt":"2026-06-12T15:33:00Z"}

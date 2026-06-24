@@ -1,0 +1,12 @@
+{
+  "task": "HOTFIX-012: Docker Compose 重启 + Launch Readiness 验证",
+  "status": "COMPLETE",
+  "changes": [
+    "pyproject.toml: 添加 pytz 依赖（Docker 构建用）"
+  ],
+  "verification": [
+    "7 服务全部 healthy: postgres, redis, app, worker, prometheus, alertmanager, grafana ✅",
+    "/health: 200 OK ✅",
+    "/api/runtime/launch-readiness: 200, blocker_count=0, warning_count=0 ✅"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "task": "RT-002",
+  "status": "COMPLETE",
+  "description": "验证前端轮询适配（无需改前端，确认后端可用即可）",
+  "verification": "chatRealtime.ts 第 5 行使用 /api/conversations/stream（SSE），第 8 行降级为 GET /api/conversations/poll?since= 每 5s 轮询，与后端端点完全匹配",
+  "backend_verified": true,
+  "docker_verified": true,
+  "frontend_changed": false,
+  "completed_at": "2026-06-13T17:42:00Z"
+}

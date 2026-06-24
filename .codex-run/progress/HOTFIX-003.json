@@ -1,0 +1,9 @@
+{
+  "id": "HOTFIX-003",
+  "status": "COMPLETE",
+  "description": "api.ts 添加 updateReviewStatus + batchReviewAction 函数",
+  "files": ["frontend/src/services/api.ts"],
+  "lines": "2935-2955",
+  "details": "updateReviewStatus 和 batchReviewAction 函数已存在，ReviewsPage 导入正常",
+  "validated": "build + tsc 通过"
+}

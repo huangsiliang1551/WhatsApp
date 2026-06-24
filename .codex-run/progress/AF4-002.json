@@ -1,0 +1,1 @@
+{"task":"AF4-002","phase":1,"status":"complete","summary":"App.tsx 适配 6 组菜单","changes":[{"file":"frontend/src/App.tsx","action":"modified","detail":"GROUP_LABELS 更新为 6 组, 新增 4 个图标映射, menuData 6 组"}]}

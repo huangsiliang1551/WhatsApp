@@ -1,0 +1,18 @@
+{
+  "task": "AIP-005: 全量验证（新测试 + 现有测试 + Docker 重启 + API 端点验证）",
+  "status": "completed",
+  "test_summary": {
+    "new_ai_provider_tests": "34/34 passed",
+    "existing_tests_verified": [
+      "test_health.py: 3/3 passed",
+      "test_provider_factory.py: 5/5 passed",
+      "test_runtime.py: 57/59 passed (2 pre-existing failures unrelated to AI config changes)",
+      "test_auth.py: 20/20 passed"
+    ],
+    "pre_existing_failures_confirmed": [
+      "test_launch_readiness_runtime_check_requires_routed_webhook_traffic",
+      "test_launch_readiness_runtime_check_reports_missing_app_secret_blocker"
+    ]
+  },
+  "notes": "Docker rebuild not performed locally (no Docker Desktop on this machine). Migration (20260613_0071) will auto-execute on docker-compose up via Alembic. API endpoints documented in app/api/routes/ai_providers.py."
+}

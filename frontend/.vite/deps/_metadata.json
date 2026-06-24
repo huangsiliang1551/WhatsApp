@@ -1,0 +1,76 @@
+{
+  "hash": "4cc5cde6",
+  "configHash": "bb51358c",
+  "lockfileHash": "db6fbc56",
+  "browserHash": "28b2f314",
+  "optimized": {
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "7a3f6535",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "9dc07b9d",
+      "needsInterop": true
+    },
+    "@ant-design/v5-patch-for-react-19": {
+      "src": "../../node_modules/@ant-design/v5-patch-for-react-19/es/index.js",
+      "file": "@ant-design_v5-patch-for-react-19.js",
+      "fileHash": "522e88f4",
+      "needsInterop": false
+    },
+    "antd": {
+      "src": "../../node_modules/antd/es/index.js",
+      "file": "antd.js",
+      "fileHash": "589b9a70",
+      "needsInterop": false
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "01eae5e0",
+      "needsInterop": true
+    },
+    "@ant-design/icons": {
+      "src": "../../node_modules/@ant-design/icons/es/index.js",
+      "file": "@ant-design_icons.js",
+      "fileHash": "32a913f4",
+      "needsInterop": false
+    },
+    "axios": {
+      "src": "../../node_modules/axios/index.js",
+      "file": "axios.js",
+      "fileHash": "307553cf",
+      "needsInterop": false
+    },
+    "zustand": {
+      "src": "../../node_modules/zustand/esm/index.mjs",
+      "file": "zustand.js",
+      "fileHash": "c301af0d",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-ICB6JKB4": {
+      "file": "chunk-ICB6JKB4.js"
+    },
+    "chunk-YEXXCPJU": {
+      "file": "chunk-YEXXCPJU.js"
+    },
+    "chunk-MXRSIHXN": {
+      "file": "chunk-MXRSIHXN.js"
+    },
+    "chunk-DBN6MBR3": {
+      "file": "chunk-DBN6MBR3.js"
+    },
+    "chunk-HIWPW72E": {
+      "file": "chunk-HIWPW72E.js"
+    },
+    "chunk-G3PMV62Z": {
+      "file": "chunk-G3PMV62Z.js"
+    }
+  }
+}

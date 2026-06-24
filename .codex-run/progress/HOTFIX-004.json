@@ -1,0 +1,8 @@
+{
+  "id": "HOTFIX-004",
+  "status": "COMPLETE",
+  "description": "admin-chat.test.tsx 断言修复(4个失败测试)",
+  "files": ["frontend/src/pages/admin-chat.test.tsx"],
+  "details": "测试已通过，12/12 全部通过。之前会话已修复断言。",
+  "verified": "npx vitest run --environment jsdom src/pages/admin-chat.test.tsx → 12/12 passed"
+}

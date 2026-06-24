@@ -1,0 +1,11 @@
+{
+  "task": "BFX-005: 工作时间API",
+  "status": "COMPLETE",
+  "changes": [
+    "app/db/models.py: 新增 BusinessHours 模型",
+    "app/services/business_hours_service.py: 新增 GET/PUT + 时区判断",
+    "app/api/routes/runtime.py: 追加 GET/PUT business-hours 端点 (fix: Query 列表注解)",
+    "alembic/versions/0069_business_hours.py: 迁移文件"
+  ],
+  "verification": "tests/test_business_hours.py: 8 tests passed"
+}

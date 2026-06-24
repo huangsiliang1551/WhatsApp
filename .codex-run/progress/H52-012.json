@@ -1,0 +1,1 @@
+{"task":"H52-012","phase":3,"name":"Notification + Ticket API","status":"completed","files":["frontend/src/services/h5Member.ts"],"description":"getNotificationsApi, markNotificationReadApi, markAllNotificationsReadApi, getTicketsApi, createTicketApi, getTicketDetailApi, replyToTicketApi - pagination, loading/error states","completedAt":"2026-06-12T15:33:00Z"}

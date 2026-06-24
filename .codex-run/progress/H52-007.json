@@ -1,0 +1,1 @@
+{"task":"H52-007","phase":2,"name":"Tasks API","status":"completed","files":["frontend/src/services/h5Member.ts"],"description":"getTaskPackagesApi, getTaskPackageDetailApi, submitTaskApi, uploadTaskProofApi - pagination, filter tabs, multipart upload","completedAt":"2026-06-12T15:33:00Z"}

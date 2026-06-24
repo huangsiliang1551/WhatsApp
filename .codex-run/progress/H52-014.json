@@ -1,0 +1,1 @@
+{"task":"H52-014","phase":4,"name":"Fragment + Mailing API","status":"completed","files":["frontend/src/services/h5Member.ts"],"description":"getFragmentsApi, getFragmentDetailApi, checkInFragmentApi, exchangeFragmentsApi, getShippingStatusApi, subscribeMailingApi, unsubscribeMailingApi","completedAt":"2026-06-12T15:33:00Z"}

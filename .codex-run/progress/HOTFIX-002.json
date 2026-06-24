@@ -1,0 +1,9 @@
+{
+  "id": "HOTFIX-002",
+  "status": "COMPLETE",
+  "description": "api.ts 添加 deletePlatformUser 函数",
+  "files": ["frontend/src/services/api.ts"],
+  "lines": "2929-2933",
+  "details": "deletePlatformUser 函数已存在，UsersPage 导入正常",
+  "validated": "build + tsc 通过"
+}

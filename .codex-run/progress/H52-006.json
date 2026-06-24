@@ -1,0 +1,1 @@
+{"task":"H52-006","phase":2,"name":"Home API","status":"completed","files":["frontend/src/services/h5Member.ts"],"description":"getWalletBalanceApi, getNotificationsCountApi - parallel data loading for home page","completedAt":"2026-06-12T15:33:00Z"}

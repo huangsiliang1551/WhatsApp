@@ -1,0 +1,1 @@
+{"task":"STUB-002","page":"MembersPage.tsx","status":"COMPLETE","lines":266,"build":"OK","tsc":"OK","note":"3数据源合并(DB+Redis+workload) + 状态操作 + 注册坐席Modal + 30秒自动刷新"}

@@ -1,0 +1,1 @@
+{"task":"H52-003","phase":1,"name":"Token Interceptor","status":"completed","files":["frontend/src/services/h5Member.ts"],"description":"Axios request interceptor (Bearer token) + response interceptor (401 queue/refresh, 5xx retry)","completedAt":"2026-06-12T15:33:00Z"}

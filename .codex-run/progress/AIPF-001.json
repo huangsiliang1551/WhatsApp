@@ -1,0 +1,11 @@
+{
+  "id": "AIPF-001",
+  "status": "COMPLETE",
+  "description": "类型定义 + API 封装",
+  "files": [
+    "frontend/src/types/aiProviders.ts (66行)",
+    "frontend/src/services/aiProviderApi.ts (51行)"
+  ],
+  "details": "AIProviderConfig/CreateAIProviderRequest/UpdateAIProviderRequest/TestConnectionRequest/TestConnectionResponse/AccountOverride 类型定义 + 10个API函数封装",
+  "validated": "tsc + build 通过"
+}

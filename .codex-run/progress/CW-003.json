@@ -1,0 +1,1 @@
+{"task":"CW-003","phase":1,"status":"completed","description":"重写MessagePanel气泡布局+日期分隔+自动滚动","filesModified":["admin-chat/MessagePanel.tsx"],"buildPass":true}

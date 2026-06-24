@@ -1,0 +1,1 @@
+{"task":"AF4-001","phase":1,"status":"complete","summary":"类型定义 + 路由配置重构","changes":[{"file":"frontend/src/types/console.ts","action":"modified","detail":"ConsoleRouteGroup 扩展到 6 个值, 新增 4 个 icon key"},{"file":"frontend/src/routes/consoleRoutes.ts","action":"modified","detail":"所有 38 个路由的 group/order/navLabel 按映射表调整, 10 个路由 visibleInNav: false"}]}

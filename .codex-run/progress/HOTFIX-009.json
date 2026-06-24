@@ -1,0 +1,11 @@
+{
+  "task": "HOTFIX-009: 验证/添加 Reviews batch 路由",
+  "status": "COMPLETE",
+  "changes": [
+    "app/api/routes/reviews.py: batch-approve 和 batch-reject 路由已存在 ✅",
+    "app/api/routes/reviews.py: 单条 /submissions/{id}/approve 和 /submissions/{id}/reject 已存在 ✅",
+    "app/api/routes/reviews.py: 新增 /{review_id}/approve 和 /{review_id}/reject 别名路由（前端兼容）",
+    "app/api/routes/reviews.py: 新增 _approve_or_reject_submission 共享辅助函数"
+  ],
+  "verification": "reviews.py 路由验证通过 (8 routes)"
+}

@@ -1,0 +1,14 @@
+{
+  "task": "AIP-002: Service 层(CRUD+种子+测试连接) + 缓存(TTL 60s) + GenericOpenAICompatibleProvider",
+  "status": "completed",
+  "files_created": [
+    "app/providers/ai/generic_provider.py",
+    "app/services/ai_provider_cache.py",
+    "app/services/ai_provider_config_service.py"
+  ],
+  "details": {
+    "generic_provider": "GenericOpenAICompatibleProvider - unified AsyncOpenAI SDK, use_responses_api flag for responses.create vs chat.completions.create",
+    "cache": "AIProviderCache - thread-safe in-memory singleton, TTL 60s, auto-refresh on get_active_chain/get_account_override, invalidate() on CRUD",
+    "service": "AIProviderConfigService - 313 lines, full CRUD with encrypted key storage, account overrides, test_connection (async), seed_from_env"
+  }
+}

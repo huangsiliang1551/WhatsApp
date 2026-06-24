@@ -1,0 +1,1 @@
+{"task":"CW-002","phase":1,"status":"completed","description":"重写ConversationList分组+紧凑卡片","filesModified":["admin-chat/ConversationList.tsx"],"buildPass":true}

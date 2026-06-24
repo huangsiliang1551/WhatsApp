@@ -1,0 +1,9 @@
+{
+  "id": "HOTFIX-001",
+  "status": "COMPLETE",
+  "description": "api.ts 添加 4 个 Dashboard API 函数",
+  "files": ["frontend/src/services/api.ts"],
+  "lines": "2871-2927",
+  "details": "getDashboardSummary/getDashboardTodo/getAiPerformance/getTopIntents + 对应类型接口已存在(之前会话已添加)",
+  "validated": "build + tsc 通过"
+}

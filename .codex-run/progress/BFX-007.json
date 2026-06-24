@@ -1,0 +1,9 @@
+{
+  "task": "BFX-007: AI质量聚合API",
+  "status": "COMPLETE",
+  "changes": [
+    "app/services/dashboard_service.py: 新增 get_ai_performance + get_top_intents 方法",
+    "app/api/routes/dashboard.py: 新增 GET /ai-performance + /top-intents 端点"
+  ],
+  "verification": "tests/test_dashboard_api.py: 22 tests passed (包含 9 个新增 AI/Intents 测试)"
+}

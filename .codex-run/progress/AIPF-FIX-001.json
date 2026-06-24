@@ -1,0 +1,14 @@
+{
+  "id": "AIPF-FIX-001",
+  "status": "COMPLETE",
+  "description": "修复 aiProviderApi.ts 4 处前后端路径不匹配",
+  "file": "frontend/src/services/aiProviderApi.ts",
+  "fixes": [
+    "testAIProviderConnection: 有 config_id 时走 /api/ai-providers/{id}/test，无 config_id 时回退 /api/ai-providers/test-connection",
+    "listAccountOverrides: /api/ai-providers/overrides → /api/ai-providers/account-overrides",
+    "setAccountOverride: /api/ai-providers/overrides/${id} → /api/ai-providers/account-overrides/${id}",
+    "clearAccountOverride: 同上 DELETE 路径"
+  ],
+  "verified": "AIProvidersSettingsTab.tsx 两处调用均已传入 config_id",
+  "validation": "tsc 0 errors + npm run build 通过"
+}

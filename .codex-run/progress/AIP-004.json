@@ -1,0 +1,21 @@
+{
+  "task": "AIP-004: 24+ 测试（config 11 + factory 6 + api 8 + existing 9）",
+  "status": "completed",
+  "files_created": [
+    "tests/test_ai_provider_config.py",
+    "tests/test_ai_provider_factory.py",
+    "tests/test_ai_provider_api.py"
+  ],
+  "test_results": {
+    "test_ai_provider_config.py": "11/11 passed",
+    "test_ai_provider_factory.py": "6/6 passed",
+    "test_ai_provider_api.py": "8/8 passed",
+    "test_ai_provider.py": "9/9 passed (existing tests, 1 fixed for account_id lambda compatibility)",
+    "total": "34/34 passed"
+  },
+  "fixes_applied": [
+    "test_api_list_providers_masks_keys: assert 'api_key' not in provider (dict keys, not str substring)",
+    "test_api_account_override_lifecycle: service.set_account_override flush()→commit() for cross-request visibility",
+    "test_ai_generation_job_falls_back: lambda missing account_id parameter"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "task": "BFX-001: Launch Readiness 文件检查路径修复",
+  "status": "COMPLETE",
+  "changes": [
+    "docker-compose.yml: app service 添加 monitoring/scripts/docs 只读 volume 挂载"
+  ],
+  "verification": "docker-compose.yml lines 66-68: monitoring, scripts, docs volumes present"
+}
