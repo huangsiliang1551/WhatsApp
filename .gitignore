@@ -20,3 +20,9 @@ frontend/.codex-artifacts/
 frontend/.codex-h5-audit/
 frontend/.stubs_backup/
 backend-restart.*.log
+.codex-artifacts/
+.codex-run/
+.qoder/
+.tmp_pytest/
+.workbuddy/
+tmp_*
