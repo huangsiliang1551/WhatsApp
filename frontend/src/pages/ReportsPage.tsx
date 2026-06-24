@@ -1,4 +1,4 @@
-import { Button, Card, Col, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography } from "antd";
+import { Button, Card, Col, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, Alert, Descriptions } from "antd";
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 
 import { EmptyGuide, PageShell } from "../components/PageShell";
@@ -6,6 +6,10 @@ import { usePageData } from "../hooks/usePageData";
 import { getFinanceReport, getWhatsAppStatsSummary } from "../services/api";
 import { listSites, type H5Site } from "../services/h5MultiTenantApi";
 import { getReportCenterSnapshot } from "../services/operations";
+import {
+  fetchOwnershipReport,
+  type OwnershipReport,
+} from "../services/ownershipReports";
 import type { ReportCenterDailyRow } from "../types/operations";
 import { withSorter } from "../utils/withSorter";
 
@@ -298,11 +302,147 @@ function FinanceReportTab(): JSX.Element {
   );
 }
 
+function OwnershipReportTab(): JSX.Element {
+  const [accountId, setAccountId] = useState<string | undefined>(undefined);
+  const fetchData = useCallback(
+    () => fetchOwnershipReport(accountId ? { account_id: accountId } : undefined),
+    [accountId]
+  );
+  const { data, loading, error } = usePageData<OwnershipReport>({
+    fetcher: fetchData,
+    deps: [accountId],
+  });
+
+  if (loading && !data) {
+    return <EmptyGuide description="正在加载归属报表" icon="📊" title="加载中" />;
+  }
+  if (error) {
+    return <Typography.Text type="danger">归属报表加载失败：{error}</Typography.Text>;
+  }
+  if (!data) {
+    return <EmptyGuide description="暂无归属报表数据" icon="📊" title="暂无数据" />;
+  }
+  return (
+    <Space direction="vertical" size={16} style={{ display: "flex" }}>
+      <Space>
+        <Select
+          allowClear
+          placeholder="按 account_id 筛选"
+          style={{ minWidth: 240 }}
+          onChange={(v) => setAccountId(v)}
+        />
+        <Typography.Text type="secondary">
+          口径：当前列表看 current_*；历史报表看 *_snapshot；划转不改历史。
+        </Typography.Text>
+      </Space>
+      <Row gutter={16}>
+        <Col span={6}>
+          <Card size="small" title="未归属会员">
+            <Statistic value={data.current.owner.unattributed} suffix="人" />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" title="无 AI 会员">
+            <Statistic value={data.current.ai.no_ai_assignment} suffix="人" />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" title="AI 自动消息">
+            <Statistic value={data.ai_reception.ai_message_count} suffix="条" />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" title="AI failover 事件">
+            <Statistic value={data.ai_reception.failover_event_count} suffix="次" />
+          </Card>
+        </Col>
+      </Row>
+      <Card size="small" title="按客服 / AI 聚合（current）">
+        <Row gutter={16}>
+          <Col span={12}>
+            <Typography.Title level={5}>客服归属</Typography.Title>
+            <Table
+              size="small"
+              dataSource={data.current.owner.by_owner}
+              rowKey={(row) => String(row.owner_staff_user_id ?? "null")}
+              columns={[
+                { title: "客服", dataIndex: "owner_staff_user_id" },
+                { title: "会员数", dataIndex: "member_count" },
+              ]}
+              pagination={false}
+            />
+          </Col>
+          <Col span={12}>
+            <Typography.Title level={5}>AI 归属</Typography.Title>
+            <Table
+              size="small"
+              dataSource={data.current.ai.by_ai_agent}
+              rowKey={(row) => String(row.ai_agent_id ?? "null")}
+              columns={[
+                { title: "AI Agent", dataIndex: "ai_agent_id" },
+                { title: "会员数", dataIndex: "member_count" },
+              ]}
+              pagination={false}
+            />
+          </Col>
+        </Row>
+      </Card>
+      <Card size="small" title="EntryLink 转化">
+        <Table
+          size="small"
+          dataSource={data.entry_links}
+          rowKey="entry_link_id"
+          columns={[
+            { title: "Code", dataIndex: "code", width: 110 },
+            { title: "类型", dataIndex: "link_type", width: 140 },
+            {
+              title: "状态",
+              dataIndex: "status",
+              width: 100,
+              render: (v: string) => <Tag>{v}</Tag>,
+            },
+            { title: "使用", dataIndex: "usage_count", width: 80 },
+            { title: "注册", dataIndex: "members_registered", width: 80 },
+            { title: "AI 绑定", dataIndex: "ai_assigned", width: 80 },
+            { title: "会话", dataIndex: "conversations", width: 80 },
+            { title: "AI 消息", dataIndex: "ai_messages", width: 80 },
+          ]}
+          pagination={{ pageSize: 10 }}
+        />
+      </Card>
+      <Card size="small" title="异常">
+        <Descriptions
+          size="small"
+          column={2}
+          items={[
+            { key: "no_owner", label: "无客服归属会员", children: data.anomalies.no_owner_member_count },
+            { key: "no_ai", label: "无 AI 会员", children: data.anomalies.no_ai_member_count },
+            { key: "bad_link", label: "EntryLink 指向已停用 AI", children: data.anomalies.entry_link_pointing_disabled_ai },
+            { key: "no_fallback", label: "AI 无 fallback staff", children: data.anomalies.ai_without_fallback_staff },
+          ]}
+        />
+        {data.anomalies.no_owner_member_count > 0 ||
+        data.anomalies.no_ai_member_count > 0 ||
+        data.anomalies.entry_link_pointing_disabled_ai > 0 ||
+        data.anomalies.ai_without_fallback_staff > 0 ? (
+          <Alert
+            style={{ marginTop: 12 }}
+            type="warning"
+            showIcon
+            message="存在异常项，请到 EntryLinks / AIAgents / Members 检查。"
+          />
+        ) : null}
+      </Card>
+    </Space>
+  );
+}
+
 export function ReportsPage(): JSX.Element {
   const tabItems = useMemo(
     () => [
       { key: "whatsapp", label: "WhatsApp 统计", children: <WhatsAppStatsTab /> },
       { key: "operations", label: "运营报表", children: <OperationsReportTab /> },
+      { key: "ownership", label: "归属报表", children: <OwnershipReportTab /> },
       { key: "finance", label: "财务报表", children: <FinanceReportTab /> },
     ],
     []

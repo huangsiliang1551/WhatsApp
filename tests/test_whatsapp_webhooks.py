@@ -1541,14 +1541,18 @@ def test_root_whatsapp_webhook_rejects_invalid_signature_before_scope_readiness_
             params={"account_id": "meta-webhook-account"},
         )
         assert first_conversation_response.status_code == 200
-        assert first_conversation_response.json() == []
+        first_payload = first_conversation_response.json()
+        first_items = first_payload.get("items", first_payload) if isinstance(first_payload, dict) else first_payload
+        assert first_items == []
 
         second_conversation_response = client.get(
             "/api/conversations",
             params={"account_id": "meta-root-invalid-signature-account-two"},
         )
         assert second_conversation_response.status_code == 200
-        assert second_conversation_response.json() == []
+        second_payload = second_conversation_response.json()
+        second_items = second_payload.get("items", second_payload) if isinstance(second_payload, dict) else second_payload
+        assert second_items == []
     finally:
         if original_env["MESSAGING_PROVIDER"] is None:
             os.environ.pop("MESSAGING_PROVIDER", None)
@@ -3091,66 +3095,83 @@ def test_whatsapp_status_update_rejects_unknown_phone_number_scope(client: TestC
     assert audit_logs[0]["payload"]["external_id"] == "wamid.scope.status.1"
 
 
-def test_whatsapp_webhook_signature_failure_is_audited(client: TestClient) -> None:
-    register_meta_account_with_webhook_secret(client)
-    subscribe_meta_webhook(client)
+def test_whatsapp_webhook_signature_failure_is_audited(
+    client: TestClient,
+    override_meta_management_provider,
+) -> None:
+    import os
+    from app.core.settings import get_settings
 
-    payload = {
-        "object": "whatsapp_business_account",
-        "entry": [
-            {
-                "id": "waba-webhook-1",
-                "changes": [
-                    {
-                        "field": "messages",
-                        "value": {
-                            "messaging_product": "whatsapp",
-                            "metadata": {
-                                "display_phone_number": "+1 555 000 0001",
-                                "phone_number_id": "pn-webhook-1",
+    original_env = os.environ.get("MESSAGING_PROVIDER")
+    os.environ["MESSAGING_PROVIDER"] = "whatsapp"
+    get_settings.cache_clear()
+    try:
+        override_meta_management_provider(client, StubMetaManagementProvider())
+        register_meta_account_with_webhook_secret(client)
+        subscribe_meta_webhook(client)
+
+        payload = {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "id": "waba-webhook-1",
+                    "changes": [
+                        {
+                            "field": "messages",
+                            "value": {
+                                "messaging_product": "whatsapp",
+                                "metadata": {
+                                    "display_phone_number": "+1 555 000 0001",
+                                    "phone_number_id": "pn-webhook-1",
+                                },
+                                "messages": [],
+                                "statuses": [],
                             },
-                            "messages": [],
-                            "statuses": [],
-                        },
-                    }
-                ],
-            }
-        ],
-    }
-    raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                        }
+                    ],
+                }
+            ],
+        }
+        raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
-    response = client.post(
-        "/webhooks/whatsapp/meta-webhook-account/wabas/waba-webhook-1",
-        content=raw_body,
-        headers={
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": "sha256=invalid",
-        },
-    )
+        response = client.post(
+            "/webhooks/whatsapp/meta-webhook-account/wabas/waba-webhook-1",
+            content=raw_body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": "sha256=invalid",
+            },
+        )
 
-    assert response.status_code == 403
+        assert response.status_code == 403
 
-    audit_response = client.get(
-        "/api/runtime/audit-logs",
-        params={
-            "account_id": "meta-webhook-account",
-            "action": "meta_webhook_signature_failed",
-            "target_type": "waba_account",
-            "target_id": "waba-webhook-1",
-        },
-    )
-    assert audit_response.status_code == 200
-    audit_logs = audit_response.json()
-    assert len(audit_logs) == 1
-    assert audit_logs[0]["payload"]["signature_header_present"] is True
+        audit_response = client.get(
+            "/api/runtime/audit-logs",
+            params={
+                "account_id": "meta-webhook-account",
+                "action": "meta_webhook_signature_failed",
+                "target_type": "waba_account",
+                "target_id": "waba-webhook-1",
+            },
+        )
+        assert audit_response.status_code == 200
+        audit_logs = audit_response.json()
+        assert len(audit_logs) == 1
+        assert audit_logs[0]["payload"]["signature_header_present"] is True
 
-    accounts_response = client.get("/api/meta/accounts")
-    assert accounts_response.status_code == 200
-    account = next(item for item in accounts_response.json() if item["account_id"] == "meta-webhook-account")
-    assert account["webhook_runtime_status"] == "signature_failed"
-    assert account["webhook_last_signature_failed_at"] is not None
-    assert account["webhook_signature_failure_count"] == 1
-    assert account["webhook_runtime_error"] == "invalid_signature"
+        accounts_response = client.get("/api/meta/accounts")
+        assert accounts_response.status_code == 200
+        account = next(item for item in accounts_response.json() if item["account_id"] == "meta-webhook-account")
+        assert account["webhook_runtime_status"] == "signature_failed"
+        assert account["webhook_last_signature_failed_at"] is not None
+        assert account["webhook_signature_failure_count"] == 1
+        assert account["webhook_runtime_error"] == "invalid_signature"
+    finally:
+        if original_env is None:
+            os.environ.pop("MESSAGING_PROVIDER", None)
+        else:
+            os.environ["MESSAGING_PROVIDER"] = original_env
+        get_settings.cache_clear()
 
 
 def test_whatsapp_webhook_rejects_payload_waba_that_does_not_match_scoped_route(

@@ -221,6 +221,9 @@ const LazyCustomersPage = lazyPage(() =>
 const LazySitesPage = lazyPage(() =>
   import("./pages/SitesPage").then((module) => ({ default: module.SitesPage }))
 );
+const LazyEntryLinksPage = lazyPage(() =>
+  import("./pages/EntryLinksPage").then((module) => ({ default: module.EntryLinksPage }))
+);
 const LazyDebugPanelPage = lazyPage(() =>
   import("./pages/DebugPanelPage").then((module) => ({ default: module.DebugPanelPage }))
 );
@@ -486,6 +489,7 @@ function renderPage(activePage: AppPageId): JSX.Element {
   if (activePage === "operations") return <LazyOperationsCenterPage />;
   if (activePage === "customers") return <LazyCustomersPage />;
   if (activePage === "sites") return <LazySitesPage />;
+  if (activePage === "entry_links") return <LazyEntryLinksPage />;
   if (activePage === "agents") return <LazyAgentsPage />;
   if (activePage === "profile") return <LazyProfilePage />;
   if (activePage === "debug_panel") return <LazyDebugPanelPage />;
@@ -770,6 +774,8 @@ export default function App() {
         setMembersPagePrefill(parsedPrefill as Parameters<typeof setMembersPagePrefill>[0]);
       } else if (route.id === "sites") {
         setSitesPagePrefill(parsedPrefill as Parameters<typeof setSitesPagePrefill>[0]);
+      } else if (route.id === "entry_links") {
+        // EntryLinksPage 暂不消费 prefill，但保持 hook 链一致。
       } else if (route.id === "access_control") {
         setAccessControlPagePrefill(
           parsedPrefill as Parameters<typeof setAccessControlPagePrefill>[0]

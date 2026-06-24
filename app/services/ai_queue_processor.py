@@ -61,6 +61,17 @@ async def process_ai_generation_job(
         recipient_id = str(payload["recipient_id"])
         queued_waba_id = _optional_payload_string(payload.get("waba_id"))
         queued_phone_number_id = _optional_payload_string(payload.get("phone_number_id"))
+        # ── 携带 queue 时填入的 AI / owner 快照（spec 5.9 / 8.4） ──
+        queued_ai_agent_id = _optional_payload_string(payload.get("ai_agent_id"))
+        queued_entry_link_id_snapshot = _optional_payload_string(
+            payload.get("source_entry_link_id_snapshot")
+        )
+        queued_owner_snapshot_raw = payload.get("owner_snapshot")
+        queued_owner_snapshot: dict[str, object] = (
+            dict(queued_owner_snapshot_raw) if isinstance(queued_owner_snapshot_raw, dict) else {}
+        )
+        queued_ai_provider_name = _optional_payload_string(payload.get("ai_provider_name"))
+        queued_ai_model_name = _optional_payload_string(payload.get("ai_model"))
         customer_language = str(payload["language_code"])
         source_job_id = str(payload["job_id"]) if payload.get("job_id") is not None else None
         if source_job_id is not None:
@@ -447,6 +458,22 @@ async def process_ai_generation_job(
                 "handover_reason": handover_reason,
             },
             provider_message_id=dispatch_result.provider_message_id,
+            actor_type="ai_agent" if delivery_mode == "ai_auto_reply" else "system",
+            actor_id=queued_ai_agent_id,
+            ai_agent_id=queued_ai_agent_id or conversation.current_ai_agent_id,
+            ai_assignment_id_snapshot=conversation.current_ai_assignment_id,
+            source_entry_link_id_snapshot=(
+                queued_entry_link_id_snapshot or conversation.current_entry_link_id
+            ),
+            owner_agency_id_snapshot=queued_owner_snapshot.get("owner_agency_id_snapshot"),
+            owner_staff_user_id_snapshot=queued_owner_snapshot.get("owner_staff_user_id_snapshot"),
+            owner_agency_member_id_snapshot=queued_owner_snapshot.get("owner_agency_member_id_snapshot"),
+            owner_assignment_id_snapshot=queued_owner_snapshot.get("owner_assignment_id_snapshot"),
+            ai_provider=queued_ai_provider_name or payload_provider,
+            ai_model=queued_ai_model_name or payload_model,
+            source_job_id=source_job_id,
+            failover_from_ai_agent_id=conversation.ai_failover_from_agent_id,
+            failover_reason=conversation.ai_failover_reason,
         )
 
         # ── A7: Record AI usage for billing ──

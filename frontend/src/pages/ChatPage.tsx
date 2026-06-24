@@ -9,6 +9,8 @@ import { getCustomerMemberStatusSnapshot, resolveCustomerProfileSummaryByConvers
 import { useAppStore } from "../stores/appStore";
 import { usePermissions } from "../hooks/usePermissions";
 import { ConversationList, MessagePanel, ConversationHeader, FinanceDrawer, VisitTrailDrawer, CustomerProfileDrawer, QuickToolbar, CannedResponses, type MessagePanelHandle, type OpenTab } from "./admin-chat";
+import { AIReceptionBar } from "./admin-chat/AIReceptionBar";
+import { switchConversationAI } from "../services/entryLinks";
 import { useWorkspaceState, useConversationDetail, useChatActions, clearProfileCache, clearMessagesCache, useNotificationSound, useAgentStatus } from "./admin-chat/hooks";
 
 function buildKey(a: string, c: string) { return `${a}:${c}`; }
@@ -694,6 +696,22 @@ export function ChatPage(): JSX.Element {
         }}>
           {selConv ? (
             <>
+              <AIReceptionBar
+                selConv={selConv}
+                canSwitchAI={can("conversations.ai.switch")}
+                canHandover={can("conversations.handover")}
+                canRestoreAI={can("conversations.restore_ai")}
+                canViewAudit={can("member_ownership.history")}
+                onSwitchAI={(aiAgentId) => {
+                  void switchConversationAI(selConv.account_id, selConv.conversation_id, aiAgentId);
+                }}
+                onHandover={() => {
+                  if (can("conversations.handover") && selConv) actions.handover(selConv);
+                }}
+                onRestoreAI={() => {
+                  if (can("conversations.restore_ai") && selConv) actions.restoreAI(selConv);
+                }}
+              />
               <ConversationHeader
                 conversation={selConv}
                 customerProfile={detail.customerProfile}

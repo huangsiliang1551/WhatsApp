@@ -812,12 +812,14 @@ async def _receive_whatsapp_webhook_for_scope(
         signature_verified = True
     elif not _should_verify_webhook_signature(settings):
         # Dev/test/mock may disable signature verification for local work.
+        # 明确把 signature_verified 设为 False 以反映"未做校验"，便于调用方
+        # 区分"校验通过"和"未启用校验"两种情况。
         logger.warning(
             "webhook_signature_verification_disabled",
             app_env=settings.app_env,
             messaging_provider=settings.messaging_provider,
         )
-        signature_verified = True
+        signature_verified = False
     elif not signature_verified:
         signature_header = signature_header or ""
         if app_secret:

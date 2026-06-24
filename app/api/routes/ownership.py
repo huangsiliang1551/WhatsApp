@@ -44,6 +44,7 @@ from app.services.member_ownership_service import (
     MemberOwnershipService,
     TransferUnauthorizedError,
 )
+from app.services.ownership_report_service import OwnershipReportService
 from app.services.ownership_snapshot_service import OwnershipSnapshotService
 
 
@@ -626,3 +627,21 @@ async def audit_for_member(
         }
         for e in session.scalars(stmt).all()
     ]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Ownership reports routes
+# ──────────────────────────────────────────────────────────────────────────────
+ownership_report_router = APIRouter(prefix="/api/reports/ownership", tags=["ownership-reports"])
+
+
+@ownership_report_router.get("")
+async def get_ownership_report(
+    account_id: str | None = Query(default=None, alias="account_id"),
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("reports.ownership.view")),
+) -> dict[str, Any]:
+    if not actor.is_super_admin and account_id is None:
+        account_id = actor.account_ids[0] if actor.account_ids else None
+    svc = OwnershipReportService(session)
+    return svc.ownership_report(account_id=account_id)

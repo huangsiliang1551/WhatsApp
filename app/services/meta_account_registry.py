@@ -185,7 +185,12 @@ class MetaAccountRegistry:
             display_name=payload.display_name,
         )
         waba_account = self._get_waba_by_waba_id(payload.waba_id)
-        effective_verify_token = self._normalize_verify_token(self._settings.meta_global_webhook_verify_token or None)
+        # 优先使用请求里显式传入的 verify_token；否则使用全局 token；最后允许空。
+        request_verify_token = self._normalize_verify_token(payload.verify_token)
+        global_verify_token = self._normalize_verify_token(
+            self._settings.meta_global_webhook_verify_token or None
+        )
+        effective_verify_token = request_verify_token or global_verify_token
         effective_app_secret = payload.app_secret
         if effective_verify_token:
             self._ensure_verify_token_available(

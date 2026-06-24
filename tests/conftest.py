@@ -66,6 +66,9 @@ def client(db_session_factory: sessionmaker[Session]) -> Generator[TestClient, N
 
     app.dependency_overrides[get_db_session] = override_get_db_session
     app.dependency_overrides[get_db_session_factory] = lambda: db_session_factory
+    # 默认安装 mock Meta 管理 Provider，避免 helper（subscribe_meta_webhook / manual 注册）
+    # 在没显式 override 的测试中真实去调 Meta API。
+    app.dependency_overrides[get_meta_management_service] = lambda: StubMetaManagementProvider()
 
     reset_rate_limiter()
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
-import { Button, Descriptions, Divider, Drawer, Empty, List, Space, Spin, Statistic, Tag, Tabs, Typography, message } from "antd";
+import { Alert, Button, Descriptions, Divider, Drawer, Empty, List, Space, Spin, Statistic, Tag, Tabs, Typography, message } from "antd";
 import {
   BlockOutlined,
   CheckCircleOutlined,
@@ -35,11 +35,20 @@ import type {
 
 // ── Constants ──
 
-const TAB_KEYS = ["overview", "conversations", "tickets", "finance", "timeline", "profile"] as const;
+const TAB_KEYS = [
+  "overview",
+  "attribution",
+  "conversations",
+  "tickets",
+  "finance",
+  "timeline",
+  "profile",
+] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 
 const TAB_LABELS: Record<TabKey, string> = {
   overview: "概览",
+  attribution: "归属",
   conversations: "会话列表",
   tickets: "工单列表",
   finance: "财务",
@@ -509,6 +518,97 @@ export function CustomerDetailDrawer({
     );
   };
 
+  const renderAttribution = () => {
+    // summary 来自 /api/customers/{id}/summary，可能包含 member_profile 字段。
+    // profile 来自 CustomerProfile service。优先用 profile；缺字段时显示"未归属 / 未绑定 AI / 无入口"。
+    const member = (summary as unknown as { member_profile?: Record<string, unknown> | null })
+      ?.member_profile;
+    const ownerId =
+      (member?.current_owner_staff_user_id as string | null | undefined) ?? null;
+    const ownerAgencyId =
+      (member?.current_owner_agency_id as string | null | undefined) ?? null;
+    const aiId = (member?.current_ai_agent_id as string | null | undefined) ?? null;
+    const aiAssignmentId =
+      (member?.current_ai_assignment_id as string | null | undefined) ?? null;
+    const entryLinkId =
+      (member?.registration_entry_link_id as string | null | undefined) ?? null;
+    const channel =
+      (member?.registration_channel as string | null | undefined) ?? null;
+    const sourceType =
+      (member?.registration_source_type as string | null | undefined) ?? null;
+    const status = (member?.attribution_status as string | null | undefined) ?? null;
+    const ownerAssignedAt =
+      (member?.owner_assigned_at as string | null | undefined) ?? null;
+    const aiAssignedAt =
+      (member?.ai_assigned_at as string | null | undefined) ?? null;
+    if (!member) {
+      return (
+        <Empty
+          description="该客户尚未加载 member_profile 概览（API 未返回）。请等待客户概览加载完成或联系管理员扩展 API。"
+          style={{ marginTop: 48 }}
+        />
+      );
+    }
+    return (
+      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+        <Descriptions
+          size="small"
+          column={1}
+          title="当前人力归属"
+          bordered
+          items={[
+            { key: "owner", label: "客服", children: ownerId ?? "未归属" },
+            { key: "owner_agency", label: "代理商", children: ownerAgencyId ?? "—" },
+            {
+              key: "owner_assigned_at",
+              label: "开始时间",
+              children: ownerAssignedAt ?? "—",
+            },
+            {
+              key: "status",
+              label: "归属状态",
+              children: status ? <Tag color="blue">{status}</Tag> : "—",
+            },
+          ]}
+        />
+        <Descriptions
+          size="small"
+          column={1}
+          title="当前 AI 归属"
+          bordered
+          items={[
+            { key: "ai", label: "AI Agent", children: aiId ?? "未绑定" },
+            { key: "ai_asg", label: "AI Assignment", children: aiAssignmentId ?? "—" },
+            { key: "ai_assigned_at", label: "绑定时间", children: aiAssignedAt ?? "—" },
+          ]}
+        />
+        <Descriptions
+          size="small"
+          column={1}
+          title="注册入口"
+          bordered
+          items={[
+            { key: "entry_link", label: "EntryLink", children: entryLinkId ?? "无入口" },
+            { key: "channel", label: "渠道", children: channel ?? "—" },
+            { key: "source_type", label: "来源类型", children: sourceType ?? "—" },
+          ]}
+        />
+        <Alert
+          type="info"
+          showIcon
+          message="归属说明"
+          description={
+            <ul style={{ marginBottom: 0, paddingLeft: 18 }}>
+              <li>当前列表看 current_*（实时状态）。</li>
+              <li>历史消息和报表看 *_snapshot（划转不会回填历史）。</li>
+              <li>未归属 / 未绑定 AI / 无入口 都不阻塞主消息链路，但部分 AI 自动能力受限。</li>
+            </ul>
+          }
+        />
+      </Space>
+    );
+  };
+
   const renderConversations = () => {
     if (convLoading) return <Spin style={{ display: "block", margin: "48px auto" }} />;
     if (conversations.length === 0) {
@@ -876,6 +976,8 @@ export function CustomerDetailDrawer({
     switch (tabKey) {
       case "overview":
         return renderOverview();
+      case "attribution":
+        return renderAttribution();
       case "conversations":
         return renderConversations();
       case "tickets":

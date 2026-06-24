@@ -71,6 +71,7 @@ class ManualMetaAccountRequest(BaseModel):
     meta_business_portfolio_id: str | None = None
     waba_id: str = Field(min_length=1)
     access_token: str = Field(min_length=1)
+    verify_token: str | None = None
     token_source: Literal["system_user", "user_access_token"] = "system_user"
     app_secret: str | None = None
     notes: str | None = None

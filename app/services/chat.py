@@ -29,6 +29,22 @@ from app.services.support_router import SupportRouter
 from app.services.translation_service import TranslationService
 
 
+# AI / 规则自动回复的统一 delivery_mode 集合：这些模式必须标记 ai_generated=True
+# 并写入 AI 接待归属和 owner / entry link 快照（spec 5.9 / 8.4）。
+AI_DELIVERY_MODES = {
+    "ai_sync_reply",
+    "ai_async_queued",
+    "ai_generation_queued",
+    "rule_auto_reply",
+    "intent_auto_reply",
+    "ai_outbound_job",
+}
+
+
+def _is_ai_delivery_mode(delivery_mode: str | None) -> bool:
+    return delivery_mode in AI_DELIVERY_MODES
+
+
 async def _build_deduplicated_result(
     normalized: NormalizedMessage,
     existing: Message,
@@ -157,6 +173,128 @@ async def process_inbound_message(
         customer_language_source="hint" if language_hint else "detected",
         provider_phone_number_id=normalized.phone_number_id,
     )
+    # ── 解析 entry 上下文并确保会话 AI 归属（spec 6.1 / 6.2 / 6.7） ──
+    entry_context: dict[str, object] = {
+        "user_id": normalized.user_id,
+        "waba_id": normalized.waba_id,
+        "phone_number_id": normalized.phone_number_id,
+        "customer_wa_id": normalized.user_id,
+    }
+    inbound_metadata = normalized.metadata or {}
+    if isinstance(inbound_metadata, dict):
+        for key in ("entry_code", "ref", "referral_entry_code"):
+            value = inbound_metadata.get(key)
+            if isinstance(value, str) and value:
+                entry_context["entry_code"] = value
+                break
+        if "referral" in inbound_metadata and isinstance(inbound_metadata["referral"], dict):
+            ref = inbound_metadata["referral"]
+            for key in ("entry_code", "ref", "source_url"):
+                value = ref.get(key)
+                if isinstance(value, str) and value:
+                    entry_context["entry_code"] = value
+                    break
+    if "entry_code" not in entry_context:
+        entry_context["entry_code"] = None
+    entry_context["text"] = normalized.text
+
+    conversation_ai_assignment = None
+    try:
+        from app.services.conversation_ai_assignment_service import (
+            AI_DELIVERY_MODES as _AI_DELIVERY_MODES,  # noqa: F401  consistency check
+            ConversationAIAssignmentService,
+        )
+        from app.services.ownership_snapshot_service import OwnershipSnapshotService
+        from sqlalchemy.orm.attributes import flag_modified
+
+        ai_svc = ConversationAIAssignmentService(runtime_state_store.session)
+        resolved = ai_svc.resolve_entry_context_from_inbound_message(
+            account_id=normalized.account_id,
+            conversation_id=normalized.conversation_id,
+            text=normalized.text,
+            waba_id=normalized.waba_id,
+            phone_number_id=normalized.phone_number_id,
+            customer_wa_id=normalized.user_id,
+            user_id=normalized.user_id,
+            entry_code=entry_context.get("entry_code"),  # type: ignore[arg-type]
+            referral_metadata=inbound_metadata if isinstance(inbound_metadata, dict) else None,
+        )
+        entry_context.update({k: v for k, v in resolved.items() if v is not None})
+        try:
+            conversation_ai_assignment = ai_svc.ensure_conversation_ai_assignment(
+                account_id=normalized.account_id,
+                conversation_id=normalized.conversation_id,
+                entry_context=resolved,
+            )
+        except Exception as assignment_exc:  # noqa: BLE001
+            # AI 归属解析失败不能阻塞主链路；保留骨架日志后继续。
+            runtime_state_store.add_audit_log(
+                account_id=normalized.account_id,
+                actor_type="system",
+                actor_id=None,
+                action="conversation_ai_assignment_skipped",
+                target_type="conversation",
+                target_id=normalized.conversation_id,
+                payload={"reason": str(assignment_exc)},
+            )
+        # 将会话当前归属同步到 Conversation 行（一次刷新即可）
+        conversation_model = runtime_state_store.session.get(
+            type(runtime_state_store._require_conversation(  # type: ignore[attr-defined]
+                account_id=normalized.account_id,
+                conversation_id=normalized.conversation_id,
+            )),
+            runtime_state_store._require_conversation(  # type: ignore[attr-defined]
+                account_id=normalized.account_id,
+                conversation_id=normalized.conversation_id,
+            ).id,
+        )
+        if conversation_ai_assignment is not None and conversation_model is not None:
+            conversation_model.current_ai_agent_id = conversation_ai_assignment.actual_ai_agent_id
+            conversation_model.current_ai_assignment_id = conversation_ai_assignment.id
+            if conversation_ai_assignment.failover_from_ai_agent_id:
+                conversation_model.ai_failover_active = True
+                conversation_model.ai_failover_from_agent_id = (
+                    conversation_ai_assignment.failover_from_ai_agent_id
+                )
+                conversation_model.ai_failover_reason = conversation_ai_assignment.failover_reason
+            else:
+                conversation_model.ai_failover_active = False
+                conversation_model.ai_failover_from_agent_id = None
+                conversation_model.ai_failover_reason = None
+            if conversation_ai_assignment.source_entry_link_id is not None:
+                conversation_model.current_entry_link_id = (
+                    conversation_ai_assignment.source_entry_link_id
+                )
+            runtime_state_store.session.add(conversation_model)
+        # 把 owner / entry 快照预热到 conversation（业务消息发件人/客服使用）
+        try:
+            snap_svc = OwnershipSnapshotService(runtime_state_store.session)
+            snap = snap_svc.build_snapshot_for_user(normalized.account_id, normalized.user_id)
+            if conversation_model is not None and snap.owner_staff_user_id_snapshot:
+                conversation_model.current_owner_agency_id_snapshot = (
+                    snap.owner_agency_id_snapshot
+                )
+                conversation_model.current_owner_staff_user_id_snapshot = (
+                    snap.owner_staff_user_id_snapshot
+                )
+                conversation_model.current_owner_agency_member_id_snapshot = (
+                    snap.owner_agency_member_id_snapshot
+                )
+                conversation_model.current_owner_assignment_id_snapshot = (
+                    snap.owner_assignment_id_snapshot
+                )
+                if conversation_model.current_entry_link_id is None:
+                    conversation_model.current_entry_link_id = (
+                        snap.source_entry_link_id_snapshot
+                    )
+                runtime_state_store.session.add(conversation_model)
+        except Exception:  # noqa: BLE001
+            # 快照解析失败不影响主流程
+            pass
+    except Exception:  # noqa: BLE001
+        # 整段 AI 归属入口解析失败也不能阻塞主消息链路
+        pass
+
     try:
         await runtime_state_store.record_inbound_message(
             account_id=normalized.account_id,
@@ -174,6 +312,7 @@ async def process_inbound_message(
                 "intent_confidence": intent_decision.confidence,
                 "handover_recommended": intent_decision.handover_recommended,
                 "handover_reason": intent_decision.handover_reason,
+                "entry_code": entry_context.get("entry_code"),
             },
         )
     except IntegrityError:
@@ -279,6 +418,28 @@ async def process_inbound_message(
                 )
             else:
                 ai_provider = get_ai_provider(settings, account_id=normalized.account_id)
+                # 收集当前 AI 归属快照塞入 queue payload，确保 worker 最终
+                # 发送消息时也能补上 ai_agent_id / owner snapshot（spec 5.9 / 8.4）。
+                queued_ai_agent_id: str | None = None
+                queued_owner_snapshot: dict[str, object] = {}
+                queued_entry_link_id: str | None = None
+                try:
+                    if conversation_ai_assignment is not None:
+                        queued_ai_agent_id = conversation_ai_assignment.actual_ai_agent_id
+                    from app.services.ownership_snapshot_service import OwnershipSnapshotService
+                    snap_svc = OwnershipSnapshotService(runtime_state_store.session)
+                    snap = snap_svc.build_snapshot_for_conversation(
+                        account_id=normalized.account_id,
+                        conversation_id=normalized.conversation_id,
+                    )
+                    queued_owner_snapshot = snap.as_dict()
+                    queued_entry_link_id = (
+                        normalized.entry_link_id
+                        if hasattr(normalized, "entry_link_id")
+                        else None
+                    ) or snap.source_entry_link_id_snapshot
+                except Exception:  # noqa: BLE001
+                    pass
                 enqueue_result = queue_service.enqueue_ai_generation(
                     {
                         "account_id": normalized.account_id,
@@ -292,6 +453,11 @@ async def process_inbound_message(
                         "intent_confidence": intent_decision.confidence,
                         "handover_recommended": intent_decision.handover_recommended,
                         "handover_reason": intent_decision.handover_reason,
+                        "ai_agent_id": queued_ai_agent_id,
+                        "source_entry_link_id_snapshot": queued_entry_link_id,
+                        "owner_snapshot": queued_owner_snapshot,
+                        "ai_provider_name": ai_provider.provider_name,
+                        "ai_model": ai_provider.model,
                     }
                 )
                 await runtime_state_store.record_queue_event(
@@ -336,6 +502,51 @@ async def process_inbound_message(
             conversation_id=normalized.conversation_id,
         )
         outbound_language = detected_language
+        # ── 计算本条出站消息的 AI / 归属快照（spec 5.9 / 8.4） ──
+        is_ai_message = _is_ai_delivery_mode(delivery_mode)
+        actual_ai_agent_id: str | None = None
+        if is_ai_message:
+            actual_ai_agent_id = (
+                conversation_ai_assignment.actual_ai_agent_id
+                if conversation_ai_assignment is not None
+                else None
+            ) or conversation.current_ai_agent_id if conversation else None
+        owner_snapshot: dict[str, object] = {}
+        entry_link_id_for_message: str | None = None
+        try:
+            from app.services.ownership_snapshot_service import OwnershipSnapshotService
+            snap_svc = OwnershipSnapshotService(runtime_state_store.session)
+            snap = snap_svc.build_snapshot_for_conversation(
+                account_id=normalized.account_id,
+                conversation_id=normalized.conversation_id,
+            )
+            owner_snapshot = snap.as_dict()
+            if actual_ai_agent_id:
+                owner_snapshot["ai_agent_id_snapshot"] = actual_ai_agent_id
+            entry_link_id_for_message = (
+                conversation.current_entry_link_id if conversation else None
+            ) or snap.source_entry_link_id_snapshot
+        except Exception:  # noqa: BLE001
+            owner_snapshot = {}
+            entry_link_id_for_message = (
+                conversation.current_entry_link_id if conversation else None
+            )
+        # Actor 口径：AI 自动消息 = ai_agent；echo/system fallback = system
+        if is_ai_message:
+            actor_type = "ai_agent"
+            actor_id_for_message = actual_ai_agent_id
+        else:
+            actor_type = "system"
+            actor_id_for_message = None
+        failover_from_id: str | None = None
+        failover_reason_value: str | None = None
+        if is_ai_message and conversation_ai_assignment is not None:
+            failover_from_id = conversation_ai_assignment.failover_from_ai_agent_id
+            failover_reason_value = conversation_ai_assignment.failover_reason
+        if not failover_from_id and conversation is not None:
+            failover_from_id = conversation.ai_failover_from_agent_id
+            failover_reason_value = conversation.ai_failover_reason
+
         dispatch_request = build_outbound_dispatch_request(
             provider=messaging_provider,
             conversation=conversation,
@@ -379,7 +590,7 @@ async def process_inbound_message(
             translated_text=None,
             translated_language_code=None,
             delivery_mode=delivery_mode,
-            ai_generated=False,
+            ai_generated=is_ai_message,
             payload={
                 "provider": dispatch_result.provider_name,
                 "provider_message_id": dispatch_result.provider_message_id,
@@ -396,6 +607,21 @@ async def process_inbound_message(
                 "handover_reason": intent_decision.handover_reason,
             },
             provider_message_id=dispatch_result.provider_message_id,
+            actor_type=actor_type,
+            actor_id=actor_id_for_message,
+            ai_agent_id=actual_ai_agent_id,
+            ai_assignment_id_snapshot=(
+                conversation.current_ai_assignment_id if conversation else None
+            ) or (conversation_ai_assignment.id if conversation_ai_assignment is not None else None),
+            source_entry_link_id_snapshot=entry_link_id_for_message,
+            owner_agency_id_snapshot=owner_snapshot.get("owner_agency_id_snapshot"),
+            owner_staff_user_id_snapshot=owner_snapshot.get("owner_staff_user_id_snapshot"),
+            owner_agency_member_id_snapshot=owner_snapshot.get("owner_agency_member_id_snapshot"),
+            owner_assignment_id_snapshot=owner_snapshot.get("owner_assignment_id_snapshot"),
+            ai_provider=ai_provider_name,
+            ai_model=ai_model,
+            failover_from_ai_agent_id=failover_from_id,
+            failover_reason=failover_reason_value,
         )
         if route_decision is not None:
             runtime_state_store.add_audit_log(

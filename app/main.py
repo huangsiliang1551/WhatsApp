@@ -101,7 +101,9 @@ from app.api.routes.ownership import (
     member_ai_ownership_router,
     member_ownership_router,
     ownership_audit_router,
+    ownership_report_router,
 )
+from app.api.routes.ai_outbound_jobs import router as ai_outbound_jobs_router
 from app.core.rate_limit_middleware import RateLimitMiddleware
 from app.core.api_stats_middleware import ApiStatsMiddleware
 from app.core.logging import configure_logging
@@ -459,6 +461,8 @@ app.include_router(member_ownership_router)
 app.include_router(member_ai_ownership_router)
 app.include_router(conversation_ai_router)
 app.include_router(ownership_audit_router)
+app.include_router(ownership_report_router)
+app.include_router(ai_outbound_jobs_router)
 
 
 # ── Client error reporting ──

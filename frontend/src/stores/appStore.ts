@@ -64,6 +64,8 @@ export type AppPageId =
   | "rate_limits"
   | "ai_chat_config"
   | "profile"
+  // 归属 / 入口链接管理
+  | "entry_links"
   // Finance & Billing pages
   | "finance_settings"
   | "finance"

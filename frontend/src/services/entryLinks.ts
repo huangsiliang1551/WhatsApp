@@ -8,6 +8,21 @@ import type {
   EntryLinkStats,
 } from "../types/entryLinks";
 
+// 会话 AI 切换（spec 10.3）
+export async function switchConversationAI(
+  accountId: string,
+  conversationId: string,
+  toAiAgentId: string,
+  reason?: string,
+): Promise<{ assignment_id: string; actual_ai_agent_id: string }> {
+  const response = await api.post<{ assignment_id: string; actual_ai_agent_id: string }>(
+    `/api/conversations/${conversationId}/ai-assignment/switch`,
+    { to_ai_agent_id: toAiAgentId, reason: reason ?? null },
+    { params: { account_id: accountId } },
+  );
+  return response.data;
+}
+
 export async function listEntryLinks(params?: {
   site_id?: string;
   link_type?: string;

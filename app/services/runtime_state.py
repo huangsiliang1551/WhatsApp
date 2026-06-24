@@ -1112,10 +1112,36 @@ class RuntimeStateStore:
         message_type: str = "text",
         sent_by_agent_id: str | None = None,
         provider_message_id: str | None = None,
+        # ── 归属快照（spec 5.9 / 8.4） ──
+        actor_type: str | None = None,
+        actor_id: str | None = None,
+        ai_agent_id: str | None = None,
+        ai_assignment_id_snapshot: str | None = None,
+        source_entry_link_id_snapshot: str | None = None,
+        owner_agency_id_snapshot: str | None = None,
+        owner_staff_user_id_snapshot: str | None = None,
+        owner_agency_member_id_snapshot: str | None = None,
+        owner_assignment_id_snapshot: str | None = None,
+        ai_provider: str | None = None,
+        ai_model: str | None = None,
+        ai_prompt_version: str | None = None,
+        source_job_id: str | None = None,
+        failover_from_ai_agent_id: str | None = None,
+        failover_reason: str | None = None,
     ) -> Message:
         conversation = self._require_conversation(account_id=account_id, conversation_id=conversation_id)
         self._ensure_conversation_phone_number_scope(conversation)
         conversation.last_message_at = utc_now()
+        resolved_actor_type = actor_type
+        if resolved_actor_type is None:
+            # 默认口径：AI 自动消息 = ai_agent；echo = system；其他 = system
+            if ai_generated or (ai_agent_id is not None):
+                resolved_actor_type = "ai_agent"
+            else:
+                resolved_actor_type = "system"
+        resolved_ai_agent_id = ai_agent_id
+        if resolved_ai_agent_id is None and ai_generated:
+            resolved_ai_agent_id = conversation.current_ai_agent_id
         message = Message(
             account_id=account_id,
             conversation_id=conversation.id,
@@ -1132,6 +1158,23 @@ class RuntimeStateStore:
             payload=payload,
             ai_generated=ai_generated,
             sent_by_agent_id=sent_by_agent_id,
+            # ── 归属快照写入 ──
+            actor_type=resolved_actor_type,
+            actor_id=actor_id or resolved_ai_agent_id,
+            ai_agent_id=resolved_ai_agent_id,
+            ai_assignment_id_snapshot=ai_assignment_id_snapshot or conversation.current_ai_assignment_id,
+            source_entry_link_id_snapshot=source_entry_link_id_snapshot or conversation.current_entry_link_id,
+            owner_agency_id_snapshot=owner_agency_id_snapshot or conversation.current_owner_agency_id_snapshot,
+            owner_staff_user_id_snapshot=owner_staff_user_id_snapshot or conversation.current_owner_staff_user_id_snapshot,
+            owner_agency_member_id_snapshot=owner_agency_member_id_snapshot or conversation.current_owner_agency_member_id_snapshot,
+            owner_assignment_id_snapshot=owner_assignment_id_snapshot or conversation.current_owner_assignment_id_snapshot,
+            ai_provider=ai_provider,
+            ai_model=ai_model,
+            ai_prompt_version=ai_prompt_version,
+            source_job_id=source_job_id,
+            delivery_mode=delivery_mode,
+            failover_from_ai_agent_id=failover_from_ai_agent_id or conversation.ai_failover_from_agent_id,
+            failover_reason=failover_reason or conversation.ai_failover_reason,
         )
         self._session.add(conversation)
         self._session.add(message)
