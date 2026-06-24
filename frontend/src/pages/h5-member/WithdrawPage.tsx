@@ -99,6 +99,18 @@ export function WithdrawPage({
   const isAmountValid = withdrawAmount.trim().length > 0 && !Number.isNaN(withdrawAmountNum) && withdrawAmountNum > 0;
   const fee = isAmountValid ? Math.min(withdrawAmountNum * WITHDRAW_FEE_RATE, withdrawAmountNum) : 0;
   const estimatedReceive = isAmountValid ? withdrawAmountNum - fee : 0;
+  const withdrawableNow = effectiveWalletSummary.canWithdraw ? maxWithdrawAmount : 0;
+  const thresholdLabel = t("withdraw.threshold", {
+    amount: formatMoney(effectiveWalletSummary.withdrawThreshold, effectiveWalletSummary.currency),
+  });
+  const readinessHint = effectiveWalletSummary.canWithdraw
+    ? t("withdraw.canWithdrawHint")
+    : t("withdraw.needTransferHint", {
+        amount: formatMoney(effectiveWalletSummary.shortfallAmount, effectiveWalletSummary.currency),
+      });
+  const nextStepLabel = effectiveWalletSummary.canWithdraw
+    ? t("withdraw.nextStepWithdraw")
+    : t("withdraw.nextStepTransfer");
 
   function handleAmountChange(value: string): void {
     onWithdrawAmountChange(value);
@@ -112,10 +124,8 @@ export function WithdrawPage({
   return (
     <section className="h5-card-stack">
       <article className="h5-card h5-member-wallet-balance-hero">
-        <SectionHeader
-          meta={effectiveWalletSummary.canWithdraw ? t("withdraw.canWithdraw") : t("withdraw.needTransfer")}
-          title={t("withdraw.title")}
-        />
+        <SectionHeader meta={t("withdraw.snapshotMeta")} title={t("withdraw.snapshotTitle")} />
+        <p className="muted">{t("withdraw.snapshotDesc")}</p>
 
         <section className="h5-member-balance-strip h5-member-wallet-balance-grid">
           <article className="h5-summary-card h5-member-wallet-balance-card h5-member-wallet-balance-card-system">
@@ -124,6 +134,7 @@ export function WithdrawPage({
               <strong className="h5-member-balance-card-value">
                 {formatMoney(effectiveWalletSummary.systemBalance, effectiveWalletSummary.currency)}
               </strong>
+              <span className="h5-member-balance-card-note">{t("withdraw.systemBalanceHint")}</span>
             </div>
           </article>
 
@@ -133,6 +144,7 @@ export function WithdrawPage({
               <strong className="h5-member-balance-card-value">
                 {formatMoney(effectiveWalletSummary.taskBalance, effectiveWalletSummary.currency)}
               </strong>
+              <span className="h5-member-balance-card-note">{t("withdraw.taskBalanceHint")}</span>
             </div>
             <div className="h5-member-balance-card-actions">
               <button className="h5-secondary-button h5-member-balance-pill-button" onClick={onShowTransferAllConfirm} type="button">
@@ -140,23 +152,41 @@ export function WithdrawPage({
               </button>
             </div>
           </article>
-        </section>
 
+          <article className="h5-summary-card h5-member-wallet-balance-card h5-member-wallet-balance-card-system">
+            <div className="h5-member-balance-card-main">
+              <span className="h5-member-balance-card-label">{t("withdraw.availableNow")}</span>
+              <strong className="h5-member-balance-card-value">
+                {formatMoney(withdrawableNow, effectiveWalletSummary.currency)}
+              </strong>
+              <span className="h5-member-balance-card-note">
+                {effectiveWalletSummary.canWithdraw ? t("withdraw.availableNowHint") : t("withdraw.thresholdNotMet")}
+              </span>
+            </div>
+          </article>
+        </section>
+      </article>
+
+      <article className="h5-card h5-member-wallet-readiness-card">
+        <SectionHeader meta={t("withdraw.readinessMeta")} title={t("withdraw.readinessTitle")} />
         <div className="h5-member-wallet-threshold-bar">
-          <strong>
-            {effectiveWalletSummary.canWithdraw
-              ? t("withdraw.metThreshold")
-              : t("withdraw.threshold", {
-                  amount: formatMoney(effectiveWalletSummary.withdrawThreshold, effectiveWalletSummary.currency),
-                })}
-          </strong>
-          <span>
-            {effectiveWalletSummary.canWithdraw
-              ? t("withdraw.canWithdrawHint")
-              : t("withdraw.needTransferHint", {
-                  amount: formatMoney(effectiveWalletSummary.shortfallAmount, effectiveWalletSummary.currency),
-                })}
-          </span>
+          <strong>{effectiveWalletSummary.canWithdraw ? t("withdraw.metThreshold") : t("withdraw.needTransfer")}</strong>
+          <span>{thresholdLabel}</span>
+          <span>{readinessHint}</span>
+        </div>
+
+        <div className="h5-member-wallet-readiness-grid">
+          <article className="h5-member-wallet-readiness-pill">
+            <span>{t("withdraw.nextStep")}</span>
+            <strong>{nextStepLabel}</strong>
+            <small>{effectiveWalletSummary.canWithdraw ? t("withdraw.thresholdMet") : t("withdraw.taskBalanceHint")}</small>
+          </article>
+
+          <article className="h5-member-wallet-readiness-pill">
+            <span>{t("withdraw.fee")}</span>
+            <strong>{t("withdraw.feeRate")}</strong>
+            <small>{t("withdraw.feeNote")}</small>
+          </article>
         </div>
       </article>
 

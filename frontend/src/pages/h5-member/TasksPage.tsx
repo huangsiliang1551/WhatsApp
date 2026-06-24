@@ -40,6 +40,7 @@ export function TasksPage({
   const completed = taskInstances.filter((task) => task.status === "completed");
   const expired = taskInstances.filter((task) => task.status === "expired");
   const prioritizeInProgress = inProgress.length > 0;
+  const focusTask = inProgress[0] ?? available[0] ?? null;
 
   function renderSignInCard(): JSX.Element {
     const { todaySignedIn, consecutiveDays, goalDays, goalReward, isCompleted } = signInStatus;
@@ -183,6 +184,74 @@ export function TasksPage({
     );
   }
 
+  function renderFocusCard(): JSX.Element | null {
+    if (!focusTask) return null;
+
+    const countdownSeconds = focusTask.countdownSeconds ?? 0;
+    const totalCommission = focusTask.totalCommission ?? focusTask.rewardAmount;
+    const isAvailable = focusTask.status === "pending_claim";
+    const progress = focusTask.totalCount > 0 ? (focusTask.completedCount / focusTask.totalCount) * 100 : 0;
+    const primaryLabel = isAvailable ? t("tasks.claim") : t("home.actionContinue");
+    const statusLabel = isAvailable ? t("tasks.groupAvailable") : t("tasks.groupInProgress");
+
+    function handleFocusAction(): void {
+      if (isAvailable && onOpenClaimDialog) {
+        onOpenClaimDialog(focusTask.id);
+        return;
+      }
+      onNavigate(`/h5/tasks/package/${focusTask.id}`);
+    }
+
+    return (
+      <article className="h5-card h5-task-focus-card">
+        <SectionHeader meta={t("tasks.focusMeta")} title={t("tasks.focusTitle")} />
+        <div className="h5-task-focus-panel">
+          <div className="h5-task-focus-copy">
+            <strong>{focusTask.title}</strong>
+            <p className="muted">
+              {isAvailable
+                ? t("tasks.startsOnClaim")
+                : t("tasks.remaining", { time: formatCountdown(countdownSeconds) })}
+            </p>
+          </div>
+          <span className={`h5-task-instance-status-badge ${isAvailable ? "active" : "completed"}`}>{statusLabel}</span>
+        </div>
+
+        <div className="h5-member-task-chip-row">
+          <span className="h5-member-inline-pill">{getTaskPackageTypeLabel(focusTask.type)}</span>
+          <span className="h5-member-inline-pill">{t("tasks.items", { count: focusTask.totalCount })}</span>
+          <span className="h5-member-inline-pill">{t("tasks.focusReward", { amount: formatMoney(totalCommission) })}</span>
+        </div>
+
+        <DetailGrid
+          items={[
+            {
+              label: t("tasks.remainingTime"),
+              value: isAvailable ? t("tasks.focusTimingOnClaim") : formatCountdown(countdownSeconds),
+            },
+            {
+              label: t("tasks.progress", { done: focusTask.completedCount, total: focusTask.totalCount }),
+              value: `${Math.round(progress)}%`,
+            },
+            {
+              label: t("tasks.totalCommission"),
+              value: formatMoney(totalCommission),
+            },
+          ]}
+        />
+
+        <div className="h5-member-card-actions">
+          <button className="seed-button" onClick={handleFocusAction} type="button">
+            {primaryLabel}
+          </button>
+          <button className="seed-button seed-button-secondary" onClick={() => onNavigate("/h5/tasks")} type="button">
+            {t("tasks.viewAllTasks")}
+          </button>
+        </div>
+      </article>
+    );
+  }
+
   function renderPartition(title: string, items: H5TaskInstance[]): JSX.Element | null {
     if (items.length === 0) return null;
     return (
@@ -206,6 +275,8 @@ export function TasksPage({
   return (
     <section className="h5-card-stack">
       <PullToRefresh onRefresh={async () => { await onRefresh(); }}>
+        {renderFocusCard()}
+
         {prioritizeInProgress ? renderPartition(t("tasks.groupInProgress"), inProgress) : null}
 
         {renderSignInCard()}

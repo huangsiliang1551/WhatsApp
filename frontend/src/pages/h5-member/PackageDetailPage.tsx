@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, WarningOutlined } from "@ant-design/icons";
 
 import type { H5TaskInstance, H5TaskProductStatus } from "../../services/h5Member";
@@ -38,6 +38,7 @@ export function PackageDetailPage({
   const [currentActionKind, setCurrentActionKind] = useState<"start" | "retry" | null>(null);
   const [showBalanceDialog, setShowBalanceDialog] = useState(false);
   const [balanceProduct, setBalanceProduct] = useState<{ price: number; currency: string } | null>(null);
+  const stepsCardRef = useRef<HTMLElement | null>(null);
 
   const allCompleted = instance.products.length > 0 && instance.products.every((product) => product.status === "completed");
   const remainingItems = Math.max(0, instance.totalCount - instance.completedCount);
@@ -45,6 +46,15 @@ export function PackageDetailPage({
   const totalCommission = instance.totalCommission ?? instance.rewardAmount;
   const countdownSeconds = instance.countdownSeconds ?? 0;
   const progressPercent = instance.totalCount > 0 ? (instance.completedCount / instance.totalCount) * 100 : 0;
+  const nextActionableProduct = instance.products.find((product) => product.status === "available" || product.status === "failed");
+  const nextStepLabel =
+    instance.status === "pending_claim"
+      ? t("tasks.detailFocusClaim")
+      : nextActionableProduct?.status === "failed"
+        ? t("tasks.retry")
+        : nextActionableProduct
+          ? t("tasks.detailFocusReady")
+          : t("tasks.productRunning");
   const progressSteps = [
     { key: "ordering", label: t("tasks.progressOrdering") },
     { key: "paying", label: t("tasks.progressPaying", { amount: formatMoney(balanceProduct?.price ?? 0, balanceProduct?.currency ?? "USD") }) },
@@ -150,7 +160,7 @@ export function PackageDetailPage({
     }
     closeProgressModal();
     if (action === "recharge") {
-      onNavigate("/h5/recharge");
+      onNavigate("/h5/wallet");
       return;
     }
     if (action === "tasks") {
@@ -246,7 +256,7 @@ export function PackageDetailPage({
             </span>
           </div>
           <div className="h5-member-card-actions">
-            <button className="seed-button" onClick={() => onNavigate("/h5/recharge")} type="button">{t("tasks.goRecharge")}</button>
+            <button className="seed-button" onClick={() => onNavigate("/h5/wallet")} type="button">{t("tasks.goRecharge")}</button>
             <button className="seed-button seed-button-secondary" onClick={() => setShowBalanceDialog(false)} type="button">{t("common.cancel")}</button>
           </div>
         </article>
@@ -262,7 +272,7 @@ export function PackageDetailPage({
           <h2>{t("tasks.packageCompleted")}</h2>
           <p>{t("tasks.rewardSent", { amount: formatMoney(instance.rewardAmount) })}</p>
           <div className="h5-package-celebration-actions">
-            <button className="seed-button" onClick={() => onNavigate("/h5/recharge")} type="button">{t("tasks.viewBalance")}</button>
+            <button className="seed-button" onClick={() => onNavigate("/h5/wallet")} type="button">{t("tasks.viewBalance")}</button>
             <button className="seed-button seed-button-secondary" onClick={() => onNavigate("/h5/tasks")} type="button">{t("tasks.backToTaskList")}</button>
           </div>
         </article>
@@ -310,6 +320,55 @@ export function PackageDetailPage({
     );
   }
 
+  function renderFocusCard(): JSX.Element {
+    const claimOnly = instance.status === "pending_claim";
+
+    function handleFocusAction(): void {
+      if (claimOnly) {
+        onOpenClaimDialog?.(instance.id);
+        return;
+      }
+      stepsCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    return (
+      <article className="h5-card h5-package-focus-card">
+        <SectionHeader title={t("tasks.detailFocusTitle")} meta={t("tasks.detailFocusMeta")} />
+        <div className="h5-task-focus-panel">
+          <div className="h5-task-focus-copy">
+            <strong>{instance.title}</strong>
+            <p className="muted">{t("tasks.detailRemainingLabel", { done: instance.completedCount, total: instance.totalCount })}</p>
+          </div>
+          <span className={`h5-task-instance-status-badge ${claimOnly ? "active" : "completed"}`}>
+            {claimOnly ? t("tasks.groupAvailable") : t("tasks.groupInProgress")}
+          </span>
+        </div>
+
+        <div className="h5-task-focus-grid">
+          <article className="h5-task-focus-pill">
+            <span>{t("tasks.detailNextStep")}</span>
+            <strong>{nextStepLabel}</strong>
+            <small>{claimOnly ? t("tasks.startsOnClaim") : t("tasks.detailStepHint")}</small>
+          </article>
+          <article className="h5-task-focus-pill">
+            <span>{t("tasks.expectedCommission")}</span>
+            <strong>{formatMoney(totalCommission)}</strong>
+            <small>{t("tasks.countdown")}: {formatCountdown(countdownSeconds)}</small>
+          </article>
+        </div>
+
+        <div className="h5-member-card-actions">
+          <button className="seed-button" onClick={handleFocusAction} type="button">
+            {claimOnly ? t("tasks.claim") : t("home.actionContinue")}
+          </button>
+          <button className="seed-button seed-button-secondary" onClick={() => onNavigate("/h5/tasks")} type="button">
+            {t("tasks.backToTasks")}
+          </button>
+        </div>
+      </article>
+    );
+  }
+
   function renderProductsCard(): JSX.Element | null {
     if (instance.status === "pending_claim") {
       return (
@@ -327,7 +386,7 @@ export function PackageDetailPage({
     }
 
     return (
-      <article className="h5-card">
+      <article className="h5-card" ref={stepsCardRef}>
         <SectionHeader
           title={t("tasks.detailCompletionSteps")}
           meta={t("tasks.items", { count: instance.totalCount })}
@@ -394,6 +453,7 @@ export function PackageDetailPage({
 
   return (
     <section className="h5-card-stack">
+      {renderFocusCard()}
       {renderSummaryCard()}
       {renderProductsCard()}
       {renderSupportCard()}

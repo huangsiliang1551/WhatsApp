@@ -19,6 +19,23 @@ function validateRechargeAmount(value: string): string {
   return "";
 }
 
+function getRechargeStatusLabel(status: string): string {
+  switch (status) {
+    case "paid":
+    case "success":
+      return t("recharge.statusPaid");
+    case "processing":
+      return t("recharge.statusProcessing");
+    case "submitted":
+    case "pending":
+      return t("recharge.statusSubmitted");
+    case "failed":
+      return t("recharge.statusFailed");
+    default:
+      return status;
+  }
+}
+
 type RechargePageProps = {
   effectiveWalletSummary: H5WalletSummary;
   rechargeAmount: string;
@@ -50,23 +67,61 @@ export function RechargePage({
   const actionCardRef = useRef<HTMLElement | null>(null);
   const isProcessing = actionName === "recharge";
 
-  const recentFlowAmount = useMemo(() => {
-    if (rechargeHistory.length === 0) return 0;
-    const timestamps = rechargeHistory
-      .map((item) => new Date(item.createdAt).getTime())
-      .filter((value) => Number.isFinite(value));
-    if (timestamps.length === 0) return 0;
-    const latest = Math.max(...timestamps);
+  const flowMetrics = useMemo(() => {
+    if (rechargeHistory.length === 0) {
+      return {
+        latestRechargeAt: null,
+        todayFlowAmount: 0,
+        weeklyFlowAmount: 0,
+      };
+    }
+
+    const normalized = rechargeHistory
+      .map((item) => ({
+        ...item,
+        createdAtMs: new Date(item.createdAt).getTime(),
+      }))
+      .filter((item) => Number.isFinite(item.createdAtMs) && item.status !== "failed");
+
+    if (normalized.length === 0) {
+      return {
+        latestRechargeAt: null,
+        todayFlowAmount: 0,
+        weeklyFlowAmount: 0,
+      };
+    }
+
+    const latest = normalized.reduce((max, item) => Math.max(max, item.createdAtMs), Number.NEGATIVE_INFINITY);
+    const latestDate = new Date(latest);
+    const latestDayKey = latestDate.toDateString();
     const windowStart = latest - 7 * 24 * 60 * 60 * 1000;
-    return rechargeHistory.reduce((sum, item) => {
-      const createdAt = new Date(item.createdAt).getTime();
-      if (!Number.isFinite(createdAt) || createdAt < windowStart) {
-        return sum;
-      }
-      return sum + item.amount;
-    }, 0);
+
+    return normalized.reduce(
+      (acc, item) => {
+        if (item.createdAtMs >= windowStart) {
+          acc.weeklyFlowAmount += item.amount;
+        }
+        if (new Date(item.createdAtMs).toDateString() === latestDayKey) {
+          acc.todayFlowAmount += item.amount;
+        }
+        return acc;
+      },
+      {
+        latestRechargeAt: new Date(latest).toISOString(),
+        todayFlowAmount: 0,
+        weeklyFlowAmount: 0,
+      },
+    );
   }, [rechargeHistory]);
-  const latestRechargeAt = rechargeHistory[0]?.createdAt ?? null;
+  const withdrawableNow = effectiveWalletSummary.canWithdraw ? effectiveWalletSummary.systemBalance : 0;
+  const thresholdLabel = t("withdraw.threshold", {
+    amount: formatMoney(effectiveWalletSummary.withdrawThreshold, effectiveWalletSummary.currency),
+  });
+  const readinessHint = effectiveWalletSummary.canWithdraw
+    ? t("withdraw.canWithdrawHint")
+    : t("withdraw.needTransferHint", {
+        amount: formatMoney(effectiveWalletSummary.shortfallAmount, effectiveWalletSummary.currency),
+      });
 
   function handleAmountChange(value: string): void {
     onRechargeAmountChange(value);
@@ -87,12 +142,82 @@ export function RechargePage({
     <section className="h5-card-stack">
       <article className="h5-card h5-member-wallet-balance-hero">
         <SectionHeader
-          meta={t("recharge.systemBalance", {
-            amount: formatMoney(effectiveWalletSummary.systemBalance, effectiveWalletSummary.currency),
-          })}
-          title={t("shell.tabEarnings")}
+          meta={t("recharge.snapshotMeta")}
+          title={t("recharge.snapshotTitle")}
         />
-        <p className="muted">{t("shell.subtitleEarnings")}</p>
+        <p className="muted">{t("recharge.snapshotDesc")}</p>
+
+        <section className="h5-member-wallet-balance-grid h5-member-earnings-summary-grid">
+          <article className="h5-summary-card h5-member-wallet-balance-card h5-member-wallet-balance-card-system">
+            <div className="h5-member-balance-card-main">
+              <span className="h5-member-balance-card-label">{t("withdraw.systemBalance")}</span>
+              <strong className="h5-member-balance-card-value">
+                {formatMoney(effectiveWalletSummary.systemBalance, effectiveWalletSummary.currency)}
+              </strong>
+              <span className="h5-member-balance-card-note">{t("recharge.totalBalanceHint")}</span>
+            </div>
+          </article>
+
+          <article className="h5-summary-card h5-member-wallet-balance-card h5-member-wallet-balance-card-system">
+            <div className="h5-member-balance-card-main">
+              <span className="h5-member-balance-card-label">{t("recharge.withdrawableNow")}</span>
+              <strong className="h5-member-balance-card-value">
+                {formatMoney(withdrawableNow, effectiveWalletSummary.currency)}
+              </strong>
+              <span className="h5-member-balance-card-note">
+                {effectiveWalletSummary.canWithdraw ? t("withdraw.metThreshold") : t("recharge.notReadyToWithdraw")}
+              </span>
+            </div>
+          </article>
+
+          <article className="h5-summary-card h5-member-wallet-balance-card">
+            <div className="h5-member-balance-card-main">
+              <span className="h5-member-balance-card-label">{t("recharge.todayFlow")}</span>
+              <strong className="h5-member-balance-card-value">
+                {formatMoney(flowMetrics.todayFlowAmount, effectiveWalletSummary.currency)}
+              </strong>
+              <span className="h5-member-balance-card-note">{t("recharge.todayFlowHint")}</span>
+            </div>
+          </article>
+
+          <article className="h5-summary-card h5-member-wallet-balance-card h5-member-wallet-balance-card-task">
+            <div className="h5-member-balance-card-main">
+              <span className="h5-member-balance-card-label">{t("recharge.recentFlow")}</span>
+              <strong className="h5-member-balance-card-value">
+                {formatMoney(flowMetrics.weeklyFlowAmount, effectiveWalletSummary.currency)}
+              </strong>
+              <span className="h5-member-balance-card-note">
+                {flowMetrics.latestRechargeAt
+                  ? t("recharge.lastActivity", { time: formatTimestamp(flowMetrics.latestRechargeAt) })
+                  : t("recharge.history")}
+              </span>
+            </div>
+          </article>
+        </section>
+      </article>
+
+      <article className="h5-card h5-member-wallet-readiness-card">
+        <SectionHeader meta={t("recharge.withdrawalReadinessMeta")} title={t("recharge.withdrawalReadiness")} />
+        <div className="h5-member-wallet-threshold-bar">
+          <strong>{effectiveWalletSummary.canWithdraw ? t("withdraw.metThreshold") : t("withdraw.needTransfer")}</strong>
+          <span>{thresholdLabel}</span>
+          <span>{readinessHint}</span>
+        </div>
+
+        <div className="h5-member-wallet-readiness-grid">
+          <article className="h5-member-wallet-readiness-pill">
+            <span>{t("withdraw.taskBalance")}</span>
+            <strong>{formatMoney(effectiveWalletSummary.taskBalance, effectiveWalletSummary.currency)}</strong>
+            <small>{t("recharge.taskBalanceHint")}</small>
+          </article>
+
+          <article className="h5-member-wallet-readiness-pill">
+            <span>{t("recharge.nextAction")}</span>
+            <strong>{effectiveWalletSummary.canWithdraw ? t("recharge.quickWithdraw") : t("recharge.quickRecharge")}</strong>
+            <small>{t("recharge.recentFlowHint")}</small>
+          </article>
+        </div>
+
         <div className="h5-member-wallet-hero-actions">
           <button
             className="seed-button seed-button-secondary"
@@ -105,41 +230,6 @@ export function RechargePage({
             {t("recharge.quickWithdraw")}
           </button>
         </div>
-        <p className="h5-member-wallet-trust-note">{t("recharge.recentFlowHint")}</p>
-
-        <section className="h5-member-wallet-balance-grid h5-member-earnings-summary-grid">
-          <article className="h5-summary-card h5-member-wallet-balance-card h5-member-wallet-balance-card-system">
-            <div className="h5-member-balance-card-main">
-              <span className="h5-member-balance-card-label">{t("withdraw.systemBalance")}</span>
-              <strong className="h5-member-balance-card-value">
-                {formatMoney(effectiveWalletSummary.systemBalance, effectiveWalletSummary.currency)}
-              </strong>
-            </div>
-          </article>
-
-          <article className="h5-summary-card h5-member-wallet-balance-card h5-member-wallet-balance-card-task">
-            <div className="h5-member-balance-card-main">
-              <span className="h5-member-balance-card-label">{t("withdraw.taskBalance")}</span>
-              <strong className="h5-member-balance-card-value">
-                {formatMoney(effectiveWalletSummary.taskBalance, effectiveWalletSummary.currency)}
-              </strong>
-            </div>
-          </article>
-
-          <article className="h5-summary-card h5-member-wallet-balance-card">
-            <div className="h5-member-balance-card-main">
-              <span className="h5-member-balance-card-label">{t("recharge.recentFlow")}</span>
-              <strong className="h5-member-balance-card-value">
-                {formatMoney(recentFlowAmount, effectiveWalletSummary.currency)}
-              </strong>
-              <span className="h5-member-balance-card-note">
-                {latestRechargeAt
-                  ? t("recharge.lastActivity", { time: formatTimestamp(latestRechargeAt) })
-                  : t("recharge.history")}
-              </span>
-            </div>
-          </article>
-        </section>
       </article>
 
       <article className="h5-card h5-member-wallet-action-card h5-member-wallet-action-card-priority" ref={actionCardRef}>
@@ -165,6 +255,7 @@ export function RechargePage({
             <input
               className={amountError ? "h5-field-input-error" : ""}
               disabled={isProcessing}
+              inputMode="decimal"
               onBlur={handleBlur}
               onChange={(event) => handleAmountChange(event.target.value)}
               value={rechargeAmount}
@@ -188,16 +279,16 @@ export function RechargePage({
 
       <article className="h5-card">
         <SectionHeader meta={t("orders.count", { count: rechargeHistory.length })} title={t("recharge.history")} />
-        <div className="h5-card-stack">
+        <div className="h5-card-stack h5-member-wallet-history-list">
           {rechargeHistory.length > 0 ? (
             rechargeHistory.map((item) => (
               <CompactListRow
                 key={item.id}
-                meta={item.note || t("recharge.historyDefaultNote")}
+                meta={formatMoney(item.amount, item.currency)}
                 sideNote={formatTimestamp(item.createdAt)}
-                title={formatMoney(item.amount, item.currency)}
-                tone="active"
-                value={item.status}
+                title={item.note || t("recharge.historyDefaultNote")}
+                tone={item.status === "failed" ? "danger" : item.status === "processing" ? "default" : "success"}
+                value={getRechargeStatusLabel(item.status)}
               />
             ))
           ) : (

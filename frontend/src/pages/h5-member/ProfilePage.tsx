@@ -8,6 +8,7 @@ import {
 import type { H5HomeDashboard, H5SignInStatus, H5WhatsAppBinding } from "../../services/h5Member";
 import {
   formatMoney,
+  getCurrentLocale,
   getProfileActionIcon,
   type ProfileQuickAction,
 } from "./sharedUtils";
@@ -44,6 +45,14 @@ export function ProfilePage({
 }: ProfilePageProps): JSX.Element {
   if (loading) return <ProfileSkeleton />;
 
+  const memberSinceLabel = dashboard.member.createdAt
+    ? new Intl.DateTimeFormat(getCurrentLocale(), {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }).format(new Date(dashboard.member.createdAt))
+    : t("common.none");
+  const secondaryQuickActions = profileQuickActions.filter((item) => item.key === "promotion" || item.key === "orders");
   const serviceRows: Array<{
     key: string;
     title: string;
@@ -61,6 +70,14 @@ export function ProfilePage({
       tone: dashboard.verification.currentStatus === "approved" ? "success" : "default",
     },
     {
+      key: "whatsapp",
+      title: t("whatsapp.title"),
+      meta: whatsAppBinding?.isBound ? t("profile.waBound") : t("profile.waUnbound"),
+      sideNote: whatsAppBinding?.phoneNumber ?? t("common.none"),
+      path: "/h5/whatsapp",
+      tone: whatsAppBinding?.isBound ? "success" : "default",
+    },
+    {
       key: "messages",
       title: t("messages.title"),
       meta: t("home.systemReminders"),
@@ -69,12 +86,12 @@ export function ProfilePage({
       tone: dashboard.unreadCount > 0 ? "active" : "default",
     },
     {
-      key: "whatsapp",
-      title: t("whatsapp.title"),
-      meta: whatsAppBinding?.isBound ? t("profile.waBound") : t("profile.waUnbound"),
-      sideNote: whatsAppBinding?.phoneNumber ?? t("common.none"),
-      path: "/h5/whatsapp",
-      tone: whatsAppBinding?.isBound ? "success" : "default",
+      key: "support",
+      title: t("tickets.title"),
+      meta: t("tickets.ticketListDesc"),
+      sideNote: "",
+      path: "/h5/tickets",
+      tone: "default",
     },
     {
       key: "settings",
@@ -89,7 +106,7 @@ export function ProfilePage({
   return (
     <section className="h5-card-stack">
       <article className="h5-card h5-member-profile-overview">
-        <SectionHeader meta={t("profile.accountCenter")} title={t("profile.title")} />
+        <SectionHeader meta={t("profile.identityMeta")} title={t("profile.accountCenter")} />
 
         <div className="h5-member-profile-hero">
           <div className="h5-member-profile-hero-main">
@@ -153,6 +170,21 @@ export function ProfilePage({
           </div>
         </div>
 
+        <div className="h5-member-profile-stat-strip">
+          <article className="h5-member-profile-stat-pill">
+            <strong>{memberSinceLabel}</strong>
+            <span>{t("profile.snapshotMemberSince")}</span>
+          </article>
+          <article className="h5-member-profile-stat-pill">
+            <strong>{dashboard.activeCount}</strong>
+            <span>{t("profile.snapshotActiveTasks")}</span>
+          </article>
+          <article className="h5-member-profile-stat-pill">
+            <strong>{dashboard.pendingClaimCount}</strong>
+            <span>{t("profile.snapshotPendingClaim")}</span>
+          </article>
+        </div>
+
         <div className="h5-member-profile-balance-strip">
           <article className="h5-member-profile-balance-card">
             <div className="h5-member-balance-card-main">
@@ -160,7 +192,7 @@ export function ProfilePage({
               <strong className="h5-member-balance-card-value">{formatMoney(dashboard.wallet.systemBalance)}</strong>
             </div>
             <div className="h5-member-balance-card-actions">
-              <button className="seed-button seed-button-secondary h5-member-balance-pill-button" onClick={() => onNavigate("/h5/recharge")} type="button">
+              <button className="seed-button seed-button-secondary h5-member-balance-pill-button" onClick={() => onNavigate("/h5/wallet")} type="button">
                 {t("profile.recharge")}
               </button>
               <button className="seed-button seed-button-secondary h5-member-balance-pill-button" onClick={() => onNavigate("/h5/withdraw")} type="button">
@@ -184,7 +216,30 @@ export function ProfilePage({
       </article>
 
       <article className="h5-card">
-        <SectionHeader meta={t("profile.quickActions")} title={t("profile.accountCenter")} />
+        <SectionHeader meta={t("profile.serviceCenterMeta")} title={t("profile.serviceCenter")} />
+        <div className="h5-member-profile-group">
+          <div className="h5-member-profile-group-head">
+            <strong className="h5-member-profile-group-title">{t("profile.serviceSnapshotTitle")}</strong>
+            <span className="h5-member-profile-group-meta">{t("profile.serviceSnapshotMeta")}</span>
+          </div>
+          <div className="h5-member-profile-service-strip">
+            <article className="h5-member-profile-service-pill">
+              <strong>{profileVerificationStatusLabel}</strong>
+              <span>{t("profile.serviceVerification")}</span>
+              <small>{dashboard.verification.hasActiveRequest ? t("verification.currentRequest") : t("verification.verificationStatus")}</small>
+            </article>
+            <article className="h5-member-profile-service-pill">
+              <strong>{t("home.unread", { count: dashboard.unreadCount })}</strong>
+              <span>{t("profile.serviceMessages")}</span>
+              <small>{t("home.systemReminders")}</small>
+            </article>
+            <article className="h5-member-profile-service-pill">
+              <strong>{whatsAppBinding?.isBound ? t("profile.waBound") : t("profile.waUnbound")}</strong>
+              <span>{t("profile.serviceBinding")}</span>
+              <small>{whatsAppBinding?.phoneNumber ?? t("common.none")}</small>
+            </article>
+          </div>
+        </div>
         <div className="h5-card-stack h5-member-profile-service-list">
           {serviceRows.map((item) => (
             <CompactListRow
@@ -200,20 +255,22 @@ export function ProfilePage({
         </div>
       </article>
 
-      <article className="h5-card h5-member-profile-quick-actions">
-        <SectionHeader meta={t("profile.quickActions")} title={t("profile.commonEntries")} />
-        <div className="h5-member-profile-quick-grid">
-          {profileQuickActions.map((item) => (
-            <button className="h5-member-profile-quick-card" key={`${item.path}:${item.label}`} onClick={() => onNavigate(item.path)} type="button">
-              <span className="h5-member-profile-quick-icon">{getProfileActionIcon(item.key)}</span>
-              <span className="h5-member-profile-quick-copy">
-                <strong>{item.label}</strong>
-                <span>{item.description}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      </article>
+      {secondaryQuickActions.length > 0 ? (
+        <article className="h5-card h5-member-profile-quick-actions">
+          <SectionHeader meta={t("profile.activityHubMeta")} title={t("profile.commonEntries")} />
+          <div className="h5-member-profile-quick-grid">
+            {secondaryQuickActions.map((item) => (
+              <button className="h5-member-profile-quick-card" key={`${item.path}:${item.label}`} onClick={() => onNavigate(item.path)} type="button">
+                <span className="h5-member-profile-quick-icon">{getProfileActionIcon(item.key)}</span>
+                <span className="h5-member-profile-quick-copy">
+                  <strong>{item.label}</strong>
+                  <span>{item.description}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </article>
+      ) : null}
 
       <article className="h5-card">
         <button className="seed-button seed-button-danger h5-member-profile-logout-button" onClick={onLogout} type="button">

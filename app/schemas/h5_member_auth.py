@@ -14,6 +14,7 @@ class H5MemberRegisterRequest(H5MemberCamelModel):
     confirm_password: str = Field(min_length=6, max_length=128)
     display_name: str | None = Field(default=None, max_length=255)
     invite_code: str | None = Field(default=None, min_length=1, max_length=64)
+    entry_code: str | None = Field(default=None, min_length=1, max_length=64)
     language_code: str = Field(default="zh-CN", min_length=2, max_length=32)
 
 

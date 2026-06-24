@@ -54,6 +54,10 @@ def _register_member(
         "confirm_password": password,
         "display_name": display_name,
     }
+    if invite_code is None:
+        # Spec 归属改造后站点默认 registration_entry_required=True。
+        # 这些测试聚焦登录/会话/编号而非注册强制，故关闭强制以保持原语义。
+        _disable_entry_required_for_tests(client, site_key)
     if invite_code is not None:
         payload["invite_code"] = invite_code
     response = client.post(
@@ -62,6 +66,21 @@ def _register_member(
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def _disable_entry_required_for_tests(client: TestClient, site_key: str) -> None:
+    from app.api.deps import get_db_session
+    from app.db.models import H5Site
+
+    session_gen = client.app.dependency_overrides[get_db_session]()
+    session = next(session_gen)
+    try:
+        site = session.query(H5Site).filter(H5Site.site_key == site_key).one_or_none()
+        if site is not None:
+            site.registration_entry_required = False
+            session.commit()
+    finally:
+        session_gen.close()
 
 
 @contextmanager
@@ -323,6 +342,25 @@ def test_h5_member_register_with_invite_code_creates_referral(
         inviter = session.query(AppUser).filter(
             AppUser.public_user_id == inviter_payload["member"]["publicUserId"]
         ).one()
+        # 邀请人需要有人力归属，被邀请人才能继承（spec 7.5）
+        from app.db.models import MemberProfile
+        from app.db.ownership_models import MemberOwnerAssignment
+        inviter_member = session.query(MemberProfile).filter(
+            MemberProfile.user_id == inviter.id
+        ).one()
+        inviter_member.current_owner_staff_user_id = "staff-inviter"
+        inviter_member.attribution_status = "owned"
+        session.add(
+            MemberOwnerAssignment(
+                account_id=inviter_member.account_id,
+                site_id=site["id"],
+                user_id=inviter.id,
+                member_profile_id=inviter_member.id,
+                owner_staff_user_id="staff-inviter",
+                source_type="staff_entry_link",
+                is_current=True,
+            )
+        )
         session.add(
             InviteCode(
                 code="PROMO-AUTH-INVITE",

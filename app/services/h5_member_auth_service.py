@@ -81,7 +81,27 @@ class H5MemberAuthService:
         phone = self._normalize_phone(payload.phone)
         if self._find_phone_identity(phone) is not None:
             raise ValueError(f"Phone '{phone}' is already registered.")
-        invite_code = self._resolve_invite_code(site_id=site.id, code=payload.invite_code)
+
+        # ── 归属入口解析（spec 7.1-7.2） ──
+        # entry_code 与 invite_code 互为别名，内部统一为 entry_code
+        from app.services.member_ownership_service import (
+            AttributionError,
+            MemberAIOwnershipService,
+            MemberOwnershipService,
+        )
+
+        entry_code_value = (payload.entry_code or payload.invite_code or "").strip() or None
+        ownership_svc = MemberOwnershipService(self._session)
+        entry_link, resolved_code = ownership_svc.resolve_registration_entry(
+            site=site, entry_code_or_invite_code=entry_code_value
+        )
+        # entry_code_value 命中 EntryLink 时用 link；否则回退旧 InviteCode 逻辑
+        invite_code = self._resolve_invite_code(site_id=site.id, code=resolved_code) if entry_link is None else None
+        referrer_user_id = (
+            invite_code.inviter_user_id
+            if invite_code is not None and invite_code.inviter_user_id is not None
+            else None
+        )
 
         now = utc_now()
         password_salt = secrets.token_hex(16)
@@ -128,6 +148,36 @@ class H5MemberAuthService:
         self._session.add(member_profile)
         self._session.flush()
         self._ensure_member_invite_code(site_id=site.id, inviter_user_id=user.id)
+
+        # ── 创建会员人力/AI 归属（spec 7.3-7.5） ──
+        # 仅在有 entry_code 或站点强制 entry 时才解析归属；否则标记 unattributed
+        # （spec 6.4：找不到归属时按配置标记 unattributed，不静默抛错）。
+        if entry_link is not None or site.registration_entry_required or referrer_user_id:
+            try:
+                ownership_svc.assign_new_member_human_owner(
+                    account_id=site.account_id,
+                    user_id=user.id,
+                    member_profile_id=member_profile.id,
+                    entry_link=entry_link,
+                    invite_code=invite_code.code if invite_code is not None else None,
+                    referrer_user_id=referrer_user_id,
+                    site=site,
+                )
+                ai_svc = MemberAIOwnershipService(self._session)
+                ai_svc.assign_new_member_ai(
+                    account_id=site.account_id,
+                    user_id=user.id,
+                    member_profile_id=member_profile.id,
+                    entry_link=entry_link,
+                    referrer_user_id=referrer_user_id,
+                    site=site,
+                )
+            except AttributionError as exc:
+                # 回滚已 flush 的 member/user，向上抛 400
+                raise ValueError(str(exc)) from exc
+        else:
+            member_profile.attribution_status = "unattributed"
+            self._session.add(member_profile)
 
         if invite_code is not None and invite_code.inviter_user_id is not None:
             invite_code.usage_count += 1

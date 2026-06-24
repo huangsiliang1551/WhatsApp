@@ -682,8 +682,6 @@ export function getProfileQuickActions(siteKey: string): ProfileQuickAction[] {
   return [
     { key: "promotion", label: t("profileLinks.promotion"), description: t("profileLinks.promotionDesc"), path: buildH5Path("/h5/promotion", siteKey) },
     { key: "orders", label: t("profileLinks.orders"), description: t("profileLinks.ordersDesc"), path: buildH5Path("/h5/orders", siteKey) },
-    { key: "tickets", label: t("profileLinks.tickets"), description: t("profileLinks.ticketsDesc"), path: buildH5Path("/h5/tickets", siteKey) },
-    { key: "contact", label: t("profileLinks.contact"), description: t("profileLinks.contactDesc"), path: buildH5Path("/h5/tickets/new", siteKey) },
   ];
 }
 

@@ -83,10 +83,41 @@ export function HomePage({
   const headerAction = getHomePrimaryAction(focusTaskPackage, dashboard.wallet);
   const recentNotice = dashboard.recentMessages[0] ?? null;
   const accountHint = session ? maskAccountId(session.accountId) : memberPhoneMasked;
+  const displayName = session?.displayName || dashboard.member.displayName || accountHint;
+  const statusInitial = displayName.trim().charAt(0).toUpperCase() || accountHint.charAt(0).toUpperCase();
+  const statusDate = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    weekday: "short",
+  }).format(new Date());
+  const verificationStatus = getVerificationStatusLabel(dashboard.verification.currentStatus);
+  const statusAlerts = notificationCount > 0 ? t("home.statusAlerts", { count: notificationCount }) : t("home.statusClear");
 
   return (
     <section className="h5-card-stack">
       <section className="h5-card h5-member-home-command">
+        <div className="h5-member-home-status-panel">
+          <div className="h5-member-home-status">
+            <button
+              aria-label={t("profile.title")}
+              className="h5-member-home-status-avatar"
+              onClick={() => onNavigate("/h5/profile")}
+              type="button"
+            >
+              {statusInitial}
+            </button>
+            <div className="h5-member-home-status-copy">
+              <strong>{t("home.statusGreeting", { name: displayName })}</strong>
+              <span>{t("home.statusContext", { date: statusDate, account: accountHint })}</span>
+            </div>
+          </div>
+
+          <div className="h5-member-home-status-rail">
+            <span className="h5-member-inline-pill">{t("home.statusVerification", { status: verificationStatus })}</span>
+            <span className="h5-member-inline-pill">{statusAlerts}</span>
+          </div>
+        </div>
+
         <SectionHeader meta={t("home.todayTargetMeta")} title={t("home.todayEarningsTitle")} />
 
         <div className="h5-member-home-metric-grid">

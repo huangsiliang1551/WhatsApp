@@ -1126,6 +1126,10 @@ async def _receive_whatsapp_webhook_for_scope(
                 queue_service=queue_service,
             )
         except Exception:
+            # BE2-007 error isolation: a single message processing failure
+            # must not block other messages in the same webhook batch. Meta
+            # expects a 200 so it does not retry the whole batch. We log +
+            # count the failure and continue.
             processing_failures += 1
             message_processing_failures_total.labels(
                 provider=provider.provider_name,
@@ -1137,7 +1141,7 @@ async def _receive_whatsapp_webhook_for_scope(
                 waba_id=waba_id,
                 message_id=message_id,
             )
-            raise
+            continue
 
         if process_result.get("deduplicated"):
             # Duplicate delivery: the service layer returned the existing

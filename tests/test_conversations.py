@@ -663,7 +663,7 @@ def test_conversation_summary_exposes_latest_intent_and_handover_recommendation(
 
     conversations_response = client.get("/api/conversations")
     assert conversations_response.status_code == 200
-    conversations = conversations_response.json()
+    conversations = conversations_response.json()["items"]
     conversation = next(
         item
         for item in conversations
@@ -849,7 +849,7 @@ def test_list_conversations_filters_by_phone_number_id_within_account_scope(
     )
 
     assert response.status_code == 200
-    conversations = response.json()
+    conversations = response.json()["items"]
     assert {item["conversation_id"] for item in conversations} == {"conv-phone-filter-1a"}
     assert all(item["phone_number_id"] == "pn-conversation-filter-1a" for item in conversations)
 
@@ -1088,7 +1088,7 @@ def test_list_conversations_without_phone_number_filter_preserves_existing_accou
     )
 
     assert response.status_code == 200
-    conversations = response.json()
+    conversations = response.json()["items"]
     assert {item["conversation_id"] for item in conversations} == {
         "conv-phone-unfiltered-1a",
         "conv-phone-unfiltered-1b",
@@ -1154,7 +1154,7 @@ def test_list_conversations_filters_by_waba_id_within_account_scope(
     )
 
     assert response.status_code == 200
-    conversations = response.json()
+    conversations = response.json()["items"]
     assert {item["conversation_id"] for item in conversations} == {"conv-waba-filter-1a"}
     assert all(item["waba_id"] == "waba-conversation-filter-1a" for item in conversations)
     assert all(
@@ -1208,7 +1208,7 @@ def test_conversation_summary_prefers_phone_snapshot_waba_when_relationship_drif
     )
 
     assert response.status_code == 200
-    conversations = response.json()
+    conversations = response.json()["items"]
     assert len(conversations) == 1
     assert conversations[0]["conversation_id"] == "conv-waba-snapshot-1"
     assert conversations[0]["phone_number_id"] == "pn-conversation-snapshot-1"

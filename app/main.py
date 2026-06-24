@@ -94,6 +94,14 @@ from app.api.routes.exchange_rates import router as exchange_rates_router
 from app.api.routes.finance_channels import router as finance_channels_router
 from app.api.routes.payment_callback import router as payment_callback_router
 from app.api.routes.finance import router as finance_router
+from app.api.routes.ownership import (
+    ai_agents_router,
+    conversation_ai_router,
+    entry_links_router,
+    member_ai_ownership_router,
+    member_ownership_router,
+    ownership_audit_router,
+)
 from app.core.rate_limit_middleware import RateLimitMiddleware
 from app.core.api_stats_middleware import ApiStatsMiddleware
 from app.core.logging import configure_logging
@@ -444,6 +452,13 @@ app.include_router(exchange_rates_router)
 app.include_router(finance_channels_router)
 app.include_router(payment_callback_router)
 app.include_router(finance_router)
+# ── 归属 / AI 接待 / 入口链接（spec 第 10 节） ──
+app.include_router(entry_links_router)
+app.include_router(ai_agents_router)
+app.include_router(member_ownership_router)
+app.include_router(member_ai_ownership_router)
+app.include_router(conversation_ai_router)
+app.include_router(ownership_audit_router)
 
 
 # ── Client error reporting ──

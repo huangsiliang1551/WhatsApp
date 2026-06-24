@@ -1161,15 +1161,88 @@ describe("TasksPage", () => {
       />,
     );
 
-    expect(screen.getByText(t("tasks.remainingTime"))).toBeTruthy();
+    expect(screen.getAllByText(t("tasks.remainingTime")).length).toBeGreaterThan(0);
     expect(screen.getByText("02:00:00")).toBeTruthy();
-    expect(screen.getByText(t("tasks.totalCommission"))).toBeTruthy();
-    expect(screen.getByText(t("tasks.typeGrowth"))).toBeTruthy();
-    expect(screen.getByText(/Reward Ratio/)).toBeTruthy();
+    expect(screen.getAllByText(t("tasks.totalCommission")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(t("tasks.typeGrowth")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Reward Ratio/).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: t("tasks.signIn") }).getAttribute("title")).toBe(t("tasks.signIn"));
 
-    fireEvent.click(screen.getByRole("button", { name: t("tasks.claim") }));
+    fireEvent.click(screen.getAllByRole("button", { name: t("tasks.claim") })[0]);
     expect(onOpenClaimDialog).toHaveBeenCalledWith("pkg-pending");
+  });
+
+  it("surfaces a single execution focus card before the sign-in and overview blocks", async () => {
+    storage.set("h5-lang", "en-US");
+    const { TasksPage } = await import("./TasksPage");
+    const onNavigate = vi.fn();
+
+    render(
+      <TasksPage
+        signInStatus={{
+          consecutiveDays: 3,
+          todaySignedIn: false,
+          goalDays: 7,
+          goalReward: 5,
+          isCompleted: false,
+        }}
+        taskInstances={[
+          {
+            id: "pkg-active",
+            title: "Active Growth Package",
+            description: "desc",
+            type: "growth",
+            status: "active",
+            rewardRatio: 0.18,
+            rewardAmount: 36,
+            products: [],
+            completedCount: 1,
+            totalCount: 3,
+            systemBalance: 120,
+            currentCommission: 12,
+            totalCommission: 36,
+            countdownSeconds: 7200,
+            completionWindowHours: 24,
+          } as any,
+          {
+            id: "pkg-pending",
+            title: "Pending Growth Package",
+            description: "desc",
+            type: "growth",
+            status: "pending_claim",
+            rewardRatio: 0.12,
+            rewardAmount: 28,
+            products: [],
+            completedCount: 0,
+            totalCount: 2,
+            systemBalance: 120,
+            currentCommission: 0,
+            totalCommission: 28,
+            countdownSeconds: 5400,
+            completionWindowHours: 24,
+          } as any,
+        ]}
+        actionName={null}
+        loading={false}
+        error={null}
+        onSignIn={vi.fn().mockResolvedValue(undefined)}
+        onNavigate={onNavigate}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onOpenClaimDialog={vi.fn()}
+      />,
+    );
+
+    const focusHeading = screen.getByText(t("tasks.focusTitle"));
+    const signInButton = screen.getByRole("button", { name: t("tasks.signIn") });
+    const overviewHeading = screen.getByText(t("tasks.overviewTitle"));
+
+    expect(focusHeading.compareDocumentPosition(signInButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(signInButton.compareDocumentPosition(overviewHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText(t("tasks.focusMeta"))).toBeTruthy();
+    expect(screen.getByRole("button", { name: t("home.actionContinue") })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: t("home.actionContinue") }));
+    expect(onNavigate).toHaveBeenCalledWith("/h5/tasks/package/pkg-active");
   });
 });
 
@@ -1278,7 +1351,7 @@ describe("PackageDetailPage", () => {
       await vi.advanceTimersByTimeAsync(2400);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: t("purchase.actionBackToTasks") }));
+    fireEvent.click(screen.getAllByRole("button", { name: t("purchase.actionBackToTasks") }).at(-1)!);
     expect(onNavigate).toHaveBeenCalledWith("/h5/tasks");
   });
 
@@ -1329,8 +1402,8 @@ describe("PackageDetailPage", () => {
     );
 
     expect(screen.getByText(t("tasks.remainingItems"))).toBeTruthy();
-    expect(screen.getByText(t("tasks.expectedCommission"))).toBeTruthy();
-    expect(screen.getByText(t("tasks.countdown"))).toBeTruthy();
+    expect(screen.getAllByText(t("tasks.expectedCommission")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(t("tasks.countdown")).length).toBeGreaterThan(0);
     expect(screen.getByText("01:01:01")).toBeTruthy();
     expect(screen.getByText(/Current Commission/)).toBeTruthy();
   });
@@ -1393,6 +1466,105 @@ describe("PackageDetailPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: t("tasks.contactSupport") }));
     expect(onNavigate).toHaveBeenCalledWith("/h5/tickets/new");
+  });
+
+  it("surfaces a dedicated task focus card before the reward summary", async () => {
+    storage.set("h5-lang", "en-US");
+    const { PackageDetailPage } = await import("./PackageDetailPage");
+
+    render(
+      <PackageDetailPage
+        instance={{
+          id: "pkg-focus",
+          title: "Growth Package",
+          description: "desc",
+          type: "growth",
+          status: "active",
+          rewardRatio: 0.12,
+          rewardAmount: 48,
+          completedCount: 1,
+          totalCount: 4,
+          systemBalance: 100,
+          currentCommission: 12,
+          totalCommission: 48,
+          countdownSeconds: 3661,
+          products: [
+            {
+              id: "prod-1",
+              productName: "Product 1",
+              imageUrl: "",
+              price: 20,
+              currency: "USD",
+              status: "completed",
+            },
+            {
+              id: "prod-2",
+              productName: "Product 2",
+              imageUrl: "",
+              price: 28,
+              currency: "USD",
+              status: "available",
+            },
+          ],
+        } as any}
+        actionName={null}
+        onStartProduct={vi.fn().mockResolvedValue({ success: true })}
+        onRetryProduct={vi.fn().mockResolvedValue({ success: true })}
+        onNavigate={vi.fn()}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const focusHeading = screen.getByText(t("tasks.detailFocusTitle"));
+    const rewardHeading = screen.getByText(t("tasks.detailRewardSummary"));
+
+    expect(focusHeading.compareDocumentPosition(rewardHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText(t("tasks.detailFocusMeta"))).toBeTruthy();
+    expect(screen.getByText(t("tasks.detailNextStep"))).toBeTruthy();
+    expect(screen.getByText(t("tasks.detailRemainingLabel", { done: 1, total: 4 }))).toBeTruthy();
+  });
+
+  it("routes completed-package balance actions to the earnings wallet path", async () => {
+    const { PackageDetailPage } = await import("./PackageDetailPage");
+    const onNavigate = vi.fn();
+
+    render(
+      <PackageDetailPage
+        instance={{
+          id: "pkg-complete",
+          title: "Growth Package",
+          description: "desc",
+          type: "growth",
+          status: "completed",
+          rewardRatio: 0.12,
+          rewardAmount: 48,
+          completedCount: 4,
+          totalCount: 4,
+          systemBalance: 100,
+          currentCommission: 48,
+          totalCommission: 48,
+          countdownSeconds: 0,
+          products: [
+            {
+              id: "prod-finish",
+              productName: "Finished Product",
+              imageUrl: "",
+              price: 20,
+              currency: "USD",
+              status: "completed",
+            },
+          ],
+        } as any}
+        actionName={null}
+        onStartProduct={vi.fn().mockResolvedValue({ success: true })}
+        onRetryProduct={vi.fn().mockResolvedValue({ success: true })}
+        onNavigate={onNavigate}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t("tasks.viewBalance") }));
+    expect(onNavigate).toHaveBeenCalledWith("/h5/wallet");
   });
 
   it("preserves full media preview filenames for long uploads", async () => {
@@ -1784,6 +1956,166 @@ describe("HomePage", () => {
     expect(onNavigate).toHaveBeenCalledWith("/h5/tasks/package/pkg-active");
   });
 
+  it("renders a calm account status layer before the earnings hero", async () => {
+    storage.set("h5-lang", "en-US");
+    const { HomePage } = await import("./HomePage");
+
+    render(
+      <HomePage
+        dashboard={{
+          site: {
+            site_key: "mall-cn",
+            brand_name: "Mall",
+            tagline: "tagline",
+            accent_color: "#1677ff",
+          },
+          member: {
+            accountId: "38271456",
+            accountIdMasked: "38****56",
+            phone: "13800000000",
+            publicUserId: "h5-38271456",
+            displayName: "Demo Member",
+            inviteCode: "INV-ABCD1234",
+            createdAt: "2026-06-20T00:00:00.000Z",
+          },
+          wallet: {
+            currency: "USD",
+            systemBalance: 120,
+            taskBalance: 36,
+            withdrawThreshold: 100,
+            shortfallAmount: 0,
+            canWithdraw: true,
+          },
+          unreadCount: 3,
+          pendingClaimCount: 1,
+          activeCount: 1,
+          expiringCount: 0,
+          recentMessages: [],
+          leaderboard: [],
+          verification: {
+            currentStatus: "approved",
+            hasActiveRequest: false,
+          },
+          fragments: {
+            totalCount: 3,
+            completedCount: 1,
+            missingCount: 2,
+            canExchange: false,
+            shippingOrderCount: 0,
+            latestShippingStatus: null,
+            rewardName: null,
+          },
+        }}
+        session={{
+          siteKey: "mall-cn",
+          accountId: "38271456",
+          publicUserId: "h5-38271456",
+          phone: "13800000000",
+          phoneMasked: "138****0000",
+          displayName: "Demo Member",
+          token: "demo-token",
+        }}
+        memberPhoneMasked="138****0000"
+        focusTaskPackage={null}
+        primaryHomeAction={{
+          title: t("home.actionCanWithdraw"),
+          description: t("home.actionCanWithdrawDesc"),
+          buttonLabel: t("home.actionGoWithdraw"),
+          kind: "withdraw",
+        }}
+        unreadMessageCount={3}
+        siteKey="mall-cn"
+        actionName={null}
+        homeWalletBalance={null}
+        notificationCount={3}
+        onNavigate={vi.fn()}
+        onOpenClaimDialog={vi.fn()}
+        onShowTransferAllConfirm={vi.fn()}
+      />,
+    );
+
+    const statusHeading = screen.getByText(t("home.statusGreeting", { name: "Demo Member" }));
+    const earningsHeading = screen.getByText(t("home.todayEarningsTitle"));
+
+    expect(statusHeading.compareDocumentPosition(earningsHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText(/Account 382\*\*\*56/)).toBeTruthy();
+  });
+
+  it("surfaces verification and notification signals in the home status rail without replacing the main CTA", async () => {
+    storage.set("h5-lang", "en-US");
+    const { HomePage } = await import("./HomePage");
+
+    render(
+      <HomePage
+        dashboard={{
+          site: {
+            site_key: "mall-cn",
+            brand_name: "Mall",
+            tagline: "tagline",
+            accent_color: "#1677ff",
+          },
+          member: {
+            accountId: "38271456",
+            accountIdMasked: "38****56",
+            phone: "13800000000",
+            publicUserId: "h5-38271456",
+            displayName: "Demo Member",
+            inviteCode: "INV-ABCD1234",
+            createdAt: "2026-06-20T00:00:00.000Z",
+          },
+          wallet: {
+            currency: "USD",
+            systemBalance: 120,
+            taskBalance: 36,
+            withdrawThreshold: 100,
+            shortfallAmount: 0,
+            canWithdraw: true,
+          },
+          unreadCount: 3,
+          pendingClaimCount: 1,
+          activeCount: 1,
+          expiringCount: 0,
+          recentMessages: [],
+          leaderboard: [],
+          verification: {
+            currentStatus: "approved",
+            hasActiveRequest: false,
+          },
+          fragments: {
+            totalCount: 3,
+            completedCount: 1,
+            missingCount: 2,
+            canExchange: false,
+            shippingOrderCount: 0,
+            latestShippingStatus: null,
+            rewardName: null,
+          },
+        }}
+        session={null}
+        memberPhoneMasked="138****0000"
+        focusTaskPackage={null}
+        primaryHomeAction={{
+          title: t("home.actionCanWithdraw"),
+          description: t("home.actionCanWithdrawDesc"),
+          buttonLabel: t("home.actionGoWithdraw"),
+          kind: "withdraw",
+        }}
+        unreadMessageCount={3}
+        siteKey="mall-cn"
+        actionName={null}
+        homeWalletBalance={null}
+        notificationCount={3}
+        onNavigate={vi.fn()}
+        onOpenClaimDialog={vi.fn()}
+        onShowTransferAllConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(t("home.statusVerification", { status: t("verification.statusApproved") }))).toBeTruthy();
+    expect(screen.getByText(t("home.statusAlerts", { count: 3 }))).toBeTruthy();
+    expect(screen.getByRole("button", { name: t("home.actionGoWithdraw") })).toBeTruthy();
+  });
+
   it("renders growth-home sections in the expected order", async () => {
     const { HomePage } = await import("./HomePage");
 
@@ -1947,7 +2279,7 @@ describe("RechargePage", () => {
     cleanup();
   });
 
-  it("renders earnings-oriented summary before history", async () => {
+  it("renders the wallet snapshot summary before history", async () => {
     const { RechargePage } = await import("./RechargePage");
 
     render(
@@ -1982,7 +2314,7 @@ describe("RechargePage", () => {
       />,
     );
 
-    const summaryHeading = screen.getAllByText(t("shell.tabEarnings")).at(0)!;
+    const summaryHeading = screen.getAllByText(t("recharge.snapshotTitle")).at(0)!;
     const historyHeading = screen.getAllByText(t("recharge.history")).at(-1)!;
     expect(summaryHeading.compareDocumentPosition(historyHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.getAllByText(t("withdraw.systemBalance")).length).toBeGreaterThan(0);
@@ -2046,7 +2378,7 @@ describe("RechargePage", () => {
     expect(onNavigate).toHaveBeenCalledWith("/h5/withdraw");
   });
 
-  it("uses earnings as the landing headline while keeping recharge as a secondary action", async () => {
+  it("uses wallet snapshot as the landing headline while keeping recharge as a secondary action", async () => {
     storage.set("h5-lang", "en-US");
     const { RechargePage } = await import("./RechargePage");
 
@@ -2072,9 +2404,145 @@ describe("RechargePage", () => {
       />,
     );
 
-    expect(screen.getByText(t("shell.tabEarnings"))).toBeTruthy();
+    expect(screen.getByText(t("recharge.snapshotTitle"))).toBeTruthy();
     expect(screen.getByRole("button", { name: t("recharge.quickRecharge") })).toBeTruthy();
     expect(screen.queryByText(/^Recharge$/)).toBeNull();
+  });
+
+  it("surfaces withdrawal readiness and a four-card earnings snapshot before the recharge form", async () => {
+    storage.set("h5-lang", "en-US");
+    const { RechargePage } = await import("./RechargePage");
+    const { formatMoney } = await import("./shared");
+
+    render(
+      <RechargePage
+        effectiveWalletSummary={{
+          currency: "USD",
+          systemBalance: 80,
+          taskBalance: 46,
+          withdrawThreshold: 100,
+          shortfallAmount: 20,
+          canWithdraw: false,
+        }}
+        rechargeAmount="100"
+        rechargeHistory={[
+          {
+            id: "tx-1",
+            transactionType: "recharge",
+            amount: 100,
+            currency: "USD",
+            status: "success",
+            note: "Recharge",
+            createdAt: "2026-06-23T09:00:00.000Z",
+          } as any,
+          {
+            id: "tx-2",
+            transactionType: "recharge",
+            amount: 40,
+            currency: "USD",
+            status: "success",
+            note: "Recharge",
+            createdAt: "2026-06-23T03:00:00.000Z",
+          } as any,
+          {
+            id: "tx-3",
+            transactionType: "recharge",
+            amount: 75,
+            currency: "USD",
+            status: "success",
+            note: "Recharge",
+            createdAt: "2026-06-20T09:00:00.000Z",
+          } as any,
+        ]}
+        actionName={null}
+        loading={false}
+        error={null}
+        rechargeStatus={null}
+        onRechargeAmountChange={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenRechargeChannels={vi.fn()}
+      />,
+    );
+
+    const summaryCards = document.querySelectorAll(".h5-member-wallet-balance-card");
+    const thresholdLabel = screen.getByText(t("withdraw.threshold", { amount: formatMoney(100, "USD") }));
+    const thresholdHint = screen.getByText(t("withdraw.needTransferHint", { amount: formatMoney(20, "USD") }));
+    const formHeading = screen.getAllByText(t("recharge.amount")).at(0)!;
+
+    expect(summaryCards.length).toBeGreaterThanOrEqual(4);
+    expect(thresholdLabel.compareDocumentPosition(formHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(thresholdHint).toBeTruthy();
+  });
+
+  it("renders wallet history rows with descriptive titles and localized status labels", async () => {
+    storage.set("h5-lang", "zh-CN");
+    const { RechargePage } = await import("./RechargePage");
+
+    render(
+      <RechargePage
+        effectiveWalletSummary={{
+          currency: "USD",
+          systemBalance: 320,
+          taskBalance: 86,
+          withdrawThreshold: 100,
+          shortfallAmount: 0,
+          canWithdraw: true,
+        }}
+        rechargeAmount="100"
+        rechargeHistory={[
+          {
+            id: "tx-1",
+            transactionType: "recharge",
+            amount: 100,
+            currency: "USD",
+            status: "paid",
+            note: "银行卡转账入账",
+            createdAt: "2026-06-23T09:00:00.000Z",
+          } as any,
+        ]}
+        actionName={null}
+        loading={false}
+        error={null}
+        rechargeStatus={null}
+        onRechargeAmountChange={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenRechargeChannels={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("银行卡转账入账")).toBeTruthy();
+    expect(screen.getByText("已入账")).toBeTruthy();
+    expect(screen.queryByText(/^paid$/)).toBeNull();
+  });
+
+  it("uses a dedicated wallet snapshot heading instead of repeating the earnings page title inside the hero card", async () => {
+    storage.set("h5-lang", "en-US");
+    const { RechargePage } = await import("./RechargePage");
+
+    render(
+      <RechargePage
+        effectiveWalletSummary={{
+          currency: "USD",
+          systemBalance: 320,
+          taskBalance: 86,
+          withdrawThreshold: 100,
+          shortfallAmount: 0,
+          canWithdraw: true,
+        }}
+        rechargeAmount="100"
+        rechargeHistory={[]}
+        actionName={null}
+        loading={false}
+        error={null}
+        rechargeStatus={null}
+        onRechargeAmountChange={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenRechargeChannels={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(t("recharge.snapshotTitle"))).toBeTruthy();
+    expect(screen.queryByText(/^Earnings$/)).toBeNull();
   });
 });
 
@@ -2147,6 +2615,72 @@ describe("WithdrawPage", () => {
     expect(screen.getAllByText(t("withdraw.statusReviewing")).length).toBeGreaterThan(0);
     expect(screen.queryByText(/^reviewing$/i)).toBeNull();
   });
+
+  it("surfaces withdrawal readiness guidance before the withdraw form", async () => {
+    storage.set("h5-lang", "en-US");
+    const { WithdrawPage } = await import("./WithdrawPage");
+    const { formatMoney } = await import("./shared");
+
+    render(
+      <WithdrawPage
+        effectiveWalletSummary={{
+          currency: "USD",
+          systemBalance: 80,
+          taskBalance: 46,
+          withdrawThreshold: 100,
+          shortfallAmount: 20,
+          canWithdraw: false,
+        }}
+        withdrawAmount="40"
+        withdrawRequests={[]}
+        maxWithdrawAmount={80}
+        actionName={null}
+        onWithdrawAmountChange={vi.fn()}
+        onWithdraw={vi.fn().mockResolvedValue(undefined)}
+        onShowTransferAllConfirm={vi.fn()}
+        onSetMaxWithdraw={vi.fn()}
+      />,
+    );
+
+    const summaryCards = document.querySelectorAll(".h5-member-wallet-balance-card");
+    const thresholdHint = screen.getByText(t("withdraw.needTransferHint", { amount: formatMoney(20, "USD") }));
+    const formHeading = screen.getAllByText(t("withdraw.amount")).at(0)!;
+
+    expect(summaryCards.length).toBeGreaterThanOrEqual(3);
+    expect(thresholdHint.compareDocumentPosition(formHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText(t("withdraw.nextStep"))).toBeTruthy();
+  });
+
+  it("uses a dedicated withdrawal overview heading instead of repeating the generic page title in the hero", async () => {
+    storage.set("h5-lang", "en-US");
+    const { WithdrawPage } = await import("./WithdrawPage");
+
+    render(
+      <WithdrawPage
+        effectiveWalletSummary={{
+          currency: "USD",
+          systemBalance: 320,
+          taskBalance: 86,
+          withdrawThreshold: 100,
+          shortfallAmount: 0,
+          canWithdraw: true,
+        }}
+        withdrawAmount="100"
+        withdrawRequests={[]}
+        maxWithdrawAmount={320}
+        actionName={null}
+        onWithdrawAmountChange={vi.fn()}
+        onWithdraw={vi.fn().mockResolvedValue(undefined)}
+        onShowTransferAllConfirm={vi.fn()}
+        onSetMaxWithdraw={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(t("withdraw.snapshotTitle"))).toBeTruthy();
+    expect(document.querySelector(".h5-member-wallet-balance-hero .h5-member-section-heading strong")?.textContent).toBe(
+      t("withdraw.snapshotTitle"),
+    );
+  });
 });
 
 describe("ProfilePage", () => {
@@ -2216,9 +2750,9 @@ describe("ProfilePage", () => {
       />,
     );
 
-    const accountHeading = screen.getAllByText(t("profile.accountCenter")).at(-1)!;
-    const quickActionsHeading = screen.getAllByText(t("profile.quickActions")).at(-1)!;
-    expect(accountHeading.compareDocumentPosition(quickActionsHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const serviceCenterHeading = screen.getByText(t("profile.serviceCenter"));
+    const quickActionsHeading = screen.getByText(t("profile.commonEntries"));
+    expect(serviceCenterHeading.compareDocumentPosition(quickActionsHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.getByText(t("profile.logout"))).toBeTruthy();
   });
 
@@ -2290,6 +2824,73 @@ describe("ProfilePage", () => {
     const settingsRow = settingsRowTitle?.closest(".h5-member-list-row");
     expect(settingsRow).toBeTruthy();
     expect(settingsRow?.textContent?.match(new RegExp(t("common.enter"), "g"))?.length ?? 0).toBe(1);
+  });
+
+  it("routes the profile recharge action to the unified earnings wallet path", async () => {
+    const { ProfilePage } = await import("./ProfilePage");
+    const onNavigate = vi.fn();
+
+    render(
+      <ProfilePage
+        dashboard={{
+          site: {
+            site_key: "mall-cn",
+            brand_name: "Mall",
+            tagline: "tagline",
+            accent_color: "#1677ff",
+          },
+          member: {
+            accountId: "38271456",
+            accountIdMasked: "38****56",
+            phone: "13800000000",
+            publicUserId: "h5-38271456",
+            displayName: "Demo Member",
+            inviteCode: "INV-ABCD1234",
+            createdAt: "2026-06-20T00:00:00.000Z",
+          },
+          wallet: {
+            currency: "USD",
+            systemBalance: 120,
+            taskBalance: 36,
+            withdrawThreshold: 100,
+            shortfallAmount: 0,
+            canWithdraw: true,
+          },
+          unreadCount: 1,
+          pendingClaimCount: 1,
+          activeCount: 1,
+          expiringCount: 0,
+          recentMessages: [],
+          leaderboard: [],
+          verification: {
+            currentStatus: "approved",
+            hasActiveRequest: false,
+          },
+          fragments: {
+            totalCount: 3,
+            completedCount: 1,
+            missingCount: 2,
+            canExchange: false,
+            shippingOrderCount: 0,
+            latestShippingStatus: null,
+            rewardName: null,
+          },
+        }}
+        whatsAppBinding={null}
+        profileVerificationStatusLabel={t("profile.verified")}
+        profileQuickActions={[
+          { key: "promotion", label: t("profileLinks.promotion"), description: t("profileLinks.promotionDesc"), path: "/h5/promotion" },
+          { key: "orders", label: t("profileLinks.orders"), description: t("profileLinks.ordersDesc"), path: "/h5/orders" },
+        ]}
+        actionName={null}
+        onNavigate={onNavigate}
+        onLogout={vi.fn()}
+        onShowTransferAllConfirm={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t("profile.recharge") }));
+    expect(onNavigate).toHaveBeenCalledWith("/h5/wallet");
   });
 
   it("keeps the verification service row to a single action label", async () => {
@@ -2435,12 +3036,245 @@ describe("ProfilePage", () => {
     expect(quickGrid?.textContent).not.toContain(t("settings.title"));
   });
 
+  it("keeps support in the primary service center and limits the secondary grid to promotion and orders", async () => {
+    const { ProfilePage } = await import("./ProfilePage");
+
+    render(
+      <ProfilePage
+        dashboard={{
+          site: {
+            site_key: "mall-cn",
+            brand_name: "Mall",
+            tagline: "tagline",
+            accent_color: "#1677ff",
+          },
+          member: {
+            accountId: "38271456",
+            accountIdMasked: "38****56",
+            phone: "13800000000",
+            publicUserId: "h5-38271456",
+            displayName: "Demo Member",
+            inviteCode: "INV-ABCD1234",
+            createdAt: "2026-06-20T00:00:00.000Z",
+          },
+          wallet: {
+            currency: "USD",
+            systemBalance: 120,
+            taskBalance: 36,
+            withdrawThreshold: 100,
+            shortfallAmount: 0,
+            canWithdraw: true,
+          },
+          unreadCount: 1,
+          pendingClaimCount: 1,
+          activeCount: 1,
+          expiringCount: 0,
+          recentMessages: [],
+          leaderboard: [],
+          verification: {
+            currentStatus: "approved",
+            hasActiveRequest: false,
+          },
+          fragments: {
+            totalCount: 3,
+            completedCount: 1,
+            missingCount: 2,
+            canExchange: false,
+            shippingOrderCount: 0,
+            latestShippingStatus: null,
+            rewardName: null,
+          },
+        }}
+        whatsAppBinding={{ isBound: true, phoneNumber: "60123456789", updatedAt: "2026-06-23T09:00:00.000Z" } as any}
+        profileVerificationStatusLabel={t("profile.verified")}
+        profileQuickActions={[
+          { key: "promotion", label: t("profileLinks.promotion"), description: t("profileLinks.promotionDesc"), path: "/h5/promotion" },
+          { key: "orders", label: t("profileLinks.orders"), description: t("profileLinks.ordersDesc"), path: "/h5/orders" },
+          { key: "tickets", label: t("profileLinks.tickets"), description: t("profileLinks.ticketsDesc"), path: "/h5/tickets" },
+          { key: "contact", label: t("profileLinks.contact"), description: t("profileLinks.contactDesc"), path: "/h5/tickets/new" },
+        ]}
+        actionName={null}
+        onNavigate={vi.fn()}
+        onLogout={vi.fn()}
+        onShowTransferAllConfirm={vi.fn()}
+      />,
+    );
+
+    const serviceCard = screen.getByText(t("profile.serviceCenter")).closest(".h5-card");
+    const quickGrid = screen.getByText(t("profile.commonEntries")).closest(".h5-card");
+
+    expect(serviceCard?.textContent).toContain(t("tickets.title"));
+    expect(quickGrid?.textContent).toContain(t("profileLinks.promotion"));
+    expect(quickGrid?.textContent).toContain(t("profileLinks.orders"));
+    expect(quickGrid?.textContent).not.toContain(t("profileLinks.tickets"));
+    expect(quickGrid?.textContent).not.toContain(t("profileLinks.contact"));
+  });
+
+  it("surfaces account snapshot pills with stable member context above the balance controls", async () => {
+    const { ProfilePage } = await import("./ProfilePage");
+
+    render(
+      <ProfilePage
+        dashboard={{
+          site: {
+            site_key: "mall-cn",
+            brand_name: "Mall",
+            tagline: "tagline",
+            accent_color: "#1677ff",
+          },
+          member: {
+            accountId: "38271456",
+            accountIdMasked: "38****56",
+            phone: "13800000000",
+            publicUserId: "h5-38271456",
+            displayName: "Demo Member",
+            inviteCode: "INV-ABCD1234",
+            createdAt: "2026-06-20T00:00:00.000Z",
+          },
+          wallet: {
+            currency: "USD",
+            systemBalance: 120,
+            taskBalance: 36,
+            withdrawThreshold: 100,
+            shortfallAmount: 0,
+            canWithdraw: true,
+          },
+          unreadCount: 3,
+          pendingClaimCount: 2,
+          activeCount: 4,
+          expiringCount: 0,
+          recentMessages: [],
+          leaderboard: [],
+          verification: {
+            currentStatus: "approved",
+            hasActiveRequest: false,
+          },
+          fragments: {
+            totalCount: 3,
+            completedCount: 1,
+            missingCount: 2,
+            canExchange: false,
+            shippingOrderCount: 0,
+            latestShippingStatus: null,
+            rewardName: null,
+          },
+        }}
+        whatsAppBinding={{ isBound: true, phoneNumber: "60123456789", updatedAt: "2026-06-23T09:00:00.000Z" } as any}
+        profileVerificationStatusLabel={t("profile.verified")}
+        profileQuickActions={[
+          { key: "promotion", label: t("profileLinks.promotion"), description: t("profileLinks.promotionDesc"), path: "/h5/promotion" },
+          { key: "orders", label: t("profileLinks.orders"), description: t("profileLinks.ordersDesc"), path: "/h5/orders" },
+        ]}
+        actionName={null}
+        onNavigate={vi.fn()}
+        onLogout={vi.fn()}
+        onShowTransferAllConfirm={vi.fn()}
+      />,
+    );
+
+    const overviewCard = screen.getByText(t("profile.accountCenter")).closest(".h5-card");
+    const statStrip = overviewCard?.querySelector(".h5-member-profile-stat-strip");
+    const balanceStrip = overviewCard?.querySelector(".h5-member-profile-balance-strip");
+
+    expect(statStrip).toBeTruthy();
+    expect(balanceStrip).toBeTruthy();
+    expect(statStrip?.textContent).toContain(t("profile.snapshotMemberSince"));
+    expect(statStrip?.textContent).toContain(t("profile.snapshotActiveTasks"));
+    expect(statStrip?.textContent).toContain(t("profile.snapshotPendingClaim"));
+    expect(statStrip?.compareDocumentPosition(balanceStrip!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("adds a service snapshot strip ahead of the detailed service rows", async () => {
+    const { ProfilePage } = await import("./ProfilePage");
+
+    render(
+      <ProfilePage
+        dashboard={{
+          site: {
+            site_key: "mall-cn",
+            brand_name: "Mall",
+            tagline: "tagline",
+            accent_color: "#1677ff",
+          },
+          member: {
+            accountId: "38271456",
+            accountIdMasked: "38****56",
+            phone: "13800000000",
+            publicUserId: "h5-38271456",
+            displayName: "Demo Member",
+            inviteCode: "INV-ABCD1234",
+            createdAt: "2026-06-20T00:00:00.000Z",
+          },
+          wallet: {
+            currency: "USD",
+            systemBalance: 120,
+            taskBalance: 36,
+            withdrawThreshold: 100,
+            shortfallAmount: 0,
+            canWithdraw: true,
+          },
+          unreadCount: 3,
+          pendingClaimCount: 2,
+          activeCount: 4,
+          expiringCount: 0,
+          recentMessages: [],
+          leaderboard: [],
+          verification: {
+            currentStatus: "approved",
+            hasActiveRequest: false,
+          },
+          fragments: {
+            totalCount: 3,
+            completedCount: 1,
+            missingCount: 2,
+            canExchange: false,
+            shippingOrderCount: 0,
+            latestShippingStatus: null,
+            rewardName: null,
+          },
+        }}
+        whatsAppBinding={{ isBound: true, phoneNumber: "60123456789", updatedAt: "2026-06-23T09:00:00.000Z" } as any}
+        profileVerificationStatusLabel={t("profile.verified")}
+        profileQuickActions={[
+          { key: "promotion", label: t("profileLinks.promotion"), description: t("profileLinks.promotionDesc"), path: "/h5/promotion" },
+          { key: "orders", label: t("profileLinks.orders"), description: t("profileLinks.ordersDesc"), path: "/h5/orders" },
+        ]}
+        actionName={null}
+        onNavigate={vi.fn()}
+        onLogout={vi.fn()}
+        onShowTransferAllConfirm={vi.fn()}
+      />,
+    );
+
+    const serviceCard = screen.getByText(t("profile.serviceCenter")).closest(".h5-card");
+    const serviceStrip = serviceCard?.querySelector(".h5-member-profile-service-strip");
+    const serviceList = serviceCard?.querySelector(".h5-member-profile-service-list");
+
+    expect(serviceStrip).toBeTruthy();
+    expect(serviceList).toBeTruthy();
+    expect(serviceStrip?.textContent).toContain(t("profile.serviceVerification"));
+    expect(serviceStrip?.textContent).toContain(t("profile.serviceMessages"));
+    expect(serviceStrip?.textContent).toContain(t("profile.serviceBinding"));
+    expect(serviceStrip?.compareDocumentPosition(serviceList!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("keeps service center rows in a dedicated mobile-safe layout override", () => {
     const css = readFileSync("src/styles/h5-member.css", "utf8");
 
     expect(css).toMatch(/\.h5-member-profile-service-list\s+\.h5-member-list-row\s*\{[\s\S]*align-items:\s*flex-start/);
     expect(css).toMatch(/@media \(max-width:\s*420px\)[\s\S]*\.h5-member-profile-service-list\s+\.h5-member-list-row\s*\{[\s\S]*flex-direction:\s*row/);
     expect(css).toMatch(/@media \(max-width:\s*420px\)[\s\S]*\.h5-member-profile-service-list\s+\.h5-member-list-row-side\s*\{[\s\S]*align-items:\s*flex-end/);
+  });
+
+  it("allows profile service-center copy to wrap for long translated labels", () => {
+    const css = readFileSync("src/styles/h5-member.css", "utf8");
+
+    expect(css).toMatch(
+      /\.h5-member-profile-service-list\s+\.h5-member-list-row-title\s+strong\s*\{[\s\S]*white-space:\s*normal[\s\S]*text-overflow:\s*clip[\s\S]*overflow-wrap:\s*anywhere/,
+    );
+    expect(css).toMatch(
+      /\.h5-member-profile-service-list\s+\.h5-member-list-row-action[\s\S]*white-space:\s*normal[\s\S]*overflow-wrap:\s*anywhere/,
+    );
   });
 });
 

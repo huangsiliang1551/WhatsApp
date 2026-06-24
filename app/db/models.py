@@ -210,6 +210,27 @@ class H5Site(Base, TimestampMixin):
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     agency_id: Mapped[str | None] = mapped_column(ForeignKey("agencies.id"), index=True)
 
+    # ── 站点注册与接待配置（spec 5.11） ──
+    registration_entry_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    allow_invite_code_alias: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    allow_unattributed_waba_inbound: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    default_staff_entry_link_id: Mapped[str | None] = mapped_column(String(36))
+    default_ai_agent_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    default_ai_entry_link_id: Mapped[str | None] = mapped_column(String(36))
+    default_waba_id: Mapped[str | None] = mapped_column(String(128))
+    default_phone_number_id: Mapped[str | None] = mapped_column(String(128))
+    member_invite_inherits_human_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    member_invite_inherits_ai: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    existing_member_link_override_policy: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="do_not_override"
+    )
+    # do_not_override / allow_manual_override / allow_new_link_override
+    ai_failover_policy: Mapped[str] = mapped_column(
+        String(48), nullable=False, default="temporary_then_auto_reassign"
+    )
+    # temporary_only / temporary_then_auto_reassign / immediate_reassign / handover_only
+    ai_failover_threshold_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+
     account: Mapped["Account | None"] = relationship(back_populates="h5_sites", overlaps="users,task_instances,task_proof_files,task_submissions,tickets")
     users: Mapped[list["AppUser"]] = relationship(
         back_populates="registration_site",
@@ -397,6 +418,27 @@ class MemberProfile(Base, TimestampMixin):
     verification_requests: Mapped[list["MemberVerificationRequest"]] = relationship(
         back_populates="member_profile"
     )
+
+    # ── 归属快照：当前人力 / AI 归属 + 注册入口（spec 5.7） ──
+    current_owner_agency_id: Mapped[str | None] = mapped_column(String(128))
+    current_owner_staff_user_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    current_owner_agency_member_id: Mapped[str | None] = mapped_column(String(128))
+    current_owner_assignment_id: Mapped[str | None] = mapped_column(String(36))
+    owner_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+
+    current_ai_agent_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    current_ai_assignment_id: Mapped[str | None] = mapped_column(String(36))
+    ai_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+
+    registration_entry_link_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    registration_ai_agent_id: Mapped[str | None] = mapped_column(String(36))
+    registration_staff_user_id: Mapped[str | None] = mapped_column(String(128))
+    registration_channel: Mapped[str | None] = mapped_column(String(32))
+    registration_source_type: Mapped[str | None] = mapped_column(String(48))
+    attribution_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unattributed", index=True
+    )
+    # owned / unattributed / pending_resolution / owner_disabled / ai_disabled / no_ai_assignment
 
 
 class MemberAuthSession(Base, TimestampMixin):
@@ -2068,6 +2110,18 @@ class Conversation(Base, TimestampMixin):
     is_sleeping: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     last_customer_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), index=True)
 
+    # ── 会话当前归属快照（spec 5.8） ──
+    current_ai_agent_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    current_ai_assignment_id: Mapped[str | None] = mapped_column(String(36))
+    current_entry_link_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    current_owner_agency_id_snapshot: Mapped[str | None] = mapped_column(String(128))
+    current_owner_staff_user_id_snapshot: Mapped[str | None] = mapped_column(String(128))
+    current_owner_agency_member_id_snapshot: Mapped[str | None] = mapped_column(String(128))
+    current_owner_assignment_id_snapshot: Mapped[str | None] = mapped_column(String(36))
+    ai_failover_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ai_failover_from_agent_id: Mapped[str | None] = mapped_column(String(36))
+    ai_failover_reason: Mapped[str | None] = mapped_column(String(255))
+
     account: Mapped["Account"] = relationship(back_populates="conversations")
     phone_number: Mapped["WhatsAppPhoneNumber | None"] = relationship(back_populates="conversations")
     assigned_agent: Mapped["Agent | None"] = relationship(back_populates="conversations")
@@ -2100,6 +2154,25 @@ class Message(Base):
     sent_by_agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=utc_now, nullable=False)
     is_cold: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+
+    # ── 消息归属快照（spec 5.9） ──
+    actor_type: Mapped[str | None] = mapped_column(String(32))
+    # customer / staff / ai_agent / system
+    actor_id: Mapped[str | None] = mapped_column(String(128))
+    ai_agent_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    ai_assignment_id_snapshot: Mapped[str | None] = mapped_column(String(36))
+    ai_provider: Mapped[str | None] = mapped_column(String(64))
+    ai_model: Mapped[str | None] = mapped_column(String(128))
+    ai_prompt_version: Mapped[str | None] = mapped_column(String(64))
+    source_entry_link_id_snapshot: Mapped[str | None] = mapped_column(String(36), index=True)
+    owner_agency_id_snapshot: Mapped[str | None] = mapped_column(String(128))
+    owner_staff_user_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    owner_agency_member_id_snapshot: Mapped[str | None] = mapped_column(String(128))
+    owner_assignment_id_snapshot: Mapped[str | None] = mapped_column(String(36))
+    source_job_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    delivery_mode: Mapped[str | None] = mapped_column(String(48))
+    failover_from_ai_agent_id: Mapped[str | None] = mapped_column(String(36))
+    failover_reason: Mapped[str | None] = mapped_column(String(255))
 
     account: Mapped["Account"] = relationship(back_populates="messages")
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
@@ -3626,3 +3699,21 @@ class PaymentReconciliation(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=utc_now, nullable=False)
+
+
+# ── 注册归属 / AI 接待 / 入口链接新表到 Base.metadata（spec 5.1-5.10） ──
+# 放在文件末尾以避免前向引用；新表定义集中在 ownership_models.py。
+from app.db.ownership_models import (  # noqa: E402,F401
+    AIAgent,
+    AIFailoverEvent,
+    AIOutboundJob,
+    ConversationAIAssignment,
+    EntryLink,
+    MemberAIAssignment,
+    MemberAITransferBatch,
+    MemberAITransferItem,
+    MemberOwnerAssignment,
+    MemberOwnerTransferBatch,
+    MemberOwnerTransferItem,
+    OwnershipAuditEvent,
+)
