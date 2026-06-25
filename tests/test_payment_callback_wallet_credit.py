@@ -88,3 +88,4 @@ def test_payment_callback_credits_wallet_once_and_ignores_duplicate_order(
         assert len(ledgers) == 1
         assert ledgers[0].cash_amount == Decimal("120")
         assert ledgers[0].is_real_recharge is True
+        assert ledgers[0].idempotency_key is not None

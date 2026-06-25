@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import WalletAccount, WithdrawalRequest, utc_now
+from app.db.models import WalletAccount, WalletLedgerEntry, WithdrawalRequest, utc_now
 from tests.test_h5_member_auth import _create_site, _register_member
 from tests.test_h5_task_packages_wallet import _seed_task_package_scope
 
@@ -75,6 +75,8 @@ def test_h5_withdrawal_create_and_list_flow(
         assert wallet.system_bonus_balance == Decimal("0")
         assert wallet.system_cash_frozen == Decimal("120")
         assert wallet.system_bonus_frozen == Decimal("0")
+        ledger = session.query(WalletLedgerEntry).filter(WalletLedgerEntry.reference_id == created["id"]).one()
+        assert ledger.idempotency_key is not None
 
 
 def test_h5_withdrawal_rejects_below_threshold_or_insufficient_system_balance(

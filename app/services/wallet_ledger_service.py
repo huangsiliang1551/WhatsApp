@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
+from hashlib import sha256
 
 from sqlalchemy.orm import Session
 
 from app.db.models import WalletAccount, WalletLedgerEntry, WithdrawalRequest
+from app.services.wallet_invariant_guard import WalletInvariantGuard
+from app.services.wallet_ledger_guard import WalletLedgerGuard
 
 
 TWOPLACES = Decimal("0.01")
@@ -70,6 +73,7 @@ class WalletLedgerService:
         ledger_type: str = "system",
         is_bonus: bool = False,
         is_real_recharge: bool = False,
+        idempotency_key: str | None = None,
     ) -> WalletLedgerEntry:
         self.ensure_split_balance(wallet=wallet)
         sanitized_amount = self._quantize(amount)
@@ -111,7 +115,21 @@ class WalletLedgerService:
             display_title=note,
             is_bonus=is_bonus,
             is_real_recharge=is_real_recharge,
+            idempotency_key=idempotency_key
+            or self._build_idempotency_key(
+                account_id=account_id,
+                wallet_account_id=wallet.id,
+                user_id=user_id,
+                ledger_type=ledger_type,
+                transaction_type=transaction_type,
+                direction="credit",
+                source_type=source_type,
+                reference_type=reference_type,
+                reference_id=reference_id,
+            ),
         )
+        WalletLedgerGuard.enforce_credit(ledger_entry)
+        WalletInvariantGuard.validate(wallet)
         self._session.add(ledger_entry)
         return ledger_entry
 
@@ -159,6 +177,17 @@ class WalletLedgerService:
             task_balance_after=self._quantize(self._value(wallet.task_balance)),
             display_category="task_transfer",
             display_title=note_out,
+            idempotency_key=self._build_idempotency_key(
+                account_id=account_id,
+                wallet_account_id=wallet.id,
+                user_id=user_id,
+                ledger_type="task",
+                transaction_type="task_to_system_transfer",
+                direction="debit",
+                source_type="task_transfer_bonus",
+                reference_type=reference_type,
+                reference_id=reference_id,
+            ),
         )
         system_ledger = WalletLedgerEntry(
             account_id=account_id,
@@ -186,7 +215,21 @@ class WalletLedgerService:
             display_category="wallet_credit",
             display_title=note_in,
             is_bonus=True,
+            idempotency_key=self._build_idempotency_key(
+                account_id=account_id,
+                wallet_account_id=wallet.id,
+                user_id=user_id,
+                ledger_type="system",
+                transaction_type="task_to_system_transfer",
+                direction="credit",
+                source_type="task_transfer_bonus",
+                reference_type=reference_type,
+                reference_id=reference_id,
+            ),
         )
+        WalletLedgerGuard.enforce_debit(task_ledger)
+        WalletLedgerGuard.enforce_credit(system_ledger)
+        WalletInvariantGuard.validate(wallet)
         self._session.add(task_ledger)
         self._session.add(system_ledger)
         return task_ledger, system_ledger
@@ -205,6 +248,7 @@ class WalletLedgerService:
         reference_type: str | None,
         reference_id: str | None,
         status: str = "paid",
+        idempotency_key: str | None = None,
     ) -> tuple[WalletSplit, WalletLedgerEntry]:
         self.ensure_split_balance(wallet=wallet)
         split = self.calculate_cash_bonus_split(wallet=wallet, amount=amount)
@@ -243,7 +287,21 @@ class WalletLedgerService:
             display_category="wallet_debit",
             display_title=note,
             is_bonus=split.bonus_amount > Decimal("0"),
+            idempotency_key=idempotency_key
+            or self._build_idempotency_key(
+                account_id=account_id,
+                wallet_account_id=wallet.id,
+                user_id=user_id,
+                ledger_type="system",
+                transaction_type=transaction_type,
+                direction="debit",
+                source_type=source_type,
+                reference_type=reference_type,
+                reference_id=reference_id,
+            ),
         )
+        WalletLedgerGuard.enforce_debit(ledger_entry)
+        WalletInvariantGuard.validate(wallet)
         self._session.add(ledger_entry)
         return split, ledger_entry
 
@@ -299,7 +357,20 @@ class WalletLedgerService:
             display_category="withdrawal",
             display_title=note,
             is_bonus=split.bonus_amount > Decimal("0"),
+            idempotency_key=self._build_idempotency_key(
+                account_id=withdrawal.account_id,
+                wallet_account_id=wallet.id,
+                user_id=withdrawal.user_id,
+                ledger_type="system",
+                transaction_type="withdraw_request",
+                direction="debit",
+                source_type="withdrawal",
+                reference_type="withdrawal_request",
+                reference_id=withdrawal.id,
+            ),
         )
+        WalletLedgerGuard.enforce_debit(ledger_entry)
+        WalletInvariantGuard.validate(wallet)
         self._session.add(ledger_entry)
         return ledger_entry
 
@@ -350,7 +421,20 @@ class WalletLedgerService:
             display_category="withdrawal",
             display_title=note,
             is_bonus=bonus_amount > Decimal("0"),
+            idempotency_key=self._build_idempotency_key(
+                account_id=withdrawal.account_id,
+                wallet_account_id=wallet.id,
+                user_id=withdrawal.user_id,
+                ledger_type="system",
+                transaction_type="withdraw_reject_refund",
+                direction="credit",
+                source_type="withdrawal_reject_refund",
+                reference_type="withdrawal_request",
+                reference_id=withdrawal.id,
+            ),
         )
+        WalletLedgerGuard.enforce_credit(ledger_entry)
+        WalletInvariantGuard.validate(wallet)
         self._session.add(ledger_entry)
         return ledger_entry
 
@@ -361,6 +445,7 @@ class WalletLedgerService:
             self._value(wallet.system_bonus_frozen) - self._value(withdrawal.bonus_amount)
         )
         self._sync_totals(wallet=wallet)
+        WalletInvariantGuard.validate(wallet)
         self._session.add(wallet)
 
     def calculate_cash_bonus_split(self, *, wallet: WalletAccount, amount: Decimal) -> WalletSplit:
@@ -387,6 +472,34 @@ class WalletLedgerService:
             WalletLedgerService._value(wallet.system_cash_frozen)
             + WalletLedgerService._value(wallet.system_bonus_frozen)
         )
+
+    @staticmethod
+    def _build_idempotency_key(
+        *,
+        account_id: str,
+        wallet_account_id: str | None,
+        user_id: str,
+        ledger_type: str,
+        transaction_type: str,
+        direction: str,
+        source_type: str | None,
+        reference_type: str | None,
+        reference_id: str | None,
+    ) -> str:
+        raw = "|".join(
+            [
+                account_id,
+                wallet_account_id or "",
+                user_id,
+                ledger_type,
+                transaction_type,
+                direction,
+                source_type or "",
+                reference_type or "",
+                reference_id or "",
+            ]
+        )
+        return f"wallet:{sha256(raw.encode('utf-8')).hexdigest()}"
 
     @staticmethod
     def _quantize(amount: Decimal) -> Decimal:

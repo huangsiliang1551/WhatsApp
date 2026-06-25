@@ -116,3 +116,4 @@ def test_recharge_repair_create_approve_and_reject_flow(
         assert len(ledgers) == 1
         assert ledgers[0].cash_amount == Decimal("120")
         assert ledgers[0].is_real_recharge is True
+        assert ledgers[0].idempotency_key is not None

@@ -114,3 +114,4 @@ def test_bonus_grant_create_approve_and_reject_flow(
         assert len(bonus_ledgers) == 1
         assert bonus_ledgers[0].bonus_amount == Decimal("200")
         assert bonus_ledgers[0].cash_amount == Decimal("0")
+        assert bonus_ledgers[0].idempotency_key is not None

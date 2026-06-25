@@ -77,7 +77,24 @@ def collect_wallet_invariant_violations(session: Session) -> list[InvariantViola
                 )
 
     ledgers = session.execute(select(WalletLedgerEntry)).scalars().all()
+    wallet_ids_with_ledger = {ledger.wallet_account_id for ledger in ledgers}
+    for wallet in wallets:
+        if wallet.id not in wallet_ids_with_ledger:
+            violations.append(
+                InvariantViolation(
+                    kind="wallet_missing_ledger",
+                    record_id=wallet.id,
+                    account_id=wallet.account_id,
+                    detail="wallet account has no ledger entries",
+                )
+            )
+
+    duplicate_idempotency_counts: dict[str, int] = {}
     for ledger in ledgers:
+        if ledger.idempotency_key:
+            duplicate_idempotency_counts[ledger.idempotency_key] = (
+                duplicate_idempotency_counts.get(ledger.idempotency_key, 0) + 1
+            )
         if ledger.ledger_type == "system":
             split_total = _amount(ledger.cash_amount) + _amount(ledger.bonus_amount)
             if _amount(ledger.amount) != split_total:
@@ -89,6 +106,21 @@ def collect_wallet_invariant_violations(session: Session) -> list[InvariantViola
                         detail=f"amount={_amount(ledger.amount)} != cash+bonus={split_total}",
                     )
                 )
+        if (
+            ledger.source_type in {"admin_bonus", "invite_bonus", "activity_bonus"}
+            and ledger.is_bonus is False
+        ):
+            violations.append(
+                InvariantViolation(
+                    kind="wallet_bonus_flag_mismatch",
+                    record_id=ledger.id,
+                    account_id=ledger.account_id,
+                    detail=(
+                        f"source_type={ledger.source_type} requires is_bonus=true, "
+                        f"but is_bonus={ledger.is_bonus}"
+                    ),
+                )
+            )
         if ledger.ledger_type == "task":
             if _amount(ledger.amount) != _amount(ledger.task_amount):
                 violations.append(
@@ -101,6 +133,17 @@ def collect_wallet_invariant_violations(session: Session) -> list[InvariantViola
                         ),
                     )
                 )
+
+    for idempotency_key, count in duplicate_idempotency_counts.items():
+        if count > 1:
+            violations.append(
+                InvariantViolation(
+                    kind="wallet_duplicate_idempotency_key",
+                    record_id=idempotency_key,
+                    account_id=None,
+                    detail=f"idempotency_key={idempotency_key} duplicated {count} times",
+                )
+            )
 
     withdrawals = session.execute(select(WithdrawalRequest)).scalars().all()
     for withdrawal in withdrawals:
