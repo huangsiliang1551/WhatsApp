@@ -7158,6 +7158,116 @@ def test_webhook_signature_disabled_accepts_invalid_signature(
         get_settings.cache_clear()
 
 
+def test_root_webhook_signature_disabled_accepts_invalid_signature_but_flags_unverified(
+    client: TestClient,
+    override_meta_management_provider,
+) -> None:
+    import os
+    from app.core.settings import get_settings
+
+    original_env = {
+        "WEBHOOK_SIGNATURE_ENABLED": os.environ.get("WEBHOOK_SIGNATURE_ENABLED"),
+        "MESSAGING_PROVIDER": os.environ.get("MESSAGING_PROVIDER"),
+    }
+    os.environ["WEBHOOK_SIGNATURE_ENABLED"] = "false"
+    os.environ["MESSAGING_PROVIDER"] = "whatsapp"
+    get_settings.cache_clear()
+
+    try:
+        override_meta_management_provider(client, StubMetaManagementProvider())
+
+        create_response = client.post(
+            "/api/meta/accounts/manual",
+            json={
+                "account_id": "meta-root-sig-disabled",
+                "display_name": "Meta Root Sig Disabled",
+                "meta_business_portfolio_id": "portfolio-root-sig-disabled",
+                "waba_id": "waba-root-sig-disabled",
+                "access_token": "token-root-sig-disabled",
+                "verify_token": "verify-root-sig-disabled",
+                "app_secret": "secret-root-sig-disabled",
+                "token_source": "system_user",
+                "phone_numbers": [
+                    {
+                        "phone_number_id": "pn-root-sig-disabled",
+                        "display_phone_number": "+1 555 000 9011",
+                        "verified_name": "Root Signature Disabled Brand",
+                        "quality_rating": "GREEN",
+                        "is_registered": True,
+                    }
+                ],
+            },
+        )
+        assert create_response.status_code == 200
+
+        subscribe_response = client.post(
+            "/api/meta/accounts/meta-root-sig-disabled/wabas/waba-root-sig-disabled/webhook-subscription",
+            json={"callback_url": "https://example.com/webhook/root-sig-disabled"},
+        )
+        assert subscribe_response.status_code == 200
+
+        verify_response = client.get(
+            "/webhooks/whatsapp/meta-root-sig-disabled/wabas/waba-root-sig-disabled",
+            params={
+                "hub.mode": "subscribe",
+                "hub.verify_token": "verify-root-sig-disabled",
+                "hub.challenge": "challenge-root-sig-disabled",
+            },
+        )
+        assert verify_response.status_code == 200
+
+        payload = {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "id": "waba-root-sig-disabled",
+                    "changes": [
+                        {
+                            "field": "messages",
+                            "value": {
+                                "messaging_product": "whatsapp",
+                                "metadata": {
+                                    "display_phone_number": "+1 555 000 9011",
+                                    "phone_number_id": "pn-root-sig-disabled",
+                                },
+                                "messages": [
+                                    {
+                                        "from": "14150009011",
+                                        "id": "wamid.root.sig.disabled.1",
+                                        "timestamp": "1712345802",
+                                        "type": "text",
+                                        "text": {"body": "root signature disabled test"},
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+        raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        response = client.post(
+            "/webhooks/whatsapp",
+            content=raw_body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": "sha256=invalid-signature",
+            },
+        )
+        assert response.status_code == 200
+        result = response.json()
+        assert result["signature_verified"] is False
+        assert result["accepted_messages"] == 1
+    finally:
+        for key, value in original_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        get_settings.cache_clear()
+
+
 def test_webhook_dedup_skips_duplicate_message(
     client: TestClient,
     override_meta_management_provider,

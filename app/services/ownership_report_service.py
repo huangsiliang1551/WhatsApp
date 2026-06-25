@@ -308,7 +308,7 @@ class OwnershipReportService:
         no_ai = int(self._session.execute(stmt_no_ai).scalar() or 0)
 
         # EntryLink 指向 disabled/archived AI
-        bad_ai_link_stmt = select(func.count(EntryLink.id)).where(
+        bad_ai_link_stmt = select(EntryLink.id).where(
             EntryLink.target_ai_agent_id.is_not(None),
             EntryLink.status == "active",
         )

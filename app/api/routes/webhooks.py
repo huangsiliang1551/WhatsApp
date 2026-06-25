@@ -1014,6 +1014,7 @@ async def _receive_whatsapp_webhook_for_scope(
     )
 
     results: list[dict[str, object]] = []
+    accepted_messages = 0
     rejected_phone_scope_messages = 0
     accepted_message_phone_counts: dict[str, int] = {}
     processing_failures = 0
@@ -1147,7 +1148,9 @@ async def _receive_whatsapp_webhook_for_scope(
 
         if process_result.get("deduplicated"):
             # Duplicate delivery: the service layer returned the existing
-            # message. Do not count it as a newly accepted message.
+            # message. Keep the result for callers, but do not count it as a
+            # newly accepted message.
+            results.append(process_result)
             business_inbound_messages_total.labels(
                 provider=provider.provider_name,
                 outcome="duplicate",
@@ -1161,6 +1164,7 @@ async def _receive_whatsapp_webhook_for_scope(
             continue
 
         results.append(process_result)
+        accepted_messages += 1
         accepted_message_phone_counts[normalized.phone_number_id or "unknown"] = (
             accepted_message_phone_counts.get(normalized.phone_number_id or "unknown", 0) + 1
         )
@@ -1276,7 +1280,7 @@ async def _receive_whatsapp_webhook_for_scope(
         waba_id=waba_id,
         status="healthy",
         error_message=None,
-        message_count=len(results),
+        message_count=accepted_messages,
         status_update_count=accepted_status_updates,
         management_event_count=(
             template_update_counts.get("accepted_template_updates", 0)
@@ -1304,7 +1308,7 @@ async def _receive_whatsapp_webhook_for_scope(
         "normalized_messages": len(normalized_messages),
         "normalized_status_updates": len(normalized_status_updates),
         "results": results,
-        "accepted_messages": len(results),
+        "accepted_messages": accepted_messages,
         "skipped_messages": rejected_phone_scope_messages,
         "rejected_phone_scope_messages": rejected_phone_scope_messages,
         "processing_failures": processing_failures,
@@ -1443,7 +1447,7 @@ async def receive_whatsapp_webhook_root(
             app_env=settings.app_env,
             messaging_provider=settings.messaging_provider,
         )
-        signature_verified = True
+        signature_verified = False
     elif _is_whatsapp_provider_mode(settings):
         if unique_secrets:
             app_secret = unique_secrets[0]

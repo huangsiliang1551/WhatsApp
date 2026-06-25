@@ -73,7 +73,9 @@ def get_sessionmaker() -> sessionmaker[Session]:
     return sessionmaker(bind=get_engine(), autoflush=False, autocommit=False, future=True)
 
 
-SessionLocal = sessionmaker(bind=get_engine(), autoflush=False, autocommit=False, future=True) if get_settings().test_mode else get_sessionmaker()
+def SessionLocal() -> Session:
+    """Create a session lazily to avoid import-time engine initialization."""
+    return get_sessionmaker()()
 
 
 class DBSessionContext:

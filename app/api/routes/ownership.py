@@ -575,6 +575,7 @@ async def list_ownership_audit_events(
     target_type: str | None = None,
     target_id: str | None = None,
     action: str | None = None,
+    account_id: str | None = Query(default=None, alias="account_id"),
     limit: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_db_session),
     actor: RequestActor = Depends(require_permission("member_ownership.history")),
@@ -582,6 +583,16 @@ async def list_ownership_audit_events(
     from sqlalchemy import select
 
     stmt = select(OwnershipAuditEvent).order_by(OwnershipAuditEvent.created_at.desc()).limit(limit)
+    if not actor.is_super_admin:
+        if account_id is not None:
+            actor.require_account_access(account_id)
+            stmt = stmt.where(OwnershipAuditEvent.account_id == account_id)
+        elif actor.account_ids:
+            stmt = stmt.where(OwnershipAuditEvent.account_id.in_(actor.account_ids))
+        else:
+            raise HTTPException(status_code=403, detail="This operation requires an explicit account scope.")
+    elif account_id is not None:
+        stmt = stmt.where(OwnershipAuditEvent.account_id == account_id)
     if target_type:
         stmt = stmt.where(OwnershipAuditEvent.target_type == target_type)
     if target_id:
@@ -641,6 +652,8 @@ async def get_ownership_report(
     session: Session = Depends(get_db_session),
     actor: RequestActor = Depends(require_permission("reports.ownership.view")),
 ) -> dict[str, Any]:
+    if not actor.is_super_admin and account_id is not None:
+        actor.require_account_access(account_id)
     if not actor.is_super_admin and account_id is None:
         account_id = actor.account_ids[0] if actor.account_ids else None
     svc = OwnershipReportService(session)

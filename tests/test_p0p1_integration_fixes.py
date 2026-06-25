@@ -208,6 +208,97 @@ async def test_record_outbound_message_backward_compatible(session: Session) -> 
 # ────────────────────── AIOutboundJobService 政策校验 ──────────────────────
 
 
+@pytest.mark.asyncio
+async def test_record_outbound_message_writes_staff_snapshot_for_human_reply(session: Session) -> None:
+    account, _ = _seed_basic(session)
+    user, _ = _seed_user_member(session, account_id=account.account_id, phone="13800000003", member_no="00000003")
+
+    conversation = Conversation(
+        account_id=account.account_id,
+        external_conversation_id="wa:pn-3:u-1",
+        customer_id=user.public_user_id,
+        status="open",
+        current_owner_staff_user_id_snapshot="staff-human-1",
+        current_owner_agency_id_snapshot="agency-human-1",
+        current_owner_assignment_id_snapshot="owner-human-1",
+        current_entry_link_id="entry-human-1",
+    )
+    session.add(conversation)
+    session.commit()
+
+    store = RuntimeStateStore(session)
+    message = await store.record_outbound_message(
+        account_id=account.account_id,
+        conversation_id=conversation.external_conversation_id,
+        recipient_id=user.public_user_id,
+        text="manual reply",
+        language_code="zh-CN",
+        translated_text=None,
+        translated_language_code=None,
+        delivery_mode="manual_reply",
+        ai_generated=False,
+        payload={"provider": "mock"},
+        actor_type="staff",
+        actor_id="staff-human-1",
+    )
+
+    assert message.ai_generated is False
+    assert message.actor_type == "staff"
+    assert message.actor_id == "staff-human-1"
+    assert message.ai_agent_id is None
+    assert message.owner_staff_user_id_snapshot == "staff-human-1"
+    assert message.owner_agency_id_snapshot == "agency-human-1"
+    assert message.owner_assignment_id_snapshot == "owner-human-1"
+    assert message.source_entry_link_id_snapshot == "entry-human-1"
+
+
+@pytest.mark.asyncio
+async def test_record_outbound_message_writes_failover_snapshot_for_fallback_ai_reply(session: Session) -> None:
+    account, _ = _seed_basic(session)
+    user, _ = _seed_user_member(session, account_id=account.account_id, phone="13800000004", member_no="00000004")
+
+    conversation = Conversation(
+        account_id=account.account_id,
+        external_conversation_id="wa:pn-4:u-1",
+        customer_id=user.public_user_id,
+        status="open",
+        current_ai_agent_id="ai-fallback-b",
+        current_ai_assignment_id="ai-asg-fallback-b",
+        current_entry_link_id="entry-fallback-1",
+        current_owner_staff_user_id_snapshot="staff-fallback-owner",
+        current_owner_assignment_id_snapshot="owner-fallback-1",
+        ai_failover_active=True,
+        ai_failover_from_agent_id="ai-primary-a",
+        ai_failover_reason="temporary_failover_agent_unavailable",
+    )
+    session.add(conversation)
+    session.commit()
+
+    store = RuntimeStateStore(session)
+    message = await store.record_outbound_message(
+        account_id=account.account_id,
+        conversation_id=conversation.external_conversation_id,
+        recipient_id=user.public_user_id,
+        text="fallback reply",
+        language_code="zh-CN",
+        translated_text=None,
+        translated_language_code=None,
+        delivery_mode="ai_sync_reply",
+        ai_generated=True,
+        payload={"provider": "mock"},
+        ai_provider="openai",
+        ai_model="gpt-4o-mini",
+    )
+
+    assert message.ai_generated is True
+    assert message.actor_type == "ai_agent"
+    assert message.ai_agent_id == "ai-fallback-b"
+    assert message.failover_from_ai_agent_id == "ai-primary-a"
+    assert message.failover_reason == "temporary_failover_agent_unavailable"
+    assert message.owner_staff_user_id_snapshot == "staff-fallback-owner"
+    assert message.source_entry_link_id_snapshot == "entry-fallback-1"
+
+
 def _seed_ai_agent(session: Session, account_id: str) -> AIAgent:
     agent = AIAgent(
         account_id=account_id,
