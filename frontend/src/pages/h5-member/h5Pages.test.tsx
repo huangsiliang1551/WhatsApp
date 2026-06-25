@@ -3393,6 +3393,97 @@ describe("RechargePage", () => {
     expect(screen.queryByText(/^paid$/)).toBeNull();
   });
 
+  it("prefers backend display titles for wallet history rows", async () => {
+    const { RechargePage } = await import("./RechargePage");
+
+    render(
+      <RechargePage
+        effectiveWalletSummary={{
+          currency: "USD",
+          systemBalance: 320,
+          taskBalance: 86,
+          withdrawThreshold: 100,
+          shortfallAmount: 0,
+          canWithdraw: true,
+        }}
+        rechargeAmount="100"
+        rechargeHistory={[
+          {
+            id: "tx-typed-title",
+            transactionType: "recharge",
+            amount: 100,
+            currency: "USD",
+            status: "paid",
+            note: "",
+            displayTitle: "充值补单到账",
+            displayCategory: "wallet_credit",
+            createdAt: "2026-06-23T09:00:00.000Z",
+          } as any,
+        ]}
+        actionName={null}
+        loading={false}
+        error={null}
+        rechargeStatus={null}
+        onRechargeAmountChange={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenRechargeChannels={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("充值补单到账")).toBeTruthy();
+  });
+
+  it("renders bonus and refund wallet labels without falling back to generic recharge copy", async () => {
+    const { RechargePage } = await import("./RechargePage");
+
+    render(
+      <RechargePage
+        effectiveWalletSummary={{
+          currency: "USD",
+          systemBalance: 320,
+          taskBalance: 86,
+          withdrawThreshold: 100,
+          shortfallAmount: 0,
+          canWithdraw: true,
+        }}
+        rechargeAmount="100"
+        rechargeHistory={[
+          {
+            id: "tx-bonus",
+            transactionType: "bonus_grant",
+            amount: 60,
+            currency: "USD",
+            status: "paid",
+            note: "",
+            displayTitle: "赠金到账",
+            createdAt: "2026-06-23T09:00:00.000Z",
+          } as any,
+          {
+            id: "tx-refund",
+            transactionType: "withdraw_reject_refund",
+            amount: 40,
+            currency: "USD",
+            status: "paid",
+            note: "",
+            displayTitle: "提现退回",
+            createdAt: "2026-06-23T10:00:00.000Z",
+          } as any,
+        ]}
+        actionName={null}
+        loading={false}
+        error={null}
+        rechargeStatus={null}
+        onRechargeAmountChange={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenRechargeChannels={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("赠金到账")).toBeTruthy();
+    expect(screen.getByText("提现退回")).toBeTruthy();
+    expect(screen.queryByText(t("recharge.historyDefaultNote"))).toBeNull();
+  });
+
   it("uses a dedicated wallet snapshot heading instead of repeating the earnings page title inside the hero card", async () => {
     storage.set("h5-lang", "en-US");
     const { RechargePage } = await import("./RechargePage");
@@ -3627,6 +3718,63 @@ describe("WithdrawPage", () => {
 
     expect(container.querySelector(".h5-withdraw-status-flow-icon-rejected")).toBeTruthy();
     expect(container.querySelector(".h5-withdraw-status-flow-icon-rejected")?.getAttribute("style")).toBeNull();
+  });
+
+  it("shows withdrawal split details and rejected refund copy in history rows", async () => {
+    storage.set("h5-lang", "zh-CN");
+    const { WithdrawPage } = await import("./WithdrawPage");
+    const { formatMoney } = await import("./shared");
+
+    render(
+      <WithdrawPage
+        effectiveWalletSummary={{
+          currency: "USD",
+          systemBalance: 320,
+          taskBalance: 86,
+          withdrawThreshold: 100,
+          shortfallAmount: 0,
+          canWithdraw: true,
+        }}
+        withdrawAmount="100"
+        withdrawRequests={[
+          {
+            id: "wd-rejected",
+            amount: 80,
+            cashAmount: 30,
+            bonusAmount: 50,
+            actualPayoutAmount: null,
+            rejectionReason: "银行卡信息不完整",
+            currency: "USD",
+            status: "rejected",
+            createdAt: "2026-06-23T09:00:00.000Z",
+          } as any,
+          {
+            id: "wd-paid",
+            amount: 120,
+            cashAmount: 100,
+            bonusAmount: 20,
+            actualPayoutAmount: 118.8,
+            rejectionReason: null,
+            currency: "USD",
+            status: "paid",
+            createdAt: "2026-06-23T10:00:00.000Z",
+          } as any,
+        ]}
+        maxWithdrawAmount={320}
+        actionName={null}
+        onWithdrawAmountChange={vi.fn()}
+        onWithdraw={vi.fn().mockResolvedValue(undefined)}
+        onShowTransferAllConfirm={vi.fn()}
+        onSetMaxWithdraw={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("提现退回")).toBeTruthy();
+    expect(screen.getByText("提现完成")).toBeTruthy();
+    expect(document.body.textContent).toContain(`真实资金 ${formatMoney(30, "USD")}`);
+    expect(document.body.textContent).toContain(`赠金 ${formatMoney(50, "USD")}`);
+    expect(document.body.textContent).toContain(`实际打款 ${formatMoney(118.8, "USD")}`);
+    expect(screen.getByText("银行卡信息不完整")).toBeTruthy();
   });
 });
 

@@ -1522,7 +1522,12 @@ export function useH5MemberApp(
 
   const effectiveWalletSummary = walletSummary ?? dashboard?.wallet ?? null;
   const rechargeHistory = useMemo(
-    () => walletTransactions.filter((item) => item.transactionType === "recharge"),
+    () => walletTransactions.filter((item) => (
+      item.transactionType === "recharge" ||
+      item.transactionType === "bonus_grant" ||
+      item.transactionType === "recharge_repair" ||
+      item.transactionType === "withdraw_reject_refund"
+    )),
     [walletTransactions],
   );
 

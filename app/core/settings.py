@@ -1,4 +1,6 @@
+import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -138,6 +140,26 @@ class Settings(BaseSettings):
     uvicorn_workers: int = Field(default=4, alias="UVICORN_WORKERS")
 
     # Webhook
+
+    def resolve_runtime_path(self, configured_path: str, *, fallback_relative: str) -> Path:
+        path = Path(configured_path).expanduser()
+        if configured_path.startswith("/opt/") and (self.test_mode or os.name == "nt"):
+            return Path("storage/runtime").joinpath(fallback_relative)
+        return path
+
+    @property
+    def resolved_template_static_root(self) -> Path:
+        return self.resolve_runtime_path(
+            self.template_static_root,
+            fallback_relative="templates/static",
+        )
+
+    @property
+    def resolved_template_upload_root(self) -> Path:
+        return self.resolve_runtime_path(
+            self.template_upload_root,
+            fallback_relative="templates/uploads",
+        )
     webhook_signature_enabled: bool = Field(default=True, alias="WEBHOOK_SIGNATURE_ENABLED")
 
     # Global webhook defaults (used when per-account config is not set)

@@ -35,6 +35,27 @@ vi.mock("../stores/appStore", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) => selector(hoisted.storeState),
 }));
 
+vi.mock("../components/member/MemberIdLink", async () => {
+  const React = await import("react");
+  return {
+    MemberIdLink: ({
+      accountId,
+      userId,
+      publicUserId,
+      label,
+    }: {
+      accountId?: string | null;
+      userId?: string | null;
+      publicUserId?: string | null;
+      label?: string | null;
+    }) => React.createElement(
+      "span",
+      null,
+      `member-link:${label ?? ""}:${userId ?? ""}:${publicUserId ?? ""}:${accountId ?? ""}`,
+    ),
+  };
+});
+
 vi.mock("antd", async () => {
   const React = await import("react");
   const Wrapper = ({ children }: { children?: React.ReactNode }) => React.createElement("div", null, children);
@@ -46,7 +67,24 @@ vi.mock("antd", async () => {
     Title: ({ children }: { children?: React.ReactNode }) => React.createElement("h4", null, children),
     Paragraph: ({ children }: { children?: React.ReactNode }) => React.createElement("p", null, children),
   };
-  const Table = Wrapper;
+  const Table = ({
+    dataSource,
+    columns,
+  }: {
+    dataSource?: Array<Record<string, unknown>>;
+    columns?: Array<Record<string, unknown>>;
+  }) => React.createElement(
+    "div",
+    null,
+    (dataSource ?? []).flatMap((record, rowIndex) =>
+      (columns ?? []).map((column, columnIndex) => {
+        const dataIndex = typeof column.dataIndex === "string" ? column.dataIndex : undefined;
+        const value = dataIndex ? record[dataIndex] : undefined;
+        const rendered = typeof column.render === "function" ? column.render(value, record, rowIndex) : value;
+        return React.createElement("div", { key: `${rowIndex}-${columnIndex}` }, rendered ?? null);
+      }),
+    ),
+  );
   const Space = Wrapper;
   const Input = ({ ...props }: Record<string, unknown>) => React.createElement("input", props);
   const Select = Wrapper;
@@ -158,5 +196,29 @@ describe("UsersPage", () => {
   it("has a refresh button", async () => {
     await renderPage(createElement(UsersPage));
     expect(document.body.textContent).toContain("刷新");
+  });
+
+  it("renders the user id column with MemberIdLink", async () => {
+    await renderPage(createElement(UsersPage));
+    expect(document.body.textContent).toContain("member-link:pub-u1:user-1:pub-u1:acct-1");
+    expect(document.body.textContent).toContain("member-link:pub-u2:user-2:pub-u2:");
+  });
+
+  it("renders selected user detail with MemberIdLink", async () => {
+    await renderPage(createElement(UsersPage));
+
+    const before = (document.body.textContent?.match(/member-link:pub-u2:user-2:pub-u2:/g) ?? []).length;
+    const userButton = Array.from(document.querySelectorAll("button")).find(
+      (button) => button.textContent === "pub-u2",
+    );
+    expect(userButton).toBeTruthy();
+
+    await act(async () => {
+      userButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushEffects();
+
+    const after = (document.body.textContent?.match(/member-link:pub-u2:user-2:pub-u2:/g) ?? []).length;
+    expect(after).toBe(before + 1);
   });
 });

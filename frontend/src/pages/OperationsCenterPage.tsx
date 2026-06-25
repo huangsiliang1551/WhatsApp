@@ -1,6 +1,7 @@
 import { useCallback, type JSX } from "react";
 import { Button, Card, Col, Row, Space, Statistic, Table, Tag, Typography } from "antd";
 
+import { MemberIdLink } from "../components/member/MemberIdLink";
 import { EmptyGuide, PageShell } from "../components/PageShell";
 import { usePageData } from "../hooks/usePageData";
 import {
@@ -112,7 +113,21 @@ export function OperationsCenterPage(): JSX.Element {
       <Table
         columns={withSorter([
           { title: "模板", dataIndex: "template_name", ellipsis: true, key: "template_name", width: 160 },
-          { title: "用户", dataIndex: "public_user_id", ellipsis: true, key: "public_user_id", width: 140 },
+          {
+            title: "用户",
+            dataIndex: "public_user_id",
+            ellipsis: true,
+            key: "public_user_id",
+            width: 140,
+            render: (value: string, record: { account_id: string | null; public_user_id: string; user_id: string }) => (
+              <MemberIdLink
+                accountId={record.account_id}
+                userId={record.user_id}
+                publicUserId={record.public_user_id}
+                label={value || record.public_user_id}
+              />
+            ),
+          },
           { title: "状态", dataIndex: "status", key: "status", width: 100, render: (value: string) => <Tag>{value}</Tag> },
           {
             title: "认证状态",

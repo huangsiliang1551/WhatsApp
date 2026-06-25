@@ -55,8 +55,8 @@ def upgrade() -> None:
         sa.Column("fallback_agency_member_id", sa.String(length=128), nullable=True),
         sa.Column("fallback_ai_agent_id", sa.String(length=36), sa.ForeignKey("ai_agents.id"), nullable=True),
         sa.Column("default_entry_link_id", sa.String(length=36), nullable=True),
-        sa.Column("auto_reply_enabled", sa.Boolean(), nullable=False, server_default=sa.text("1")),
-        sa.Column("proactive_send_enabled", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("auto_reply_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        sa.Column("proactive_send_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("health_status", sa.String(length=32), nullable=False, server_default="healthy"),
         sa.Column("last_health_check_at", sa.DateTime(timezone=False), nullable=True),
         sa.Column("metadata_json", sa.JSON(), nullable=True),
@@ -110,7 +110,7 @@ def upgrade() -> None:
         sa.Column("to_staff_user_id", sa.String(length=128), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="completed"),
         sa.Column("total_items", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("dry_run", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("dry_run", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("reason", sa.Text(), nullable=True),
         sa.Column("changed_by_actor_id", sa.String(length=128), nullable=True),
         sa.Column("metadata_json", sa.JSON(), nullable=True),
@@ -146,8 +146,8 @@ def upgrade() -> None:
         sa.Column("to_ai_agent_id", sa.String(length=36), sa.ForeignKey("ai_agents.id"), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="completed"),
         sa.Column("total_items", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("include_open_conversations", sa.Boolean(), nullable=False, server_default=sa.text("1")),
-        sa.Column("dry_run", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("include_open_conversations", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        sa.Column("dry_run", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("reason", sa.Text(), nullable=True),
         sa.Column("changed_by_actor_id", sa.String(length=128), nullable=True),
         sa.Column("metadata_json", sa.JSON(), nullable=True),
@@ -189,7 +189,7 @@ def upgrade() -> None:
         sa.Column("source_referrer_user_id", sa.String(length=36), sa.ForeignKey("app_users.id"), nullable=True),
         sa.Column("assigned_at", sa.DateTime(timezone=False), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("ended_at", sa.DateTime(timezone=False), nullable=True),
-        sa.Column("is_current", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("is_current", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("changed_by_actor_id", sa.String(length=128), nullable=True),
         sa.Column("transfer_batch_id", sa.String(length=36), sa.ForeignKey("member_owner_transfer_batches.id"), nullable=True),
         sa.Column("reason", sa.Text(), nullable=True),
@@ -217,7 +217,7 @@ def upgrade() -> None:
         sa.Column("source_referrer_user_id", sa.String(length=36), sa.ForeignKey("app_users.id"), nullable=True),
         sa.Column("assigned_at", sa.DateTime(timezone=False), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("ended_at", sa.DateTime(timezone=False), nullable=True),
-        sa.Column("is_current", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("is_current", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("changed_by_actor_id", sa.String(length=128), nullable=True),
         sa.Column("transfer_batch_id", sa.String(length=36), sa.ForeignKey("member_ai_transfer_batches.id"), nullable=True),
         sa.Column("reason", sa.Text(), nullable=True),
@@ -249,7 +249,7 @@ def upgrade() -> None:
         sa.Column("failover_reason", sa.String(length=128), nullable=True),
         sa.Column("assigned_at", sa.DateTime(timezone=False), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("ended_at", sa.DateTime(timezone=False), nullable=True),
-        sa.Column("is_current", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("is_current", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("changed_by_actor_id", sa.String(length=128), nullable=True),
         sa.Column("reason", sa.Text(), nullable=True),
         sa.Column("metadata_json", sa.JSON(), nullable=True),
@@ -370,7 +370,7 @@ def upgrade() -> None:
     op.add_column("conversations", sa.Column("current_owner_staff_user_id_snapshot", sa.String(length=128), nullable=True))
     op.add_column("conversations", sa.Column("current_owner_agency_member_id_snapshot", sa.String(length=128), nullable=True))
     op.add_column("conversations", sa.Column("current_owner_assignment_id_snapshot", sa.String(length=36), nullable=True))
-    op.add_column("conversations", sa.Column("ai_failover_active", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+    op.add_column("conversations", sa.Column("ai_failover_active", sa.Boolean(), nullable=False, server_default=sa.text("false")))
     op.add_column("conversations", sa.Column("ai_failover_from_agent_id", sa.String(length=36), nullable=True))
     op.add_column("conversations", sa.Column("ai_failover_reason", sa.String(length=255), nullable=True))
     op.create_index("ix_conversations_current_ai_agent_id", "conversations", ["current_ai_agent_id"])
@@ -399,16 +399,16 @@ def upgrade() -> None:
     op.create_index("ix_messages_source_job_id", "messages", ["source_job_id"])
 
     # ── 扩展 h5_sites：注册与接待配置 ──
-    op.add_column("h5_sites", sa.Column("registration_entry_required", sa.Boolean(), nullable=False, server_default=sa.text("1")))
-    op.add_column("h5_sites", sa.Column("allow_invite_code_alias", sa.Boolean(), nullable=False, server_default=sa.text("1")))
-    op.add_column("h5_sites", sa.Column("allow_unattributed_waba_inbound", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+    op.add_column("h5_sites", sa.Column("registration_entry_required", sa.Boolean(), nullable=False, server_default=sa.text("true")))
+    op.add_column("h5_sites", sa.Column("allow_invite_code_alias", sa.Boolean(), nullable=False, server_default=sa.text("true")))
+    op.add_column("h5_sites", sa.Column("allow_unattributed_waba_inbound", sa.Boolean(), nullable=False, server_default=sa.text("false")))
     op.add_column("h5_sites", sa.Column("default_staff_entry_link_id", sa.String(length=36), nullable=True))
     op.add_column("h5_sites", sa.Column("default_ai_agent_id", sa.String(length=36), nullable=True))
     op.add_column("h5_sites", sa.Column("default_ai_entry_link_id", sa.String(length=36), nullable=True))
     op.add_column("h5_sites", sa.Column("default_waba_id", sa.String(length=128), nullable=True))
     op.add_column("h5_sites", sa.Column("default_phone_number_id", sa.String(length=128), nullable=True))
-    op.add_column("h5_sites", sa.Column("member_invite_inherits_human_owner", sa.Boolean(), nullable=False, server_default=sa.text("1")))
-    op.add_column("h5_sites", sa.Column("member_invite_inherits_ai", sa.Boolean(), nullable=False, server_default=sa.text("1")))
+    op.add_column("h5_sites", sa.Column("member_invite_inherits_human_owner", sa.Boolean(), nullable=False, server_default=sa.text("true")))
+    op.add_column("h5_sites", sa.Column("member_invite_inherits_ai", sa.Boolean(), nullable=False, server_default=sa.text("true")))
     op.add_column("h5_sites", sa.Column("existing_member_link_override_policy", sa.String(length=32), nullable=False, server_default="do_not_override"))
     op.add_column("h5_sites", sa.Column("ai_failover_policy", sa.String(length=48), nullable=False, server_default="temporary_then_auto_reassign"))
     op.add_column("h5_sites", sa.Column("ai_failover_threshold_minutes", sa.Integer(), nullable=False, server_default="30"))

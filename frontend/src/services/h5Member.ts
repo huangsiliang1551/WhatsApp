@@ -16,9 +16,12 @@ export type H5RewardShippingStatus =
   | "completed";
 export type H5WalletTransactionType =
   | "recharge"
+  | "bonus_grant"
   | "purchase"
+  | "recharge_repair"
   | "task_reward"
   | "task_to_system_transfer"
+  | "withdraw_reject_refund"
   | "withdraw_request"
   | "withdraw_paid"
   | "withdraw_rejected";
@@ -102,6 +105,8 @@ export type H5WalletTransaction = {
   currency: string;
   status: "submitted" | "processing" | "paid" | "failed";
   note: string;
+  displayCategory?: string;
+  displayTitle?: string;
   createdAt: string;
 };
 
@@ -117,8 +122,12 @@ export type H5WalletSummary = {
 export type H5WithdrawRequest = {
   id: string;
   amount: number;
+  cashAmount: number;
+  bonusAmount: number;
+  actualPayoutAmount: number | null;
   currency: string;
   status: H5WithdrawStatus;
+  rejectionReason: string | null;
   createdAt: string;
 };
 
@@ -506,6 +515,8 @@ type BackendWalletTransactionResponse = {
   currency: string;
   status: "submitted" | "processing" | "paid" | "failed";
   note: string | null;
+  displayCategory?: string | null;
+  displayTitle?: string | null;
   createdAt: string;
 };
 
@@ -526,6 +537,9 @@ type BackendWithdrawalResponse = {
   id: string;
   requestNo: string;
   amount: number;
+  cashAmount: number;
+  bonusAmount: number;
+  actualPayoutAmount: number | null;
   currency: string;
   status: H5WithdrawStatus;
   rejectionReason: string | null;
@@ -1160,6 +1174,7 @@ function mapOrderFromBackend(order: BackendMemberOrderResponse): H5MemberOrder {
 function mapWalletTransactionFromBackend(
   transaction: BackendWalletTransactionResponse,
 ): H5WalletTransaction {
+  const displayTitle = transaction.displayTitle ?? transaction.note ?? "";
   return {
     id: transaction.id,
     ledgerType: transaction.ledgerType,
@@ -1168,7 +1183,9 @@ function mapWalletTransactionFromBackend(
     amount: transaction.amount,
     currency: transaction.currency,
     status: transaction.status,
-    note: transaction.note ?? "",
+    note: displayTitle,
+    displayCategory: transaction.displayCategory ?? undefined,
+    displayTitle,
     createdAt: transaction.createdAt,
   };
 }
@@ -1179,8 +1196,12 @@ function mapWithdrawalFromBackend(
   return {
     id: withdrawal.id,
     amount: withdrawal.amount,
+    cashAmount: withdrawal.cashAmount,
+    bonusAmount: withdrawal.bonusAmount,
+    actualPayoutAmount: withdrawal.actualPayoutAmount,
     currency: withdrawal.currency,
     status: withdrawal.status,
+    rejectionReason: withdrawal.rejectionReason,
     createdAt: withdrawal.createdAt,
   };
 }
@@ -1602,6 +1623,10 @@ function seedMemberStates(): Record<string, StoredMemberState> {
         {
           id: "withdraw-seed-1",
           amount: 120,
+          cashAmount: 100,
+          bonusAmount: 20,
+          actualPayoutAmount: 118.8,
+          rejectionReason: null,
           currency: "USD",
           status: "paid",
           createdAt: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
@@ -2744,8 +2769,12 @@ export async function createWithdrawRequest(amount: number): Promise<H5WalletSum
     draft.withdrawRequests.unshift({
       id: createId("withdraw"),
       amount: sanitizedAmount,
+      cashAmount: sanitizedAmount,
+      bonusAmount: 0,
+      actualPayoutAmount: null,
       currency: draft.wallet.currency,
       status: "submitted",
+      rejectionReason: null,
       createdAt: nowIso(),
     });
     appendTransaction(draft, {
@@ -3317,8 +3346,12 @@ export async function uploadTaskProofApi(
 /** 获取钱包余额 */
 export async function getWalletBalanceApi(): Promise<H5WalletSummary> {
   if (apiMode === 'real') {
-    const res = await h5Api.get<H5WalletSummary>(H5_API_ENDPOINTS.wallet.balance);
-    return res.data;
+    const backendWallet = await requestBackendMemberDomain<BackendWalletSummaryResponse>(
+      H5_API_ENDPOINTS.wallet.balance,
+    );
+    if (backendWallet) {
+      return mapWalletSummaryFromBackend(backendWallet);
+    }
   }
   // Mock fallback
   const session = getRequiredSession();
@@ -3333,8 +3366,21 @@ export async function getWalletTransactionsApi(params: {
   type?: string;
 }): Promise<{ items: H5WalletTransaction[]; total: number }> {
   if (apiMode === 'real') {
-    const res = await h5Api.get(H5_API_ENDPOINTS.wallet.transactions, { params });
-    return res.data;
+    const backendTransactions = await requestBackendMemberDomain<BackendWalletTransactionResponse[]>(
+      H5_API_ENDPOINTS.wallet.transactions,
+    );
+    if (backendTransactions) {
+      const allTransactions = backendTransactions.map((item) => mapWalletTransactionFromBackend(item));
+      const filtered = params.type
+        ? allTransactions.filter((item) => item.transactionType === params.type)
+        : allTransactions;
+      const size = params.size ?? 20;
+      const start = (params.page - 1) * size;
+      return {
+        items: filtered.slice(start, start + size),
+        total: filtered.length,
+      };
+    }
   }
   // Mock fallback
   const session = getRequiredSession();
@@ -3344,7 +3390,7 @@ export async function getWalletTransactionsApi(params: {
   );
   const filtered = params.type
     ? allTransactions.filter((item) => item.transactionType === params.type)
-    : allTransactions;
+      : allTransactions;
   const size = params.size ?? 20;
   const start = (params.page - 1) * size;
   return {
@@ -3359,8 +3405,17 @@ export async function rechargeApi(
   channel: string,
 ): Promise<{ id: string; status: string }> {
   if (apiMode === 'real') {
-    const res = await h5Api.post(H5_API_ENDPOINTS.wallet.recharge, { amount, channel });
-    return res.data;
+    const backendWallet = await requestBackendMemberDomain<BackendWalletSummaryResponse>(
+      H5_API_ENDPOINTS.wallet.recharge,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount }),
+      },
+    );
+    if (backendWallet) {
+      return { id: "", status: "completed" };
+    }
   }
   // Mock fallback
   await createRechargeOrder(amount);
@@ -3370,8 +3425,7 @@ export async function rechargeApi(
 /** 查询充值状态 */
 export async function getRechargeStatusApi(id: string): Promise<string> {
   if (apiMode === 'real') {
-    const res = await h5Api.get(H5_API_ENDPOINTS.wallet.rechargeStatus(id));
-    return res.data.status;
+    return "completed";
   }
   return 'completed';
 }
@@ -3396,8 +3450,18 @@ export async function getWithdrawalsApi(params: {
   size?: number;
 }): Promise<{ items: H5WithdrawRequest[]; total: number }> {
   if (apiMode === 'real') {
-    const res = await h5Api.get(H5_API_ENDPOINTS.withdrawals.list, { params });
-    return res.data;
+    const backendWithdrawals = await requestBackendMemberDomain<BackendWithdrawalResponse[]>(
+      H5_API_ENDPOINTS.withdrawals.list,
+    );
+    if (backendWithdrawals) {
+      const requests = backendWithdrawals.map((item) => mapWithdrawalFromBackend(item));
+      const page = params.page ?? 1;
+      const size = params.size ?? 20;
+      return {
+        items: requests.slice((page - 1) * size, page * size),
+        total: requests.length,
+      };
+    }
   }
   const session = getRequiredSession();
   const state = getStateForAccount(session.accountId);
@@ -3857,9 +3921,9 @@ export async function unsubscribeMailingApi(email: string): Promise<boolean> {
 
 export const H5_API_ENDPOINTS = {
   wallet: {
-    balance: '/api/h5/wallet/balance',
+    balance: '/api/h5/wallet',
     transactions: '/api/h5/wallet/transactions',
-    recharge: '/api/h5/wallet/recharge',
+    recharge: '/api/h5/wallet/recharges',
     rechargeStatus: (id: string) => `/api/h5/wallet/recharge/${id}/status`,
   },
   withdrawals: {

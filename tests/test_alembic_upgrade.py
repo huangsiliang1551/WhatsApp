@@ -450,10 +450,24 @@ def test_alembic_upgrade_head_on_sqlite() -> None:
             assert "status" in task_package_instance_columns
             assert "order_id" in task_package_instance_item_columns
             assert "system_balance" in wallet_account_columns
+            assert "frozen_balance" in wallet_account_columns
+            assert "system_cash_balance" in wallet_account_columns
+            assert "system_bonus_balance" in wallet_account_columns
+            assert "system_cash_frozen" in wallet_account_columns
+            assert "system_bonus_frozen" in wallet_account_columns
             assert "transaction_type" in wallet_ledger_entry_columns
+            assert "cash_amount" in wallet_ledger_entry_columns
+            assert "bonus_amount" in wallet_ledger_entry_columns
+            assert "cash_balance_before" in wallet_ledger_entry_columns
+            assert "cash_balance_after" in wallet_ledger_entry_columns
+            assert "bonus_balance_before" in wallet_ledger_entry_columns
+            assert "bonus_balance_after" in wallet_ledger_entry_columns
             assert "wallet_account_id" in wallet_transfer_request_columns
             assert "credited_at" in wallet_recharge_order_columns
             assert "request_no" in withdrawal_request_columns
+            assert "cash_amount" in withdrawal_request_columns
+            assert "bonus_amount" in withdrawal_request_columns
+            assert "account_fingerprint" in withdrawal_request_columns
             assert "withdrawal_request_id" in withdrawal_audit_log_columns
             assert "fragment_key" in fragment_definition_columns
             assert "owned_count" in fragment_inventory_columns

@@ -6,9 +6,10 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.db.models import (
+    AppUser,
     InviteLink,
     InviteRecord,
     SystemSetting,
@@ -71,6 +72,71 @@ class InviteService:
                 for r in items
             ],
             "total": total_count,
+        }
+
+    def list_records(
+        self,
+        *,
+        account_id: str | None = None,
+        inviter_user_id: str | None = None,
+        invitee_user_id: str | None = None,
+        invite_type: str | None = None,
+        is_rewarded: bool | None = None,
+        page: int = 1,
+        size: int = 20,
+    ) -> dict[str, Any]:
+        inviter_user = aliased(AppUser)
+        invitee_user = aliased(AppUser)
+
+        query = (
+            select(
+                InviteRecord,
+                inviter_user.public_user_id.label("inviter_public_user_id"),
+                invitee_user.public_user_id.label("invitee_public_user_id"),
+            )
+            .join(inviter_user, inviter_user.id == InviteRecord.inviter_user_id)
+            .join(invitee_user, invitee_user.id == InviteRecord.invitee_user_id)
+        )
+
+        if account_id:
+            query = query.where(InviteRecord.account_id == account_id)
+        if inviter_user_id:
+            query = query.where(InviteRecord.inviter_user_id == inviter_user_id)
+        if invitee_user_id:
+            query = query.where(InviteRecord.invitee_user_id == invitee_user_id)
+        if invite_type:
+            query = query.where(InviteRecord.invite_type == invite_type)
+        if is_rewarded is not None:
+            query = query.where(InviteRecord.is_rewarded.is_(is_rewarded))
+
+        ordered_query = query.order_by(InviteRecord.created_at.desc())
+        total_count = len(self._session.execute(ordered_query).all())
+        offset = (page - 1) * size
+        rows = self._session.execute(ordered_query.offset(offset).limit(size)).all()
+
+        return {
+            "items": [
+                {
+                    "id": record.id,
+                    "account_id": record.account_id,
+                    "inviter_user_id": record.inviter_user_id,
+                    "inviter_public_user_id": inviter_public_user_id,
+                    "invitee_user_id": record.invitee_user_id,
+                    "invitee_public_user_id": invitee_public_user_id,
+                    "invite_type": record.invite_type,
+                    "reward_amount": record.reward_amount,
+                    "is_rewarded": record.is_rewarded,
+                    "reward_fund_type": "task_balance",
+                    "reward_transaction_type": f"invite_{record.invite_type}",
+                    "invitee_ip": record.invitee_ip,
+                    "invitee_device_id": record.invitee_device_id,
+                    "created_at": record.created_at.isoformat() if record.created_at else None,
+                }
+                for record, inviter_public_user_id, invitee_public_user_id in rows
+            ],
+            "total": total_count,
+            "page": page,
+            "size": size,
         }
 
     def on_register_callback(

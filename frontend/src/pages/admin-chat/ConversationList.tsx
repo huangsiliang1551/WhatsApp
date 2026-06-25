@@ -3,6 +3,7 @@ import { type JSX, memo, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Button, Checkbox, Dropdown, Popconfirm, Select, Tag, Tooltip, Typography } from "antd";
 import { CaretRightOutlined, CaretDownOutlined } from "@ant-design/icons";
 
+import { MemberIdLink } from "../../components/member/MemberIdLink";
 import type { ConversationSummary } from "../../services/api";
 import { getConversationPrimaryPreview, getConversationsMetadataBatch } from "../../services/api";
 import { prefetchConversation } from "./hooks";
@@ -39,6 +40,10 @@ const SENTIMENT_EMOJI: Record<string, string> = {
 
 function buildConvKey(conv: ConversationSummary): string {
   return `${conv.account_id}:${conv.conversation_id}`;
+}
+
+function getConversationPublicUserId(conv: ConversationSummary): string {
+  return (conv as ConversationSummary & { customer_public_user_id?: string | null }).customer_public_user_id ?? conv.customer_id;
 }
 
 function formatTime(v: string | null | undefined): string {
@@ -347,7 +352,12 @@ export const ConversationList = memo(function ConversationList({
               color: active ? modeColor : undefined,
             }}
           >
-            {c.customer_id}
+            <MemberIdLink
+              accountId={c.account_id}
+              userId={c.customer_id}
+              publicUserId={getConversationPublicUserId(c)}
+              label={getConversationPublicUserId(c)}
+            />
           </Typography.Text>
           {c.is_sleeping && (
             <span style={{ fontSize: 10, opacity: 0.6, flexShrink: 0 }} title="沉睡中">💤</span>

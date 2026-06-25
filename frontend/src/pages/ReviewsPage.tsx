@@ -4,6 +4,7 @@ import { withSorter } from "../utils/withSorter";
 
 import { PageShell, EmptyGuide } from "../components/PageShell";
 import { DangerButton, showError, showSuccess } from "../components/Feedback";
+import { MemberIdLink } from "../components/member/MemberIdLink";
 import { usePageData } from "../hooks/usePageData";
 import { useAppStore } from "../stores/appStore";
 import {
@@ -220,7 +221,21 @@ export function ReviewsPage(): JSX.Element {
 
   const taskColumns = [
     { title: "任务", dataIndex: "template_name", key: "template_name", ellipsis: true },
-    { title: "用户", dataIndex: "public_user_id", key: "public_user_id", width: 140, ellipsis: true },
+    {
+      title: "用户",
+      dataIndex: "public_user_id",
+      key: "public_user_id",
+      width: 140,
+      ellipsis: true,
+      render: (value: string, record: TaskInstance) => (
+        <MemberIdLink
+          accountId={record.account_id}
+          userId={record.user_id}
+          publicUserId={record.public_user_id}
+          label={value || record.public_user_id}
+        />
+      ),
+    },
     {
       title: "用户来源",
       dataIndex: "site_key",
@@ -274,7 +289,20 @@ export function ReviewsPage(): JSX.Element {
 
   const verificationColumns = [
     { title: "会员号", dataIndex: "memberNo", key: "memberNo", width: 120 },
-    { title: "用户", dataIndex: "publicUserId", key: "publicUserId", width: 160 },
+    {
+      title: "用户",
+      dataIndex: "publicUserId",
+      key: "publicUserId",
+      width: 160,
+      render: (value: string, record: PlatformMemberVerificationRequest) => (
+        <MemberIdLink
+          accountId={record.accountId}
+          userId={record.userId}
+          publicUserId={record.publicUserId}
+          label={value || record.publicUserId}
+        />
+      ),
+    },
     { title: "状态", dataIndex: "status", key: "status", width: 120, render: (value: string) => <Tag color="blue">{value}</Tag> },
     {
       title: "操作",
@@ -297,7 +325,20 @@ export function ReviewsPage(): JSX.Element {
 
   const bindingColumns = [
     { title: "会员号", dataIndex: "memberNo", key: "memberNo", width: 120 },
-    { title: "用户", dataIndex: "publicUserId", key: "publicUserId", width: 160 },
+    {
+      title: "用户",
+      dataIndex: "publicUserId",
+      key: "publicUserId",
+      width: 160,
+      render: (value: string, record: PlatformMemberWhatsAppBindingRequest) => (
+        <MemberIdLink
+          accountId={record.accountId}
+          userId={record.userId}
+          publicUserId={record.publicUserId}
+          label={value || record.publicUserId}
+        />
+      ),
+    },
     { title: "请求号码", dataIndex: "requestedPhoneNumber", key: "requestedPhoneNumber", width: 160, render: (value: string | null) => value || "-" },
     { title: "状态", dataIndex: "status", key: "status", width: 120, render: (value: string) => <Tag color="green">{value}</Tag> },
     {

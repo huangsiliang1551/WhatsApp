@@ -15,6 +15,13 @@ import { useWorkspaceState, useConversationDetail, useChatActions, clearProfileC
 
 function buildKey(a: string, c: string) { return `${a}:${c}`; }
 
+export function getConversationTabLabel(conv: {
+  customer_id: string;
+  customer_public_user_id?: string | null;
+}): string {
+  return conv.customer_public_user_id ?? conv.customer_id;
+}
+
 export function ChatPage(): JSX.Element {
   const ws = useWorkspaceState();
   const detail = useConversationDetail();
@@ -120,7 +127,7 @@ export function ChatPage(): JSX.Element {
     return () => { chatRealtime.disconnect(); };
   }, []);
 
-  const openTab = (conv: typeof selConv) => { if (!conv) return; const k = buildKey(conv.account_id, conv.conversation_id); setOpenTabs((p) => p.some((t) => t.key === k) ? p : [...p, { key: k, conversationId: conv.conversation_id, accountId: conv.account_id, label: conv.customer_id.slice(0, 12) }]); setSelKey(k); };
+  const openTab = (conv: typeof selConv) => { if (!conv) return; const k = buildKey(conv.account_id, conv.conversation_id); setOpenTabs((p) => p.some((t) => t.key === k) ? p : [...p, { key: k, conversationId: conv.conversation_id, accountId: conv.account_id, label: getConversationTabLabel(conv).slice(0, 12) }]); setSelKey(k); };
 
   const closeTab = (key: string) => { setOpenTabs((p) => { const i = p.findIndex((t) => t.key === key); if (i < 0) return p; const n = p.filter((t) => t.key !== key); if (selKey === key && n.length > 0) setSelKey(n[Math.min(i, n.length - 1)].key); else if (selKey === key) setSelKey(""); return n; }); setUnreadCounts((p) => { const c = { ...p }; delete c[key]; return c; }); };
 

@@ -18,20 +18,22 @@ import {
   WhatsAppOutlined,
 } from "@ant-design/icons";
 import {
-  getCustomerSummary,
   getCustomerTimeline,
   batchUpdateCustomerLifecycle,
   listCustomerConversations,
   getCustomerProfile,
 } from "../services/api";
+import { getMemberSummary } from "../services/memberApi";
 import { showSuccess, showError } from "../components/Feedback";
+import { usePermissions } from "../hooks/usePermissions";
+import { MemberIdLink } from "../components/member/MemberIdLink";
 import type {
-  CustomerSummaryResponse,
   TimelineEvent,
   PlatformUser,
   CustomerConversationBrief,
   CustomerProfile,
 } from "../services/api";
+import type { CustomerSummaryResponse } from "../types/member";
 
 // ── Constants ──
 
@@ -136,6 +138,8 @@ export function CustomerDetailDrawer({
   onClose,
   onViewConversations,
 }: CustomerDetailDrawerProps): JSX.Element {
+  const { can } = usePermissions();
+  const canViewFinance = can("customers.finance");
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [summary, setSummary] = useState<CustomerSummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -157,7 +161,7 @@ export function CustomerDetailDrawer({
     setSummaryLoading(true);
     setSummaryError(null);
     try {
-      const data = await getCustomerSummary(id, accId);
+      const data = await getMemberSummary(id, accId);
       setSummary(data);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "加载客户详情失败";
@@ -288,7 +292,14 @@ export function CustomerDetailDrawer({
           <UserOutlined style={{ marginRight: 4 }} />基本信息
         </Typography.Text>
         <Descriptions size="small" column={1} style={{ marginBottom: 12 }}>
-          <Descriptions.Item label="用户ID">{customer.public_user_id}</Descriptions.Item>
+          <Descriptions.Item label="用户ID">
+            <MemberIdLink
+              accountId={accountId}
+              userId={customer.id}
+              publicUserId={customer.public_user_id}
+              label={customer.public_user_id}
+            />
+          </Descriptions.Item>
           <Descriptions.Item label="名称">{customer.display_name || "-"}</Descriptions.Item>
           <Descriptions.Item label="语言">{customer.language || "-"}</Descriptions.Item>
           <Descriptions.Item label="注册时间">
@@ -394,23 +405,23 @@ export function CustomerDetailDrawer({
           />
           <Statistic
             title="余额"
-            value={wallet.balance}
+            value={canViewFinance ? wallet.balance : "需财务权限"}
             prefix="¥"
-            precision={2}
-            valueStyle={{ fontSize: 18, color: wallet.balance > 0 ? "#52c41a" : "#999" }}
+            precision={canViewFinance ? 2 : undefined}
+            valueStyle={{ fontSize: 18, color: canViewFinance && wallet.balance > 0 ? "#52c41a" : "#999" }}
           />
           <Statistic
             title="累计充值"
-            value={wallet.total_recharged}
+            value={canViewFinance ? wallet.total_recharged : "需财务权限"}
             prefix="¥"
-            precision={2}
+            precision={canViewFinance ? 2 : undefined}
             valueStyle={{ fontSize: 18, color: "#52c41a" }}
           />
           <Statistic
             title="累计提现"
-            value={wallet.total_withdrawn}
+            value={canViewFinance ? wallet.total_withdrawn : "需财务权限"}
             prefix="¥"
-            precision={2}
+            precision={canViewFinance ? 2 : undefined}
             valueStyle={{ fontSize: 18, color: "#ff4d4f" }}
           />
         </div>
@@ -748,6 +759,16 @@ export function CustomerDetailDrawer({
   const renderFinance = () => {
     if (!summary) return null;
     const { wallet } = summary;
+    if (!canViewFinance) {
+      return (
+        <Alert
+          type="info"
+          showIcon
+          message="需财务权限"
+          description="当前账号没有查看客户财务信息的权限。"
+        />
+      );
+    }
     return (
       <div style={{ padding: "0 4px" }}>
         {/* Balance */}
@@ -902,6 +923,28 @@ export function CustomerDetailDrawer({
         </div>
       );
     }
+    if (!canViewFinance) {
+      return (
+        <div style={{ padding: "0 4px" }}>
+          <Alert
+            type="info"
+            showIcon
+            message="需财务权限"
+            description="客户画像中的充值与提现统计已按权限隐藏。"
+            style={{ marginBottom: 12 }}
+          />
+          <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
+            馃搳 琛屼负鏁版嵁
+          </Typography.Text>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <Statistic title="绛惧埌娆℃暟" value={profile.behavior.sign_in_count} valueStyle={{ fontSize: 18 }} />
+            <Statistic title="杩炵画绛惧埌" value={profile.behavior.sign_in_streak} suffix="澶?" valueStyle={{ fontSize: 18 }} />
+            <Statistic title="鍏呭€兼鏁?" value={profile.behavior.recharge_count} valueStyle={{ fontSize: 18 }} />
+            <Statistic title="浼氳瘽娆℃暟" value={profile.behavior.conversation_count} valueStyle={{ fontSize: 18 }} />
+          </div>
+        </div>
+      );
+    }
     return (
       <div style={{ padding: "0 4px" }}>
         {/* 行为数据 */}
@@ -1005,13 +1048,18 @@ export function CustomerDetailDrawer({
       title={
         summary ? (
           <Space>
-            <span>{summary.customer.display_name || summary.customer.public_user_id}</span>
+            <MemberIdLink
+              accountId={accountId}
+              userId={summary.customer.id}
+              publicUserId={summary.customer.public_user_id}
+              label={summary.customer.public_user_id}
+            />
+            {summary.customer.display_name ? (
+              <Typography.Text>{summary.customer.display_name}</Typography.Text>
+            ) : null}
             <Tag color={LC_COLORS[summary.customer.lifecycle_status] ?? "default"} style={{ fontSize: 10 }}>
               {LC_LABELS[summary.customer.lifecycle_status] ?? summary.customer.lifecycle_status}
             </Tag>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {summary.customer.public_user_id}
-            </Typography.Text>
             {summary.customer.created_at && (
               <Typography.Text type="secondary" style={{ fontSize: 11 }}>
                 注册: {new Date(summary.customer.created_at).toLocaleDateString("zh-CN")}

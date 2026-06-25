@@ -1,6 +1,7 @@
 import { Button, Card, Col, Row, Space, Tag, Typography, message } from "antd";
 import { useCallback, type JSX } from "react";
 
+import { MemberIdLink } from "../components/member/MemberIdLink";
 import { PageShell, EmptyGuide } from "../components/PageShell";
 import { usePageData } from "../hooks/usePageData";
 import { api, listConversations, listRuntimeAgents, type ConversationSummary } from "../services/api";
@@ -34,6 +35,10 @@ function formatRelativeTime(value: string | null | undefined): string {
   return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
+function getConversationPublicUserId(conversation: ConversationSummary): string {
+  return (conversation as ConversationSummary & { customer_public_user_id?: string | null }).customer_public_user_id ?? conversation.customer_id;
+}
+
 type QueueSectionProps = {
   conversations: ConversationSummary[];
   onClaim: (conversation: ConversationSummary) => Promise<void>;
@@ -63,7 +68,14 @@ function QueueSection({ conversations, onClaim, onOpen, title, tone }: QueueSect
               <Card size="small" style={{ borderLeft: `3px solid ${borderColor}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                   <div style={{ minWidth: 0 }}>
-                    <Typography.Text strong>{conversation.customer_id.slice(0, 18)}</Typography.Text>
+                    <Typography.Text strong>
+                      <MemberIdLink
+                        accountId={conversation.account_id}
+                        userId={conversation.customer_id}
+                        publicUserId={getConversationPublicUserId(conversation)}
+                        label={getConversationPublicUserId(conversation)}
+                      />
+                    </Typography.Text>
                     <div style={{ marginTop: 4 }}>
                       <Tag color={MODE_COLORS[conversation.management_mode] ?? "default"} style={{ fontSize: 10 }}>
                         {MODE_LABELS[conversation.management_mode] ?? conversation.management_mode}

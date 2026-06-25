@@ -1,6 +1,9 @@
 import { type JSX, useEffect, useState } from "react";
 import { Button, Descriptions, Drawer, Spin, Tag, Typography } from "antd";
-import { getCustomerSummary, type CustomerSummaryResponse } from "../../services/api";
+import { getMemberSummary } from "../../services/memberApi";
+import { MemberIdLink } from "../../components/member/MemberIdLink";
+import { usePermissions } from "../../hooks/usePermissions";
+import type { CustomerSummaryResponse } from "../../types/member";
 
 const { Text } = Typography;
 
@@ -32,13 +35,15 @@ function fmtLifecycle(s: string): string {
 }
 
 export function CustomerProfileDrawer({ open, customerId, accountId, onClose, onOpenCustomerPage }: CustomerProfileDrawerProps): JSX.Element {
+  const { can } = usePermissions();
+  const canViewFinance = can("customers.finance");
   const [data, setData] = useState<CustomerSummaryResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !customerId) return;
     setLoading(true);
-    getCustomerSummary(customerId, accountId ?? undefined)
+    getMemberSummary(customerId, accountId ?? undefined)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
@@ -46,6 +51,70 @@ export function CustomerProfileDrawer({ open, customerId, accountId, onClose, on
 
   const verifStatus = data?.member_status?.verification?.status ?? null;
   const bindStatus = data?.member_status?.whatsapp_binding?.status ?? null;
+
+  if (open && data && !canViewFinance) {
+    return (
+      <Drawer
+        title="瀹㈡埛璧勬枡"
+        open={open}
+        onClose={onClose}
+        width={420}
+        destroyOnClose
+      >
+        <div>
+          <Descriptions column={1} size="small" bordered style={{ marginBottom: 12 }}>
+            <Descriptions.Item label="鍚嶇О">
+              {data.customer.display_name ?? "-"}
+            </Descriptions.Item>
+            <Descriptions.Item label="鐢ㄦ埛 ID">
+              <MemberIdLink
+                accountId={accountId}
+                userId={data.customer.id}
+                publicUserId={data.customer.public_user_id}
+                label={data.customer.public_user_id}
+              />
+            </Descriptions.Item>
+            <Descriptions.Item label="璇█">
+              {data.customer.language}
+            </Descriptions.Item>
+            <Descriptions.Item label="娉ㄥ唽鏃堕棿">
+              {fmt(data.customer.created_at)}
+            </Descriptions.Item>
+            <Descriptions.Item label="娉ㄥ唽IP">
+              {data.customer.registration_ip ?? "-"}
+            </Descriptions.Item>
+            <Descriptions.Item label="鐘舵€?">
+              <Tag color={getLifecycleColor(data.customer.lifecycle_status)}>
+                {fmtLifecycle(data.customer.lifecycle_status)}
+              </Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="浼氬憳楠岃瘉">
+              <Tag color={verifStatus === "approved" ? "success" : "default"}>
+                {verifStatus === "approved" ? "宸茶璇?" : verifStatus ?? "鏈璇?"}
+              </Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="WhatsApp缁戝畾">
+              <Tag color={bindStatus === "bound" || bindStatus === "approved" ? "success" : "default"}>
+                {bindStatus === "bound" || bindStatus === "approved" ? "宸茬粦瀹?" : bindStatus ?? "鏈粦瀹?"}
+              </Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="璐㈠姟淇℃伅">
+              需财务权限
+            </Descriptions.Item>
+            <Descriptions.Item label="浼氳瘽鏁?">
+              {data.conversations.total}锛堣繘琛屼腑 {data.conversations.open}锛?
+            </Descriptions.Item>
+            <Descriptions.Item label="宸ュ崟鏁?">
+              {data.tickets.total}锛堝鐞嗕腑 {data.tickets.open}锛?
+            </Descriptions.Item>
+          </Descriptions>
+          <Button block size="small" onClick={onOpenCustomerPage}>
+            鏌ョ湅瀹屾暣瀹㈡埛绠＄悊椤?
+          </Button>
+        </div>
+      </Drawer>
+    );
+  }
 
   return (
     <Drawer
@@ -66,7 +135,12 @@ export function CustomerProfileDrawer({ open, customerId, accountId, onClose, on
               {data.customer.display_name ?? "-"}
             </Descriptions.Item>
             <Descriptions.Item label="用户 ID">
-              {data.customer.public_user_id}
+              <MemberIdLink
+                accountId={accountId}
+                userId={data.customer.id}
+                publicUserId={data.customer.public_user_id}
+                label={data.customer.public_user_id}
+              />
             </Descriptions.Item>
             <Descriptions.Item label="语言">
               {data.customer.language}

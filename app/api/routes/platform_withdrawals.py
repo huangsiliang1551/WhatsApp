@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import get_platform_withdrawal_service, get_runtime_state_service, require_permission
 from app.core.auth import RequestActor
 from app.schemas.platform_withdrawals import (
+    PlatformWithdrawalDuplicateAccountsResponse,
     PlatformWithdrawalResponse,
     PlatformWithdrawalStatus,
     PlatformWithdrawalStatusUpdateRequest,
@@ -83,3 +84,26 @@ async def update_platform_withdrawal_status(
     )
     runtime_state.commit()
     return updated
+
+
+@router.get(
+    "/withdrawals/{withdrawal_id}/duplicate-accounts",
+    summary="Get duplicate withdrawal accounts",
+    description="Return overlapping members that used the same withdrawal account fingerprint.",
+    tags=["platform-withdrawals"],
+)
+async def get_platform_withdrawal_duplicate_accounts(
+    withdrawal_id: str,
+    withdrawal_service: PlatformWithdrawalService = Depends(get_platform_withdrawal_service),
+    actor: RequestActor = Depends(require_permission("withdrawal.duplicate_account.view")),
+) -> PlatformWithdrawalDuplicateAccountsResponse:
+    try:
+        current = await withdrawal_service.get_withdrawal(withdrawal_id=withdrawal_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    actor.require_account_access(current.account_id)
+    try:
+        return await withdrawal_service.get_duplicate_accounts(withdrawal_id=withdrawal_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

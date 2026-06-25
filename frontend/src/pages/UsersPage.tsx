@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type JSX } from "react";
 
 import { EmptyGuide, PageShell } from "../components/PageShell";
 import { DangerButton, showError, showSuccess } from "../components/Feedback";
+import { MemberIdLink } from "../components/member/MemberIdLink";
 import { usePageData } from "../hooks/usePageData";
 import {
   api,
@@ -229,6 +230,14 @@ export function UsersPage(): JSX.Element {
       ellipsis: true,
       sorter: (left: PlatformUser, right: PlatformUser) =>
         (left.public_user_id ?? "").localeCompare(right.public_user_id ?? ""),
+      render: (value: string, record: PlatformUser) => (
+        <MemberIdLink
+          accountId={record.account_id}
+          userId={record.id}
+          publicUserId={record.public_user_id}
+          label={value || record.public_user_id}
+        />
+      ),
     },
     {
       title: "显示名称",
@@ -387,7 +396,12 @@ export function UsersPage(): JSX.Element {
             用户详情
           </Typography.Title>
           <Space direction="vertical" size={6}>
-            <Typography.Text>用户：{selectedUser.public_user_id}</Typography.Text>
+            <MemberIdLink
+              accountId={selectedUser.account_id}
+              userId={selectedUser.id}
+              publicUserId={selectedUser.public_user_id}
+              label={selectedUser.public_user_id}
+            />
             <Typography.Text>账号：{selectedUser.account_id || "-"}</Typography.Text>
             <Typography.Text>
               会员认证状态：{selectedUserMemberStatus?.verificationRequests[0]?.status ?? "暂无"}

@@ -192,6 +192,9 @@ async def create_h5_withdrawal(
         return await commerce_service.create_withdrawal(
             context=context,
             amount=Decimal(str(payload.amount)),
+            withdraw_account_type=payload.withdraw_account_type,
+            bank_name=payload.bank_name,
+            account_no=payload.account_no,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

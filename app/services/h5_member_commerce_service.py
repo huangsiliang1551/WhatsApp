@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
+import hashlib
 import time
 from typing import Any
 from uuid import uuid4
@@ -10,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
+    AppUser,
     InviteCode,
     MemberNotification,
     MemberOrder,
@@ -43,6 +45,7 @@ from app.schemas.h5_member_commerce import (
 )
 from app.services.h5_member_auth_service import H5MemberContext
 from app.services.h5_member_fragment_service import H5MemberFragmentService
+from app.services.wallet_ledger_service import WalletLedgerService
 
 
 @dataclass(slots=True)
@@ -59,6 +62,7 @@ class H5MemberCommerceService:
     def __init__(self, *, session: Session) -> None:
         self._session = session
         self._cache: dict[str, _CacheEntry] = {}
+        self._wallet_ledger_service = WalletLedgerService(session=session)
 
     async def list_task_packages(self, *, context: H5MemberContext) -> list[H5TaskPackagePayload]:
         packages = self._session.execute(
@@ -213,7 +217,6 @@ class H5MemberCommerceService:
 
         now = utc_now()
         fragment_drop = None
-        wallet.system_balance = self._quantize(Decimal(wallet.system_balance) - item_price)
         order = MemberOrder(
             account_id=context.account_id,
             user_id=context.user.id,
@@ -233,23 +236,18 @@ class H5MemberCommerceService:
         item.order_id = order.id
         item.completed_at = now
         self._session.add(item)
-        self._session.add(wallet)
         self._invalidate_cache(f"orders:{context.account_id}:{context.user.id}")
-        self._session.add(
-            WalletLedgerEntry(
-                account_id=context.account_id,
-                wallet_account_id=wallet.id,
-                user_id=context.user.id,
-                ledger_type="system",
-                transaction_type="purchase",
-                direction="debit",
-                amount=item_price,
-                currency=item.currency,
-                status="paid",
-                note=f"{package.template.title} / {item.product_name}",
-                reference_type="member_order",
-                reference_id=order.id,
-            )
+        self._wallet_ledger_service.debit_system_balance(
+            wallet=wallet,
+            account_id=context.account_id,
+            user_id=context.user.id,
+            amount=item_price,
+            currency=item.currency,
+            transaction_type="purchase",
+            source_type="purchase",
+            note=f"{package.template.title} / {item.product_name}",
+            reference_type="member_order",
+            reference_id=order.id,
         )
 
         if all(entry.completed_at is not None for entry in package.items):
@@ -335,8 +333,6 @@ class H5MemberCommerceService:
         wallet = self._require_wallet(context=context, create_if_missing=True)
         now = utc_now()
         sanitized_amount = self._quantize(amount)
-        wallet.system_balance = self._quantize(Decimal(wallet.system_balance) + sanitized_amount)
-        self._session.add(wallet)
         recharge = WalletRechargeOrder(
             account_id=context.account_id,
             wallet_account_id=wallet.id,
@@ -353,21 +349,19 @@ class H5MemberCommerceService:
             recharge_order_id=recharge.id,
             recharged_at=now,
         )
-        self._session.add(
-            WalletLedgerEntry(
-                account_id=context.account_id,
-                wallet_account_id=wallet.id,
-                user_id=context.user.id,
-                ledger_type="system",
-                transaction_type="recharge",
-                direction="credit",
-                amount=sanitized_amount,
-                currency=wallet.currency,
-                status="paid",
-                note="Recharge credited",
-                reference_type="wallet_recharge_order",
-                reference_id=recharge.id,
-            )
+        self._wallet_ledger_service.credit_system_balance(
+            wallet=wallet,
+            account_id=context.account_id,
+            user_id=context.user.id,
+            amount=sanitized_amount,
+            currency=wallet.currency,
+            transaction_type="recharge",
+            source_type="user_recharge",
+            note="Recharge credited",
+            reference_type="wallet_recharge_order",
+            reference_id=recharge.id,
+            fund_type="cash",
+            is_real_recharge=True,
         )
         self._create_member_notification(
             context=context,
@@ -400,8 +394,6 @@ class H5MemberCommerceService:
             raise ValueError("Transfer amount must be greater than zero.")
         if Decimal(wallet.task_balance) < sanitized_amount:
             raise ValueError("Task balance is insufficient.")
-        wallet.task_balance = self._quantize(Decimal(wallet.task_balance) - sanitized_amount)
-        wallet.system_balance = self._quantize(Decimal(wallet.system_balance) + sanitized_amount)
         transfer = WalletTransferRequest(
             account_id=context.account_id,
             wallet_account_id=wallet.id,
@@ -410,40 +402,18 @@ class H5MemberCommerceService:
             currency=wallet.currency,
             status="paid",
         )
-        self._session.add(wallet)
         self._session.add(transfer)
         self._session.flush()
-        self._session.add(
-            WalletLedgerEntry(
-                account_id=context.account_id,
-                wallet_account_id=wallet.id,
-                user_id=context.user.id,
-                ledger_type="task",
-                transaction_type="task_to_system_transfer",
-                direction="debit",
-                amount=sanitized_amount,
-                currency=wallet.currency,
-                status="paid",
-                note="Transfer out from task balance",
-                reference_type="wallet_transfer_request",
-                reference_id=transfer.id,
-            )
-        )
-        self._session.add(
-            WalletLedgerEntry(
-                account_id=context.account_id,
-                wallet_account_id=wallet.id,
-                user_id=context.user.id,
-                ledger_type="system",
-                transaction_type="task_to_system_transfer",
-                direction="credit",
-                amount=sanitized_amount,
-                currency=wallet.currency,
-                status="paid",
-                note="Transfer in from task balance",
-                reference_type="wallet_transfer_request",
-                reference_id=transfer.id,
-            )
+        self._wallet_ledger_service.transfer_task_to_system_bonus(
+            wallet=wallet,
+            account_id=context.account_id,
+            user_id=context.user.id,
+            amount=sanitized_amount,
+            currency=wallet.currency,
+            note_out="Transfer out from task balance",
+            note_in="Transfer in from task balance",
+            reference_type="wallet_transfer_request",
+            reference_id=transfer.id,
         )
         self._create_member_notification(
             context=context,
@@ -469,6 +439,9 @@ class H5MemberCommerceService:
         *,
         context: H5MemberContext,
         amount: Decimal,
+        withdraw_account_type: str | None = None,
+        bank_name: str | None = None,
+        account_no: str | None = None,
     ) -> H5WithdrawalResponse:
         # TODO: BE2-023 — Add duplicate submission prevention. A user should not be able to
         # submit a new withdrawal request while there is an active pending withdrawal
@@ -487,7 +460,11 @@ class H5MemberCommerceService:
             raise ValueError("System balance is insufficient.")
 
         now = utc_now()
-        wallet.system_balance = self._quantize(system_balance - sanitized_amount)
+        account_meta = self._build_withdraw_account_metadata(
+            withdraw_account_type=withdraw_account_type,
+            bank_name=bank_name,
+            account_no=account_no,
+        )
         withdrawal = WithdrawalRequest(
             account_id=context.account_id,
             wallet_account_id=wallet.id,
@@ -495,12 +472,17 @@ class H5MemberCommerceService:
             member_profile_id=context.member_profile.id,
             request_no=f"WDR-{uuid4().hex[:12].upper()}",
             amount=sanitized_amount,
+            withdraw_account_type=account_meta["withdraw_account_type"],
+            bank_name=account_meta["bank_name"],
+            account_no_masked=account_meta["account_no_masked"],
+            account_fingerprint=account_meta["account_fingerprint"],
+            account_snapshot_json=account_meta["account_snapshot_json"],
             currency=wallet.currency,
             status="submitted",
         )
-        self._session.add(wallet)
         self._session.add(withdrawal)
         self._session.flush()
+        self._apply_duplicate_account_risk(withdrawal=withdrawal)
 
         audit_log = WithdrawalAuditLog(
             account_id=context.account_id,
@@ -510,22 +492,12 @@ class H5MemberCommerceService:
             actor_type="member",
             actor_id=context.user.id,
         )
-        ledger_entry = WalletLedgerEntry(
-            account_id=context.account_id,
-            wallet_account_id=wallet.id,
-            user_id=context.user.id,
-            ledger_type="system",
-            transaction_type="withdraw_request",
-            direction="debit",
-            amount=sanitized_amount,
-            currency=wallet.currency,
-            status="submitted",
+        ledger_entry = self._wallet_ledger_service.submit_withdrawal(
+            wallet=wallet,
+            withdrawal=withdrawal,
             note="Withdrawal request submitted",
-            reference_type="withdrawal_request",
-            reference_id=withdrawal.id,
         )
         self._session.add(audit_log)
-        self._session.add(ledger_entry)
         self._create_member_notification(
             context=context,
             category="wallet",
@@ -1116,6 +1088,8 @@ class H5MemberCommerceService:
             currency=entry.currency,
             status=entry.status,
             note=entry.note,
+            display_category=entry.display_category,
+            display_title=entry.display_title or entry.note,
             created_at=entry.created_at,
         )
 
@@ -1147,16 +1121,29 @@ class H5MemberCommerceService:
             histories.setdefault(log.withdrawal_request_id, []).append(log)
         return histories
 
-    @staticmethod
     def _serialize_withdrawal(
+        self,
         withdrawal: WithdrawalRequest,
         *,
         history: list[WithdrawalAuditLog],
     ) -> H5WithdrawalResponse:
+        duplicate_member_ids = self._get_duplicate_member_ids(withdrawal=withdrawal)
         return H5WithdrawalResponse(
             id=withdrawal.id,
             request_no=withdrawal.request_no,
             amount=float(withdrawal.amount),
+            cash_amount=float(withdrawal.cash_amount),
+            bonus_amount=float(withdrawal.bonus_amount),
+            actual_payout_amount=(
+                float(withdrawal.actual_payout_amount) if withdrawal.actual_payout_amount is not None else None
+            ),
+            withdraw_account_type=withdrawal.withdraw_account_type,
+            account_no_masked=withdrawal.account_no_masked,
+            account_fingerprint=withdrawal.account_fingerprint,
+            duplicate_account_count=withdrawal.duplicate_account_count or 0,
+            duplicate_member_ids=duplicate_member_ids,
+            risk_level=withdrawal.risk_level,
+            risk_flags=list(withdrawal.risk_flags or []),
             currency=withdrawal.currency,
             status=withdrawal.status,
             rejection_reason=withdrawal.rejection_reason,
@@ -1175,6 +1162,98 @@ class H5MemberCommerceService:
                 for entry in history
             ],
         )
+
+    @staticmethod
+    def _normalize_withdraw_account_type(withdraw_account_type: str | None) -> str | None:
+        value = (withdraw_account_type or "").strip().lower()
+        return value or None
+
+    @classmethod
+    def _build_withdraw_account_metadata(
+        cls,
+        *,
+        withdraw_account_type: str | None,
+        bank_name: str | None,
+        account_no: str | None,
+    ) -> dict[str, Any]:
+        account_type = cls._normalize_withdraw_account_type(withdraw_account_type)
+        normalized_account = (account_no or "").strip()
+        normalized_bank_name = (bank_name or "").strip() or None
+        if not normalized_account:
+            return {
+                "withdraw_account_type": account_type,
+                "bank_name": normalized_bank_name,
+                "account_no_masked": None,
+                "account_fingerprint": None,
+                "account_snapshot_json": None,
+            }
+
+        account_digits = "".join(ch for ch in normalized_account if ch.isalnum())
+        account_tail = account_digits[-4:] if account_digits else normalized_account[-4:]
+        masked_account = f"{'*' * max(len(account_digits) - 4, 0)}{account_tail}" if account_digits else "****"
+        if account_type == "bank":
+            fingerprint_raw = f"bank::{(normalized_bank_name or '').upper()}::{account_digits}"
+        elif account_type == "crypto":
+            fingerprint_raw = f"crypto::{normalized_account.lower()}"
+        elif account_type == "ewallet":
+            fingerprint_raw = f"ewallet::{normalized_account.lower()}"
+        else:
+            fingerprint_raw = f"other::{normalized_account.lower()}"
+
+        return {
+            "withdraw_account_type": account_type or "other",
+            "bank_name": normalized_bank_name,
+            "account_no_masked": masked_account,
+            "account_fingerprint": hashlib.sha256(fingerprint_raw.encode("utf-8")).hexdigest(),
+            "account_snapshot_json": {
+                "withdraw_account_type": account_type or "other",
+                "bank_name": normalized_bank_name,
+                "account_no_masked": masked_account,
+            },
+        }
+
+    def _apply_duplicate_account_risk(
+        self,
+        *,
+        withdrawal: WithdrawalRequest,
+    ) -> None:
+        duplicate_member_ids = self._get_duplicate_member_ids(withdrawal=withdrawal)
+        duplicate_count = len(duplicate_member_ids)
+        withdrawal.duplicate_account_count = duplicate_count
+        withdrawal.risk_level = self._derive_risk_level(duplicate_count)
+        withdrawal.risk_flags = ["duplicate_withdraw_account"] if duplicate_count > 0 else []
+        self._session.add(withdrawal)
+
+    def _get_duplicate_member_ids(
+        self,
+        *,
+        withdrawal: WithdrawalRequest,
+    ) -> list[str]:
+        if not withdrawal.account_fingerprint:
+            return []
+        rows = self._session.execute(
+            select(AppUser.public_user_id)
+            .select_from(WithdrawalRequest)
+            .join(AppUser, AppUser.id == WithdrawalRequest.user_id)
+            .where(
+                WithdrawalRequest.account_id == withdrawal.account_id,
+                WithdrawalRequest.account_fingerprint == withdrawal.account_fingerprint,
+                WithdrawalRequest.user_id != withdrawal.user_id,
+            )
+            .distinct()
+            .order_by(AppUser.public_user_id.asc())
+        ).all()
+        return [row[0] for row in rows if row[0]]
+
+    @staticmethod
+    def _derive_risk_level(duplicate_count: int) -> str | None:
+        if duplicate_count >= 5:
+            return "high"
+        if duplicate_count >= 2:
+            return "medium"
+        if duplicate_count >= 1:
+            return "low"
+        return None
 
     @staticmethod
     def _mask_member_no(member_no: str) -> str:

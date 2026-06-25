@@ -4,6 +4,7 @@ import { withSorter } from "../utils/withSorter";
 import { ClearOutlined, SendOutlined, TagOutlined } from "@ant-design/icons";
 
 import { DangerButton, showError, showSuccess } from "../components/Feedback";
+import { MemberIdLink } from "../components/member/MemberIdLink";
 import { EmptyGuide, PageShell } from "../components/PageShell";
 import { usePageData } from "../hooks/usePageData";
 import { usePermissions } from "../hooks/usePermissions";
@@ -54,6 +55,20 @@ function renderMemberTag(status: string | null | undefined): JSX.Element {
   return <Tag color={color}>{status}</Tag>;
 }
 
+export function getTicketMemberLinkProps(detail: Pick<SupportTicket, "account_id" | "public_user_id" | "user_id">): {
+  accountId: string | null;
+  userId: string;
+  publicUserId: string;
+  label: string;
+} {
+  return {
+    accountId: detail.account_id,
+    userId: detail.user_id ?? detail.public_user_id,
+    publicUserId: detail.public_user_id,
+    label: detail.public_user_id,
+  };
+}
+
 export function TicketsPage(): JSX.Element {
   const openCustomersPage = useAppStore((state) => state.openCustomersPage);
   const { can } = usePermissions();
@@ -85,7 +100,7 @@ export function TicketsPage(): JSX.Element {
     }
     const detail = selectedTicket;
     getPlatformUserMemberStatusSnapshot({
-      id: detail.public_user_id,
+      id: detail.user_id ?? detail.public_user_id,
       account_id: detail.account_id,
       public_user_id: detail.public_user_id,
     })
@@ -167,10 +182,12 @@ export function TicketsPage(): JSX.Element {
     }
   };
 
-  const handleOpenTicketCustomerPage = (detail: Pick<SupportTicket, "account_id" | "public_user_id">): void => {
+  const handleOpenTicketCustomerPage = (
+    detail: Pick<SupportTicket, "account_id" | "public_user_id" | "user_id">,
+  ): void => {
     openCustomersPage({
       account_id: detail.account_id,
-      selected_profile_id: detail.public_user_id,
+      selected_profile_id: detail.user_id ?? undefined,
       query: detail.public_user_id,
     });
   };
@@ -330,7 +347,7 @@ export function TicketsPage(): JSX.Element {
           <Space direction="vertical" size={4}>
             <Typography.Text>Member Verification Status: {selectedTicketMemberStatus?.verificationRequests[0]?.status ?? "N/A"}</Typography.Text>
             <Typography.Text>WhatsApp Binding Status: {selectedTicketMemberStatus?.bindingRequests[0]?.status ?? "N/A"}</Typography.Text>
-            <Typography.Text type="secondary">{selectedTicket.public_user_id} / {selectedTicket.account_id}</Typography.Text>
+            <MemberIdLink {...getTicketMemberLinkProps(selectedTicket)} />
             <Button size="small" onClick={() => handleOpenTicketCustomerPage(selectedTicket)}>客户页</Button>
           </Space>
         </div>

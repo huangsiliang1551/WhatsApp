@@ -525,6 +525,8 @@ function createWalletTransactionPayload(): Record<string, unknown> {
     currency: "USD",
     status: "paid",
     note: "Starter Package / Demo Product",
+    displayCategory: "wallet_debit",
+    displayTitle: "Starter Package / Demo Product",
     createdAt: "2026-06-11T00:10:00Z",
   };
 }
@@ -534,6 +536,9 @@ function createWithdrawalPayload(): Record<string, unknown> {
     id: "withdraw-1",
     requestNo: "WD-10001",
     amount: 120,
+    cashAmount: 100,
+    bonusAmount: 20,
+    actualPayoutAmount: 118.8,
     currency: "USD",
     status: "submitted",
     rejectionReason: null,
@@ -1142,9 +1147,14 @@ describe("H5 member auth service contract", () => {
     expect(orders[0]?.orderNo).toBe("ORD-10001");
     expect(wallet.systemBalance).toBe(220);
     expect(transactions[0]?.transactionType).toBe("purchase");
+    expect(transactions[0]?.displayCategory).toBe("wallet_debit");
+    expect(transactions[0]?.displayTitle).toBe("Starter Package / Demo Product");
     expect(withdrawals[0]).toMatchObject({
       id: "withdraw-1",
       amount: 120,
+      cashAmount: 100,
+      bonusAmount: 20,
+      actualPayoutAmount: 118.8,
       status: "submitted",
     });
     expect(leaderboard[0]?.accountIdMasked).toBe("382***56");

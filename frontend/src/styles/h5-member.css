@@ -2907,6 +2907,27 @@
   hyphens: auto;
 }
 
+.h5-withdraw-rejection-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: #991b1b;
+  overflow-wrap: anywhere;
+}
+
+.h5-withdraw-rejection-note strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.h5-withdraw-rejection-note span {
+  flex: 1 1 180px;
+  font-size: 13px;
+}
+
 .h5-withdraw-status-flow,
 .h5-withdraw-status-flow-step-group,
 .h5-withdraw-status-flow-step,

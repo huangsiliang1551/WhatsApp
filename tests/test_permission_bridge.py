@@ -504,6 +504,40 @@ def test_auth_permissions_endpoint_falls_back_to_builtin_agent_permissions(
     assert "sites" in payload["menus"]
 
 
+def test_auth_permissions_endpoint_exposes_invite_management_menu_for_task_rules_module(
+    strict_client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    agency_id = "agency-perm-invite-management"
+    agent_id = "agent-invite-management-reader"
+    with db_session_factory() as session:
+        _seed_agency_scope(session, agency_id=agency_id)
+        session.add(
+            RolePermission(
+                id="role-perm-agent-invite-management",
+                agency_id=agency_id,
+                role_name="agent",
+                permissions=["task_rules.view"],
+                created_by="seed",
+            )
+        )
+        session.commit()
+
+    response = strict_client.get(
+        "/api/auth/permissions",
+        headers={
+            "Authorization": f"Bearer {_issue_agent_token(user_id=agent_id, agency_id=agency_id, user_type='agent', role='agent')}",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "task_rules" in payload["menus"]
+    assert "invite_management" in payload["menus"]
+    assert "invite_relations" in payload["menus"]
+    assert "invite_rewards" in payload["menus"]
+
+
 def test_update_agency_permissions_rejects_unknown_permission_codes(
     strict_client: TestClient,
     db_session_factory: sessionmaker[Session],

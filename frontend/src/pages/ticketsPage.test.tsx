@@ -2,7 +2,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TicketsPage } from "./TicketsPage";
+import { TicketsPage, getTicketMemberLinkProps } from "./TicketsPage";
 
 const hoisted = vi.hoisted(() => ({
   storeState: {} as Record<string, unknown>,
@@ -41,11 +41,40 @@ vi.mock("../stores/appStore", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) => selector(hoisted.storeState),
 }));
 
+vi.mock("../components/member/MemberIdLink", async () => {
+  const React = await import("react");
+  return {
+    MemberIdLink: ({
+      accountId,
+      userId,
+      publicUserId,
+      label,
+    }: {
+      accountId?: string | null;
+      userId?: string | null;
+      publicUserId?: string | null;
+      label?: string | null;
+    }) =>
+      React.createElement(
+        "span",
+        null,
+        `member-link:${label ?? ""}:${userId ?? ""}:${publicUserId ?? ""}:${accountId ?? ""}`,
+      ),
+  };
+});
+
 vi.mock("antd", async () => {
   const React = await import("react");
   const Wrapper = ({ children }: { children?: React.ReactNode }) => React.createElement("div", null, children);
-  const Button = ({ children, onClick, loading }: { children?: React.ReactNode; onClick?: () => void; loading?: boolean }) =>
-    React.createElement("button", { onClick, disabled: loading }, children);
+  const Button = ({
+    children,
+    onClick,
+    loading,
+  }: {
+    children?: React.ReactNode;
+    onClick?: () => void;
+    loading?: boolean;
+  }) => React.createElement("button", { onClick, disabled: loading }, children);
   const Tag = ({ children }: { children?: React.ReactNode }) => React.createElement("span", null, children);
   const Typography = {
     Text: ({ children }: { children?: React.ReactNode }) => React.createElement("span", null, children),
@@ -56,6 +85,38 @@ vi.mock("antd", async () => {
   Input.TextArea = ({ ...props }: Record<string, unknown>) => React.createElement("textarea", props);
   const Select = Wrapper;
   const Modal = Wrapper;
+  const Table = ({
+    dataSource = [],
+    columns = [],
+  }: {
+    dataSource?: Array<Record<string, unknown>>;
+    columns?: Array<{
+      key?: string;
+      dataIndex?: string;
+      render?: (value: unknown, record: Record<string, unknown>, index: number) => React.ReactNode;
+    }>;
+  }) =>
+    React.createElement(
+      "div",
+      null,
+      dataSource.map((record, index) =>
+        React.createElement(
+          "div",
+          { key: String(record.id ?? index) },
+          columns.map((column, columnIndex) =>
+            React.createElement(
+              "div",
+              { key: `${String(column.key ?? column.dataIndex ?? columnIndex)}-${index}` },
+              column.render
+                ? column.render(column.dataIndex ? record[column.dataIndex] : undefined, record, index)
+                : column.dataIndex
+                  ? String(record[column.dataIndex] ?? "")
+                  : null,
+            ),
+          ),
+        ),
+      ),
+    );
   return {
     Badge: Wrapper,
     Button,
@@ -66,7 +127,7 @@ vi.mock("antd", async () => {
     Row: Wrapper,
     Select,
     Space: Wrapper,
-    Table: Wrapper,
+    Table,
     Tag,
     Typography,
   };
@@ -75,8 +136,15 @@ vi.mock("antd", async () => {
 vi.mock("../components/PageShell", async () => {
   const React = await import("react");
   return {
-    PageShell: ({ children, stats, actions }: { children?: React.ReactNode; stats?: React.ReactNode; actions?: React.ReactNode }) =>
-      React.createElement("div", null, stats, actions, children),
+    PageShell: ({
+      children,
+      stats,
+      actions,
+    }: {
+      children?: React.ReactNode;
+      stats?: React.ReactNode;
+      actions?: React.ReactNode;
+    }) => React.createElement("div", null, stats, actions, children),
     EmptyGuide: ({ title, description }: { title?: string; description?: string }) =>
       React.createElement("div", null, title, description),
   };
@@ -121,9 +189,58 @@ describe("TicketsPage", () => {
       openCustomersPage: vi.fn(),
     };
     hoisted.listSupportTicketsMock.mockReset().mockResolvedValue([
-      { id: "ticket-1", account_id: "acct-1", public_user_id: "pub-u1", subject: "登录问题", status: "open", category: "technical", priority: "high", content_preview: "无法登录系统", created_at: new Date(Date.now() - 3600000 * 30).toISOString(), updated_at: "2026-06-11T00:00:00Z" },
-      { id: "ticket-2", account_id: "acct-1", public_user_id: "pub-u2", subject: "订单问题", status: "in_progress", category: "order", priority: "medium", content_preview: "订单未收到", created_at: new Date(Date.now() - 3600000 * 18).toISOString(), updated_at: "2026-06-12T00:00:00Z" },
-      { id: "ticket-3", account_id: "acct-1", public_user_id: "pub-u3", subject: "退款申请", status: "resolved", category: "refund", priority: "low", content_preview: "申请退款", created_at: new Date(Date.now() - 7200000).toISOString(), updated_at: "2026-06-12T00:00:00Z" },
+      {
+        id: "ticket-1",
+        account_id: "acct-1",
+        user_id: "user-1",
+        public_user_id: "pub-u1",
+        subject: "Login issue",
+        status: "open",
+        category: "technical",
+        priority: "high",
+        content_preview: "Cannot log in",
+        created_at: new Date(Date.now() - 3600000 * 30).toISOString(),
+        updated_at: "2026-06-11T00:00:00Z",
+      },
+      {
+        id: "ticket-2",
+        account_id: "acct-1",
+        user_id: "user-2",
+        public_user_id: "pub-u2",
+        subject: "Order issue",
+        status: "in_progress",
+        category: "order",
+        priority: "medium",
+        content_preview: "Order not received",
+        created_at: new Date(Date.now() - 3600000 * 18).toISOString(),
+        updated_at: "2026-06-12T00:00:00Z",
+      },
+      {
+        id: "ticket-3",
+        account_id: "acct-1",
+        user_id: "user-3",
+        public_user_id: "pub-u3",
+        subject: "Refund request",
+        status: "resolved",
+        category: "refund",
+        priority: "low",
+        content_preview: "Requesting refund",
+        created_at: new Date(Date.now() - 7200000).toISOString(),
+        updated_at: "2026-06-12T00:00:00Z",
+      },
+      {
+        id: "ticket-4",
+        account_id: "acct-2",
+        user_id: null,
+        public_user_id: "pub-u4",
+        subject: "No user id ticket",
+        status: "open",
+        category: "technical",
+        priority: "low",
+        content_preview: "Missing linked user id",
+        created_at: new Date(Date.now() - 3600000).toISOString(),
+        updated_at: "2026-06-12T00:00:00Z",
+      },
     ]);
     hoisted.apiPostMock.mockReset().mockResolvedValue({});
     hoisted.batchUpdateTagsMock.mockReset().mockResolvedValue({});
@@ -160,15 +277,15 @@ describe("TicketsPage", () => {
 
   it("shows kanban view by default", async () => {
     await renderPage(createElement(TicketsPage));
-    expect(document.body.textContent).toContain("待处理");
-    expect(document.body.textContent).toContain("处理中");
-    expect(document.body.textContent).toContain("已解决");
+    expect(document.body.textContent).toContain("open");
+    expect(document.body.textContent).toContain("in_progress");
+    expect(document.body.textContent).toContain("resolved");
   });
 
   it("shows ticket subjects in kanban cards", async () => {
     await renderPage(createElement(TicketsPage));
-    expect(document.body.textContent).toContain("登录问题");
-    expect(document.body.textContent).toContain("订单问题");
+    expect(document.body.textContent).toContain("Login issue");
+    expect(document.body.textContent).toContain("Order issue");
   });
 
   it("has view mode toggle buttons", async () => {
@@ -181,5 +298,54 @@ describe("TicketsPage", () => {
     hoisted.listSupportTicketsMock.mockReset().mockResolvedValue([]);
     await renderPage(createElement(TicketsPage));
     expect(hoisted.listSupportTicketsMock).toHaveBeenCalled();
+  });
+
+  it("uses user id for member status lookup and customer navigation when available", async () => {
+    await renderPage(createElement(TicketsPage));
+
+    const detailButton = Array.from(document.querySelectorAll("button")).find(
+      (button) => button.textContent === "详情",
+    );
+    expect(detailButton).toBeTruthy();
+    await act(async () => {
+      detailButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(hoisted.getPlatformUserMemberStatusSnapshotMock).toHaveBeenCalledWith({
+      id: "user-1",
+      account_id: "acct-1",
+      public_user_id: "pub-u1",
+    });
+    expect(document.body.textContent).toContain("member-link:pub-u1:user-1:pub-u1:acct-1");
+
+    const customerButton = Array.from(document.querySelectorAll("button")).find(
+      (button) => button.textContent === "客户页",
+    );
+    expect(customerButton).toBeTruthy();
+    await act(async () => {
+      customerButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(hoisted.storeState.openCustomersPage).toHaveBeenCalledWith({
+      account_id: "acct-1",
+      selected_profile_id: "user-1",
+      query: "pub-u1",
+    });
+  });
+
+  it("builds member link props even without user id", async () => {
+    expect(
+      getTicketMemberLinkProps({
+        account_id: "acct-2",
+        user_id: null,
+        public_user_id: "pub-u4",
+      } as never),
+    ).toEqual({
+      accountId: "acct-2",
+      userId: "pub-u4",
+      publicUserId: "pub-u4",
+      label: "pub-u4",
+    });
   });
 });

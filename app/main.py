@@ -269,13 +269,10 @@ app.add_middleware(
 )
 
 # ── Static files: template preview (P2-03: paths from settings, not hard-coded) ──
-import os
-from pathlib import Path
-
-_static_dir = Path(settings.template_static_root).expanduser()
-_upload_dir = Path(settings.template_upload_root).expanduser()
-os.makedirs(_static_dir, exist_ok=True)
-os.makedirs(_upload_dir, exist_ok=True)
+_static_dir = settings.resolved_template_static_root
+_upload_dir = settings.resolved_template_upload_root
+_static_dir.mkdir(parents=True, exist_ok=True)
+_upload_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/templates", StaticFiles(directory=str(_static_dir)), name="templates")
 
 

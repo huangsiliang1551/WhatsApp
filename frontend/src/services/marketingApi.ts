@@ -69,6 +69,39 @@ export type InviteConfig = {
   same_device_limit: number;
 };
 
+export type InviteAdminRecord = {
+  id: string;
+  account_id: string;
+  inviter_user_id: string;
+  inviter_public_user_id: string;
+  invitee_user_id: string;
+  invitee_public_user_id: string;
+  invite_type: string;
+  reward_amount: string | number;
+  is_rewarded: boolean;
+  reward_fund_type: string;
+  reward_transaction_type: string;
+  invitee_ip: string | null;
+  invitee_device_id: string | null;
+  created_at: string | null;
+};
+
+export type InviteAdminListResponse = {
+  items: InviteAdminRecord[];
+  total: number;
+  page: number;
+  size: number;
+};
+
+type InviteConfigApiResponse = {
+  register_reward: number;
+  recharge_threshold: number;
+  recharge_reward: number;
+  max_count: number;
+  anti_fraud_same_ip_limit: number;
+  anti_fraud_same_device_limit: number;
+};
+
 export type MarketingStats = {
   push_triggered: number;
   push_claimed: number;
@@ -213,6 +246,31 @@ function saveMockConfig(key: string, data: unknown): void {
 
 let MOCK_SIGNIN_CONFIG: SignInConfig = loadMockConfig("mock_signin_config", DEFAULT_MOCK_SIGNIN_CONFIG);
 let MOCK_INVITE_CONFIG: InviteConfig = loadMockConfig("mock_invite_config", DEFAULT_MOCK_INVITE_CONFIG);
+
+export function normalizeInviteConfig(response: InviteConfigApiResponse | InviteConfig): InviteConfig {
+  if ("recharge_trigger_amount" in response) {
+    return response;
+  }
+  return {
+    register_reward: response.register_reward,
+    recharge_trigger_amount: response.recharge_threshold,
+    recharge_reward: response.recharge_reward,
+    max_invitees: response.max_count,
+    same_ip_limit: response.anti_fraud_same_ip_limit,
+    same_device_limit: response.anti_fraud_same_device_limit,
+  };
+}
+
+export function serializeInviteConfig(config: InviteConfig): InviteConfigApiResponse {
+  return {
+    register_reward: config.register_reward,
+    recharge_threshold: config.recharge_trigger_amount,
+    recharge_reward: config.recharge_reward,
+    max_count: config.max_invitees,
+    anti_fraud_same_ip_limit: config.same_ip_limit,
+    anti_fraud_same_device_limit: config.same_device_limit,
+  };
+}
 
 const MOCK_MARKETING_STATS: MarketingStats = {
   push_triggered: 500, push_claimed: 420, push_completed: 350, push_reward_total: 1750,
@@ -525,17 +583,46 @@ export async function updateSignInConfig(data: SignInConfig): Promise<void> {
 }
 
 export async function getInviteConfig(): Promise<InviteConfig> {
-  try { const r = await api.get<InviteConfig>("/api/invites/config"); return r.data; }
+  try {
+    const r = await api.get<InviteConfigApiResponse>("/api/invites/config");
+    return normalizeInviteConfig(r.data);
+  }
   catch { return MOCK_INVITE_CONFIG; }
 }
 
 export async function updateInviteConfig(data: InviteConfig): Promise<void> {
   try {
-    await api.put("/api/invites/config", data);
+    await api.put("/api/invites/config", serializeInviteConfig(data));
   } catch {
     MOCK_INVITE_CONFIG = { ...data };
     saveMockConfig("mock_invite_config", MOCK_INVITE_CONFIG);
   }
+}
+
+export async function listInviteRelations(params: {
+  account_id?: string;
+  inviter_user_id?: string;
+  invitee_user_id?: string;
+  invite_type?: string;
+  is_rewarded?: boolean;
+  page?: number;
+  size?: number;
+}): Promise<InviteAdminListResponse> {
+  const response = await api.get<InviteAdminListResponse>("/api/invites/relations", { params });
+  return response.data;
+}
+
+export async function listInviteRewards(params: {
+  account_id?: string;
+  inviter_user_id?: string;
+  invitee_user_id?: string;
+  invite_type?: string;
+  is_rewarded?: boolean;
+  page?: number;
+  size?: number;
+}): Promise<InviteAdminListResponse> {
+  const response = await api.get<InviteAdminListResponse>("/api/invites/rewards", { params });
+  return response.data;
 }
 
 // Stats

@@ -12,12 +12,11 @@ import structlog
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.settings import get_settings
 from app.db.models import H5Template
 
 logger = structlog.get_logger()
 
-UPLOAD_DIR = "/opt/whatsapp/uploads/templates"
-EXTRACT_DIR = "/opt/whatsapp/static/templates"
 MAX_SIZE = 100 * 1024 * 1024  # 100MB
 ALLOWED_EXTENSIONS = {".zip", ".rar"}
 
@@ -25,6 +24,9 @@ ALLOWED_EXTENSIONS = {".zip", ".rar"}
 class TemplatePackageService:
     def __init__(self, session: Session) -> None:
         self._session = session
+        settings = get_settings()
+        self._upload_root = settings.resolved_template_upload_root
+        self._extract_root = settings.resolved_template_static_root
 
     async def upload_package(self, template_id: str, file: UploadFile) -> dict:
         """Upload a template package (ZIP/RAR), extract and validate."""
@@ -55,10 +57,10 @@ class TemplatePackageService:
         if template is None:
             raise HTTPException(status_code=404, detail="Template not found")
 
-        upload_dir = Path(UPLOAD_DIR) / template_id
-        extract_dir = Path(EXTRACT_DIR) / template_id
-        temp_extract_dir = Path(EXTRACT_DIR) / f"{template_id}.tmp-{uuid4().hex}"
-        backup_extract_dir = Path(EXTRACT_DIR) / f"{template_id}.bak-{uuid4().hex}"
+        upload_dir = self._upload_root / template_id
+        extract_dir = self._extract_root / template_id
+        temp_extract_dir = self._extract_root / f"{template_id}.tmp-{uuid4().hex}"
+        backup_extract_dir = self._extract_root / f"{template_id}.bak-{uuid4().hex}"
         upload_dir.mkdir(parents=True, exist_ok=True)
         temp_extract_dir.mkdir(parents=True, exist_ok=True)
 
@@ -110,7 +112,7 @@ class TemplatePackageService:
 
     def get_template_manifest(self, template_id: str) -> dict:
         """Read and return the manifest.json for a template."""
-        manifest_path = Path(EXTRACT_DIR) / template_id / "manifest.json"
+        manifest_path = self._extract_root / template_id / "manifest.json"
         if not manifest_path.exists():
             raise HTTPException(status_code=404, detail="Manifest not found. Upload package first.")
         try:

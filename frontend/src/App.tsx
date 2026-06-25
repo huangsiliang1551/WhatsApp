@@ -131,6 +131,21 @@ const LazyEcommercePage = lazyPage(() =>
 const LazyTaskRulesPage = lazyPage(() =>
   import("./pages/TaskRulesPage").then((module) => ({ default: module.TaskRulesPage }))
 );
+const LazyInviteManagementPage = lazyPage(() =>
+  import("./pages/InviteManagementPage").then((module) => ({
+    default: module.InviteManagementPage,
+  }))
+);
+const LazyInviteRelationsPage = lazyPage(() =>
+  import("./pages/InviteRelationsPage").then((module) => ({
+    default: module.InviteRelationsPage,
+  }))
+);
+const LazyInviteRewardsPage = lazyPage(() =>
+  import("./pages/InviteRewardsPage").then((module) => ({
+    default: module.InviteRewardsPage,
+  }))
+);
 const LazyAudienceRulesPage = lazyPage(() =>
   import("./pages/AudienceRulesPage").then((module) => ({
     default: module.AudienceRulesPage,
@@ -467,6 +482,9 @@ function renderPage(activePage: AppPageId): JSX.Element {
   if (activePage === "media") return <LazyMediaLibraryPage />;
   if (activePage === "ecommerce") return <LazyEcommercePage />;
   if (activePage === "task_rules") return <LazyTaskRulesPage />;
+  if (activePage === "invite_management") return <LazyInviteManagementPage />;
+  if (activePage === "invite_relations") return <LazyInviteRelationsPage />;
+  if (activePage === "invite_rewards") return <LazyInviteRewardsPage />;
   if (activePage === "audience_rules") return <LazyAudienceRulesPage />;
   if (activePage === "tags") return <LazyTagsPage />;
   if (activePage === "tasks") return <LazyTasksPage />;

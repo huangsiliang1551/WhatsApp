@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -14,7 +14,13 @@ from app.db.models import (
     utc_now,
 )
 from app.schemas.h5_member_commerce import H5WithdrawalAuditLogResponse
-from app.schemas.platform_withdrawals import PlatformWithdrawalResponse, PlatformWithdrawalStatus
+from app.schemas.platform_withdrawals import (
+    PlatformWithdrawalDuplicateAccountsResponse,
+    PlatformWithdrawalDuplicateMemberResponse,
+    PlatformWithdrawalResponse,
+    PlatformWithdrawalStatus,
+)
+from app.services.wallet_ledger_service import WalletLedgerService
 
 TERMINAL_WITHDRAWAL_STATUSES = {"rejected", "paid"}
 # Status transition map: submitted → reviewing → approved → rejected/paid.
@@ -35,6 +41,7 @@ WITHDRAWAL_STATUS_TRANSITIONS: dict[str, set[str]] = {
 class PlatformWithdrawalService:
     def __init__(self, *, session: Session) -> None:
         self._session = session
+        self._wallet_ledger_service = WalletLedgerService(session=session)
 
     async def list_withdrawals(
         self,
@@ -65,6 +72,20 @@ class PlatformWithdrawalService:
         return self._serialize_withdrawal(
             withdrawal,
             history=self._load_withdrawal_histories([withdrawal.id]).get(withdrawal.id, []),
+        )
+
+    async def get_duplicate_accounts(
+        self,
+        *,
+        withdrawal_id: str,
+    ) -> PlatformWithdrawalDuplicateAccountsResponse:
+        withdrawal = self._require_withdrawal(withdrawal_id=withdrawal_id)
+        return PlatformWithdrawalDuplicateAccountsResponse(
+            withdrawal_id=withdrawal.id,
+            account_fingerprint=withdrawal.account_fingerprint,
+            account_no_masked=withdrawal.account_no_masked,
+            duplicate_account_count=withdrawal.duplicate_account_count or 0,
+            members=self._get_duplicate_members(withdrawal=withdrawal),
         )
 
     async def update_withdrawal_status(
@@ -98,6 +119,8 @@ class PlatformWithdrawalService:
         if status == "paid":
             withdrawal.paid_at = now
             withdrawal.rejection_reason = None
+            wallet = self._require_wallet_for_update(wallet_id=withdrawal.wallet_account_id)
+            self._wallet_ledger_service.settle_paid_withdrawal(wallet=wallet, withdrawal=withdrawal)
         elif status == "rejected":
             withdrawal.rejection_reason = rejection_reason.strip() if rejection_reason is not None else None
             self._refund_rejected_withdrawal(withdrawal=withdrawal, note=review_note)
@@ -138,26 +161,11 @@ class PlatformWithdrawalService:
         note: str,
     ) -> None:
         wallet = self._require_wallet_for_update(wallet_id=withdrawal.wallet_account_id)
-        refund_amount = Decimal(withdrawal.amount)
-        wallet.system_balance = self._quantize(Decimal(wallet.system_balance) + refund_amount)
-        self._session.add(wallet)
-        self._session.add(
-            WalletLedgerEntry(
-                account_id=withdrawal.account_id,
-                wallet_account_id=wallet.id,
-                user_id=withdrawal.user_id,
-                ledger_type="system",
-                transaction_type="withdraw_reject_refund",
-                direction="credit",
-                amount=refund_amount,
-                currency=withdrawal.currency,
-                status="paid",
-                note=note,
-                reference_type="withdrawal_request",
-                reference_id=withdrawal.id,
-            )
+        self._wallet_ledger_service.reject_withdrawal(
+            wallet=wallet,
+            withdrawal=withdrawal,
+            note=note,
         )
-
     def _create_member_notification(
         self,
         *,
@@ -276,20 +284,38 @@ class PlatformWithdrawalService:
             for item in withdrawals
         ]
 
-    @staticmethod
     def _serialize_withdrawal(
+        self,
         withdrawal: WithdrawalRequest,
         *,
         history: list[WithdrawalAuditLog],
     ) -> PlatformWithdrawalResponse:
+        public_user_id = None
+        user = self._session.get(AppUser, withdrawal.user_id)
+        if user is not None:
+            public_user_id = user.public_user_id
+        duplicate_member_ids = [item.public_user_id for item in self._get_duplicate_members(withdrawal=withdrawal)]
         return PlatformWithdrawalResponse(
             id=withdrawal.id,
             account_id=withdrawal.account_id,
             wallet_account_id=withdrawal.wallet_account_id,
             user_id=withdrawal.user_id,
+            public_user_id=public_user_id,
             member_profile_id=withdrawal.member_profile_id,
             request_no=withdrawal.request_no,
             amount=float(withdrawal.amount),
+            cash_amount=float(withdrawal.cash_amount),
+            bonus_amount=float(withdrawal.bonus_amount),
+            actual_payout_amount=(
+                float(withdrawal.actual_payout_amount) if withdrawal.actual_payout_amount is not None else None
+            ),
+            withdraw_account_type=withdrawal.withdraw_account_type,
+            account_no_masked=withdrawal.account_no_masked,
+            account_fingerprint=withdrawal.account_fingerprint,
+            duplicate_account_count=withdrawal.duplicate_account_count or 0,
+            duplicate_member_ids=duplicate_member_ids,
+            risk_level=withdrawal.risk_level,
+            risk_flags=list(withdrawal.risk_flags or []),
             currency=withdrawal.currency,
             status=withdrawal.status,
             rejection_reason=withdrawal.rejection_reason,
@@ -308,6 +334,43 @@ class PlatformWithdrawalService:
                 for item in history
             ],
         )
+
+    def _get_duplicate_members(
+        self,
+        *,
+        withdrawal: WithdrawalRequest,
+    ) -> list[PlatformWithdrawalDuplicateMemberResponse]:
+        if not withdrawal.account_fingerprint:
+            return []
+        rows = self._session.execute(
+            select(
+                WithdrawalRequest.account_id,
+                AppUser.public_user_id,
+                func.count(WithdrawalRequest.id),
+                func.sum(WithdrawalRequest.amount),
+                func.max(WithdrawalRequest.created_at),
+            )
+            .select_from(WithdrawalRequest)
+            .join(AppUser, AppUser.id == WithdrawalRequest.user_id)
+            .where(
+                WithdrawalRequest.account_id == withdrawal.account_id,
+                WithdrawalRequest.account_fingerprint == withdrawal.account_fingerprint,
+                WithdrawalRequest.user_id != withdrawal.user_id,
+            )
+            .group_by(WithdrawalRequest.account_id, AppUser.public_user_id)
+            .order_by(func.max(WithdrawalRequest.created_at).desc(), AppUser.public_user_id.asc())
+        ).all()
+        return [
+            PlatformWithdrawalDuplicateMemberResponse(
+                account_id=row[0],
+                public_user_id=row[1],
+                withdrawal_count=int(row[2] or 0),
+                total_withdraw_amount=float(row[3] or 0),
+                latest_withdrawal_at=row[4],
+            )
+            for row in rows
+            if row[1] and row[4] is not None
+        ]
 
     @staticmethod
     def _default_status_note(status: str) -> str:

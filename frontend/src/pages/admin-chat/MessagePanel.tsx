@@ -108,6 +108,15 @@ function fmtLangLabel(code: string): string {
   return map[code] ?? code;
 }
 
+export function getForwardConversationOptionLabel(c: {
+  customer_id: string;
+  customer_public_user_id?: string | null;
+  last_message_preview?: string | null;
+}): string {
+  const userLabel = c.customer_public_user_id ?? c.customer_id;
+  return `${userLabel.slice(0, 16)} | ${c.last_message_preview?.slice(0, 20) ?? "无预览"}`;
+}
+
 export interface MessagePanelHandle {
   insertText: (text: string) => void;
   /** ①: 搜索消息 */
@@ -1121,7 +1130,7 @@ export const MessagePanel = forwardRef<MessagePanelHandle, MessagePanelProps>(fu
                 .filter((c) => c.conversation_id !== selectedConversation?.conversation_id)
                 .map((c) => ({
                   value: c.conversation_id,
-                  label: `${c.customer_id.slice(0, 16)} | ${c.last_message_preview?.slice(0, 20) ?? "无预览"}`,
+                  label: getForwardConversationOptionLabel(c),
                 }))}
               filterOption={(inputValue, option) =>
                 (option?.label as string)?.toLowerCase().includes(inputValue.toLowerCase()) ?? false

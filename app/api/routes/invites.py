@@ -48,6 +48,58 @@ async def get_my_invite_records(
     return svc.get_my_records(user_id, page=page, size=size)
 
 
+@router.get("/relations")
+async def list_invite_relations(
+    account_id: str | None = Query(default=None),
+    inviter_user_id: str | None = Query(default=None),
+    invitee_user_id: str | None = Query(default=None),
+    invite_type: str | None = Query(default=None),
+    is_rewarded: bool | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    actor: RequestActor = Depends(require_permission("task_rules.view")),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    if account_id:
+        actor.require_account_access(account_id)
+    svc = InviteService(session)
+    return svc.list_records(
+        account_id=account_id,
+        inviter_user_id=inviter_user_id,
+        invitee_user_id=invitee_user_id,
+        invite_type=invite_type,
+        is_rewarded=is_rewarded,
+        page=page,
+        size=size,
+    )
+
+
+@router.get("/rewards")
+async def list_invite_rewards(
+    account_id: str | None = Query(default=None),
+    inviter_user_id: str | None = Query(default=None),
+    invitee_user_id: str | None = Query(default=None),
+    invite_type: str | None = Query(default=None),
+    is_rewarded: bool | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    actor: RequestActor = Depends(require_permission("task_rules.view")),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    if account_id:
+        actor.require_account_access(account_id)
+    svc = InviteService(session)
+    return svc.list_records(
+        account_id=account_id,
+        inviter_user_id=inviter_user_id,
+        invitee_user_id=invitee_user_id,
+        invite_type=invite_type,
+        is_rewarded=is_rewarded,
+        page=page,
+        size=size,
+    )
+
+
 @router.post("/register-callback")
 async def register_callback(
     payload: RegisterCallbackRequest,

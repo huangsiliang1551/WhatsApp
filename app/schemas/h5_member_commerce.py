@@ -63,6 +63,8 @@ class H5WalletTransactionResponse(H5MemberCamelModel):
     currency: str
     status: str
     note: str | None = None
+    display_category: str | None = None
+    display_title: str | None = None
     created_at: datetime
 
 
@@ -89,6 +91,9 @@ class H5WalletTransferRequest(H5MemberCamelModel):
 
 class H5WithdrawalCreateRequest(H5MemberCamelModel):
     amount: float = Field(gt=0)
+    withdraw_account_type: str | None = None
+    bank_name: str | None = None
+    account_no: str | None = None
 
 
 class H5WithdrawalAuditLogResponse(H5MemberCamelModel):
@@ -104,6 +109,16 @@ class H5WithdrawalResponse(H5MemberCamelModel):
     id: str
     request_no: str
     amount: float
+    cash_amount: float = 0
+    bonus_amount: float = 0
+    actual_payout_amount: float | None = None
+    withdraw_account_type: str | None = None
+    account_no_masked: str | None = None
+    account_fingerprint: str | None = None
+    duplicate_account_count: int = 0
+    duplicate_member_ids: list[str] = Field(default_factory=list)
+    risk_level: str | None = None
+    risk_flags: list[str] = Field(default_factory=list)
     currency: str
     status: str
     rejection_reason: str | None = None

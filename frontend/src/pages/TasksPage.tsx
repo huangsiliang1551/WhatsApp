@@ -5,6 +5,7 @@ import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons"
 
 import { PageShell } from "../components/PageShell";
 import { showError, showSuccess } from "../components/Feedback";
+import { MemberIdLink } from "../components/member/MemberIdLink";
 import { usePageData } from "../hooks/usePageData";
 import { useAppStore } from "../stores/appStore";
 import {
@@ -224,7 +225,20 @@ export function TasksPage(): JSX.Element {
   const instColumns = [
     { title: "实例 ID", dataIndex: "id", key: "id", width: 160, ellipsis: true, render: (value: string) => <Typography.Text copyable style={{ fontSize: 12 }}>{value.slice(0, 16)}...</Typography.Text> },
     { title: "模板", dataIndex: "template_name", key: "template_name", width: 120, ellipsis: true },
-    { title: "用户", dataIndex: "public_user_id", key: "public_user_id", width: 120 },
+    {
+      title: "用户",
+      dataIndex: "public_user_id",
+      key: "public_user_id",
+      width: 120,
+      render: (value: string, record: TaskInstance) => (
+        <MemberIdLink
+          accountId={record.account_id}
+          userId={record.user_id}
+          publicUserId={record.public_user_id}
+          label={value || record.public_user_id}
+        />
+      ),
+    },
     {
       title: "用户来源",
       dataIndex: "site_key",
@@ -255,7 +269,20 @@ export function TasksPage(): JSX.Element {
   const reviewColumns = [
     { title: "实例 ID", dataIndex: "id", key: "id", width: 160, ellipsis: true, render: (value: string) => <Typography.Text copyable style={{ fontSize: 12 }}>{value.slice(0, 16)}...</Typography.Text> },
     { title: "模板", dataIndex: "template_name", key: "template_name", width: 120, ellipsis: true },
-    { title: "用户", dataIndex: "public_user_id", key: "public_user_id", width: 120 },
+    {
+      title: "用户",
+      dataIndex: "public_user_id",
+      key: "public_user_id",
+      width: 120,
+      render: (value: string, record: TaskInstance) => (
+        <MemberIdLink
+          accountId={record.account_id}
+          userId={record.user_id}
+          publicUserId={record.public_user_id}
+          label={value || record.public_user_id}
+        />
+      ),
+    },
     { title: "提交时间", dataIndex: "submitted_at", key: "submitted_at", width: 140, render: (value: string | null) => value ? new Date(value).toLocaleDateString("zh-CN") : "-" },
     {
       title: "操作",

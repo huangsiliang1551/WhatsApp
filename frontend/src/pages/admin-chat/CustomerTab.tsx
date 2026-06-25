@@ -2,6 +2,7 @@ import { type JSX, useEffect, useMemo, useState } from "react";
 import { Alert, Button, Collapse, Descriptions, Tag, Typography, Spin } from "antd";
 import type { ConversationSummary, ConversationMessage } from "../../services/api";
 import { listMessages } from "../../services/api";
+import { MemberIdLink } from "../../components/member/MemberIdLink";
 import { useMemberStatus } from "../../hooks/useMemberStatus";
 import type { CustomerProfileSummary } from "../../types/operations";
 
@@ -66,7 +67,14 @@ export function CustomerTab({
         <div>
           <Descriptions column={1} size="small">
             <Descriptions.Item label="名称">{customerProfile.display_name ?? "-"}</Descriptions.Item>
-            <Descriptions.Item label="用户 ID">{customerProfile.public_user_id}</Descriptions.Item>
+            <Descriptions.Item label="用户 ID">
+              <MemberIdLink
+                accountId={conversation.account_id}
+                userId={customerProfile.id}
+                publicUserId={customerProfile.public_user_id}
+                label={customerProfile.public_user_id}
+              />
+            </Descriptions.Item>
             <Descriptions.Item label="语言">{customerProfile.language_code}</Descriptions.Item>
             <Descriptions.Item label="注册时间">{fmt(customerProfile.last_active_at)}</Descriptions.Item>
             <Descriptions.Item label="注册IP">{customerProfile.registration_ip ?? "-"}</Descriptions.Item>

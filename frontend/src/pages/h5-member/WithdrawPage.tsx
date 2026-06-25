@@ -64,6 +64,23 @@ function WithdrawStatusFlow({ status }: { status: H5WithdrawRequest["status"] })
   );
 }
 
+function getWithdrawalHistoryTitle(item: H5WithdrawRequest): string {
+  if (item.status === "rejected") return t("withdraw.historyRejectedTitle");
+  if (item.status === "paid") return t("withdraw.historyPaidTitle");
+  return t("withdraw.historySubmittedTitle");
+}
+
+function buildWithdrawalHistoryMeta(item: H5WithdrawRequest): string {
+  const parts = [
+    t("withdraw.historyCashAmount", { amount: formatMoney(item.cashAmount, item.currency) }),
+    t("withdraw.historyBonusAmount", { amount: formatMoney(item.bonusAmount, item.currency) }),
+  ];
+  if (item.actualPayoutAmount !== null) {
+    parts.push(t("withdraw.historyActualPayout", { amount: formatMoney(item.actualPayoutAmount, item.currency) }));
+  }
+  return parts.join(" · ");
+}
+
 type WithdrawPageProps = {
   effectiveWalletSummary: H5WalletSummary;
   withdrawAmount: string;
@@ -246,12 +263,19 @@ export function WithdrawPage({
             withdrawRequests.map((item) => (
               <div className="h5-withdraw-request-item" key={item.id}>
                 <CompactListRow
-                  meta={getWithdrawStatusLabel(item.status)}
+                  meta={buildWithdrawalHistoryMeta(item)}
                   sideNote={formatTimestamp(item.createdAt)}
-                  title={formatMoney(item.amount, item.currency)}
+                  title={getWithdrawalHistoryTitle(item)}
+                  subtitle={formatMoney(item.amount, item.currency)}
                   tone={item.status === "rejected" ? "danger" : item.status === "paid" ? "success" : "active"}
                   value={getWithdrawStatusLabel(item.status)}
                 />
+                {item.rejectionReason ? (
+                  <div className="h5-withdraw-rejection-note" role="note">
+                    <strong>{t("withdraw.historyRejectionReason")}</strong>
+                    <span>{item.rejectionReason}</span>
+                  </div>
+                ) : null}
                 <WithdrawStatusFlow status={item.status} />
               </div>
             ))

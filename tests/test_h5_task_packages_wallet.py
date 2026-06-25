@@ -526,6 +526,33 @@ def test_h5_wallet_transfer_and_recharge_update_balances_and_ledgers(
     assert home_response.status_code == 200, home_response.text
     assert home_response.json()["unreadMessageCount"] == 2
 
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(AppUser.public_user_id == auth_payload["member"]["publicUserId"]).one()
+        wallet = session.query(WalletAccount).filter(WalletAccount.user_id == user.id).one()
+        assert wallet.system_balance == Decimal("100")
+        assert wallet.system_cash_balance == Decimal("50")
+        assert wallet.system_bonus_balance == Decimal("50")
+        assert wallet.system_cash_frozen == Decimal("0")
+        assert wallet.system_bonus_frozen == Decimal("0")
+
+        recharge_ledger = session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.wallet_account_id == wallet.id,
+            WalletLedgerEntry.transaction_type == "recharge",
+        ).one()
+        assert recharge_ledger.cash_amount == Decimal("30")
+        assert recharge_ledger.bonus_amount == Decimal("0")
+        assert recharge_ledger.fund_type == "cash"
+        assert recharge_ledger.is_real_recharge is True
+
+        transfer_credit_ledger = session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.wallet_account_id == wallet.id,
+            WalletLedgerEntry.transaction_type == "task_to_system_transfer",
+            WalletLedgerEntry.ledger_type == "system",
+        ).one()
+        assert transfer_credit_ledger.cash_amount == Decimal("0")
+        assert transfer_credit_ledger.bonus_amount == Decimal("50")
+        assert transfer_credit_ledger.fund_type == "bonus"
+
 
 def test_h5_member_home_includes_wallet_and_task_package_counts(
     client: TestClient,

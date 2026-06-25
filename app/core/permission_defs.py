@@ -360,6 +360,11 @@ PERMISSION_DEFINITIONS: list[dict[str, Any]] = [
     {"code": "finance.view_recharge", "module": "finance", "label": "查看充值", "description": "查看充值记录", "super_admin_only": False},
     {"code": "finance.view_withdrawal", "module": "finance", "label": "查看提现", "description": "查看提现记录", "super_admin_only": False},
     {"code": "finance.approve_withdrawal", "module": "finance", "label": "审批提现", "description": "审批/拒绝提现申请", "super_admin_only": False},
+    {"code": "withdrawal.duplicate_account.view", "module": "withdrawal", "label": "查看重复提现账户", "description": "查看提现重复账户风险明细", "super_admin_only": False},
+    {"code": "withdrawal.account_sensitive.view", "module": "withdrawal", "label": "查看敏感提现账户", "description": "查看提现账户敏感信息", "super_admin_only": False},
+    {"code": "member.popover.view", "module": "member", "label": "查看会员浮层", "description": "允许在各列表中打开会员信息浮层", "super_admin_only": False},
+    {"code": "member.sensitive.view", "module": "member", "label": "查看会员敏感信息", "description": "查看会员敏感字段", "super_admin_only": False},
+    {"code": "member.finance_breakdown.view", "module": "member", "label": "查看会员财务拆分", "description": "查看会员余额与累计财务摘要", "super_admin_only": False},
 
     # ═══════════════════════════════════════════════════════════════════════════
     # 43. 财务设置 finance_settings (2)
@@ -571,6 +576,10 @@ MODULE_PAGE_MAP: dict[str, str] = {
     "audience_rules": "audience_rules",
 }
 
+MODULE_ADDITIONAL_PAGE_MAP: dict[str, tuple[str, ...]] = {
+    "task_rules": ("invite_management", "invite_relations", "invite_rewards"),
+}
+
 PERMISSION_REGISTRY: dict[str, dict[str, Any]] = {
     definition["code"]: definition for definition in PERMISSION_DEFINITIONS
 }
@@ -658,9 +667,13 @@ def get_page_for_permission(permission_code: str) -> str | None:
 def derive_menu_pages(permission_codes: Iterable[str]) -> list[str]:
     pages: set[str] = set()
     for permission_code in normalize_permission_codes(permission_codes, ignore_unknown=True):
-        page = get_page_for_permission(permission_code)
+        definition = get_permission_definition(permission_code)
+        module = definition["module"]
+        page = MODULE_PAGE_MAP.get(module)
         if page:
             pages.add(page)
+        for extra_page in MODULE_ADDITIONAL_PAGE_MAP.get(module, ()):
+            pages.add(extra_page)
     return sorted(pages)
 
 

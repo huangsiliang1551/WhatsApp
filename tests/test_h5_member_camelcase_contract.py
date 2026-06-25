@@ -115,6 +115,8 @@ def test_h5_member_commerce_emit_camelcase_fields(
     transaction = transactions_response.json()[0]
     assert "ledgerType" in transaction
     assert "transactionType" in transaction
+    assert "displayCategory" in transaction
+    assert "displayTitle" in transaction
     assert "createdAt" in transaction
 
 

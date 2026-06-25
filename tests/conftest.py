@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.api.deps import get_db_session, get_db_session_factory, get_meta_management_service
 from app.core.rate_limiter import reset_rate_limiter
@@ -29,11 +30,11 @@ from tests.fake_redis import FakeRedis
 
 @pytest.fixture
 def db_session_factory(tmp_path: Path) -> sessionmaker[Session]:
-    database_path = tmp_path / "app_test.db"
     engine = create_engine(
-        f"sqlite:///{database_path.as_posix()}",
+        "sqlite://",
         future=True,
         connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)

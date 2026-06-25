@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "rea
 
 import { EmptyGuide, PageShell } from "../components/PageShell";
 import { showError, showSuccess } from "../components/Feedback";
+import { MemberIdLink } from "../components/member/MemberIdLink";
 import { usePageData } from "../hooks/usePageData";
 import { usePermissions } from "../hooks/usePermissions";
 import {
@@ -22,6 +23,20 @@ import {
 } from "../services/operations";
 import { useAppStore } from "../stores/appStore";
 import { CustomerDetailDrawer } from "./CustomerDetailDrawer";
+
+export function getCustomerSummaryMemberLinkProps(summary: Pick<PlatformUser, "id" | "account_id" | "public_user_id">): {
+  accountId: string | null;
+  userId: string;
+  publicUserId: string;
+  label: string;
+} {
+  return {
+    accountId: summary.account_id,
+    userId: summary.id,
+    publicUserId: summary.public_user_id,
+    label: summary.public_user_id,
+  };
+}
 
 const LC_COLORS: Record<string, string> = {
   active: "#52c41a",
@@ -297,6 +312,14 @@ export function CustomersPage(): JSX.Element {
       width: 140,
       ellipsis: true,
       sorter: (left, right) => (left.public_user_id ?? "").localeCompare(right.public_user_id ?? ""),
+      render: (value: string, record: PlatformUser) => (
+        <MemberIdLink
+          accountId={record.account_id}
+          userId={record.id}
+          publicUserId={record.public_user_id}
+          label={value || record.public_user_id}
+        />
+      ),
     },
     {
       title: "名称",
@@ -586,9 +609,11 @@ export function CustomersPage(): JSX.Element {
           <Space direction="vertical" size={4}>
             <Typography.Text>会员认证状态：{detailMemberStatus?.verificationRequests[0]?.status ?? "暂无"}</Typography.Text>
             <Typography.Text>WhatsApp 绑定状态：{detailMemberStatus?.bindingRequests[0]?.status ?? "暂无"}</Typography.Text>
-            <Typography.Text type="secondary">
-              当前档案：{selectedCustomerSummary.public_user_id} / {selectedCustomerSummary.account_id ?? "-"}
-            </Typography.Text>
+            <span style={{ display: "flex", alignItems: "center", gap: 6, color: "#8c8c8c", fontSize: 14 }}>
+              <span>当前档案：</span>
+              <MemberIdLink {...getCustomerSummaryMemberLinkProps(selectedCustomerSummary)} />
+              <span>/ {selectedCustomerSummary.account_id ?? "-"}</span>
+            </span>
           </Space>
         </div>
       ) : null}

@@ -221,6 +221,7 @@ export type SupportTicketMessage = {
 export type SupportTicket = {
   id: string;
   account_id: string;
+  user_id?: string | null;
   public_user_id: string;
   category: SupportTicketCategory;
   status: SupportTicketStatus;
@@ -349,6 +350,7 @@ type StoredReviewDecision = {
 type StoredTicketRecord = {
   id: string;
   account_id: string;
+  user_id?: string | null;
   public_user_id: string;
   category: SupportTicketCategory;
   status: SupportTicketStatus;
@@ -838,6 +840,7 @@ function mapTicketSummary(record: StoredTicketRecord): SupportTicket {
   return {
     id: record.id,
     account_id: record.account_id,
+    user_id: record.user_id ?? null,
     public_user_id: record.public_user_id,
     category: record.category,
     status: normalizeSupportTicketStatus(record.status),
@@ -1315,6 +1318,7 @@ function mapBackendTicketSummary(ticket: Record<string, unknown>): SupportTicket
   return {
     id: String(ticket.id),
     account_id: accountId,
+    user_id: typeof ticket.user_id === "string" ? ticket.user_id : null,
     public_user_id: String(ticket.public_user_id),
     category: normalizeSupportTicketCategory(ticket.ticket_type),
     status: normalizeSupportTicketStatus(ticket.status),

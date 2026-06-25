@@ -12,18 +12,38 @@ from typing import Any
 from app.api.deps import get_db_session, require_permission
 from app.core.auth import RequestActor
 from app.db.models import (
+    AppUser,
     RechargeRecord,
     WithdrawalRecord,
     WithdrawalSetting,
     PaymentCallback,
     PaymentReconciliation,
 )
+from app.schemas.finance_bonus import BonusGrantCreateRequest, BonusGrantDecisionRequest
+from app.schemas.recharge_repair import RechargeRepairCreateRequest
+from app.schemas.wallet_ledger import ManualRechargeRequest
 from app.services.withdrawal_service import WithdrawalService
 from app.services.finance_report_service import FinanceReportService
 from app.services.payment_reconciliation_service import PaymentReconciliationService
 from app.services.channel_health_service import ChannelHealthService
+from app.services.bonus_grant_service import BonusGrantService
+from app.services.recharge_repair_service import RechargeRepairService
 
 router = APIRouter(prefix="/api/finance", tags=["finance"])
+
+
+def _resolve_effective_finance_account_id(
+    actor: RequestActor,
+    requested_account_id: str | None,
+) -> str | None:
+    if actor.is_super_admin:
+        return requested_account_id
+    if requested_account_id is not None:
+        actor.require_account_access(requested_account_id)
+        return requested_account_id
+    if len(actor.account_ids) == 1:
+        return actor.account_ids[0]
+    return None
 
 
 class ApproveRequest(BaseModel):
@@ -45,13 +65,6 @@ class BatchRejectRequest(BaseModel):
 
 class UnfreezeRequest(BaseModel):
     pass
-
-
-class ManualRechargeRequest(BaseModel):
-    user_id: str
-    amount: float
-    agency_id: str | None = None
-    site_id: str | None = None
 
 
 class WithdrawalSettingsUpdate(BaseModel):
@@ -84,20 +97,28 @@ def list_recharge_records(
     agency_id: str | None = None,
     site_id: str | None = None,
     status: str | None = None,
+    source_type: str | None = None,
+    fund_scope: str | None = None,
+    include_bonus: bool = True,
     sort_field: str | None = Query(None, description="排序字段名，如 amount, created_at"),
     sort_order: str | None = Query(None, description="排序方向：asc 或 desc"),
 ) -> list[dict]:
     svc = FinanceReportService(session)
     filters = {}
-    effective_agency = agency_id if actor.is_super_admin else actor.agency_id
-    if effective_agency:
-        filters["agency_id"] = effective_agency
+    effective_account_id = _resolve_effective_finance_account_id(actor, agency_id)
+    if effective_account_id:
+        filters["agency_id"] = effective_account_id
     elif not actor.is_super_admin:
         return []
     if site_id:
         filters["site_id"] = site_id
     if status:
         filters["status"] = status
+    if source_type:
+        filters["source_type"] = source_type
+    if fund_scope:
+        filters["fund_scope"] = fund_scope
+    filters["include_bonus"] = include_bonus
     return svc.get_recharge_report(filters or None, sort_field=sort_field, sort_order=sort_order)
 
 
@@ -110,21 +131,59 @@ def list_withdrawal_records(
     agency_id: str | None = None,
     site_id: str | None = None,
     status: str | None = None,
+    fund_scope: str | None = None,
+    include_bonus: bool = True,
     sort_field: str | None = Query(None, description="排序字段名，如 amount, created_at"),
     sort_order: str | None = Query(None, description="排序方向：asc 或 desc"),
 ) -> list[dict]:
     svc = FinanceReportService(session)
     filters = {}
-    effective_agency = agency_id if actor.is_super_admin else actor.agency_id
-    if effective_agency:
-        filters["agency_id"] = effective_agency
+    effective_account_id = _resolve_effective_finance_account_id(actor, agency_id)
+    if effective_account_id:
+        filters["agency_id"] = effective_account_id
     elif not actor.is_super_admin:
         return []
     if site_id:
         filters["site_id"] = site_id
     if status:
         filters["status"] = status
+    if fund_scope:
+        filters["fund_scope"] = fund_scope
+    filters["include_bonus"] = include_bonus
     return svc.get_withdrawal_report(filters or None, sort_field=sort_field, sort_order=sort_order)
+
+
+@router.get("/wallet-ledgers")
+def list_wallet_ledgers(
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("reports.finance")),
+    agency_id: str | None = None,
+    user_id: str | None = None,
+    status: str | None = None,
+    source_type: str | None = None,
+    transaction_type: str | None = None,
+    fund_scope: str | None = None,
+    sort_field: str | None = Query(None, description="排序字段名，如 amount, created_at"),
+    sort_order: str | None = Query(None, description="排序方向：asc 或 desc"),
+) -> list[dict]:
+    svc = FinanceReportService(session)
+    filters = {}
+    effective_account_id = _resolve_effective_finance_account_id(actor, agency_id)
+    if effective_account_id:
+        filters["agency_id"] = effective_account_id
+    elif not actor.is_super_admin:
+        return []
+    if user_id:
+        filters["user_id"] = user_id
+    if status:
+        filters["status"] = status
+    if source_type:
+        filters["source_type"] = source_type
+    if transaction_type:
+        filters["transaction_type"] = transaction_type
+    if fund_scope:
+        filters["fund_scope"] = fund_scope
+    return svc.get_wallet_ledger_report(filters or None, sort_field=sort_field, sort_order=sort_order)
 
 
 @router.post("/withdrawals/{record_id}/approve")
@@ -201,8 +260,9 @@ def unfreeze_withdrawal(
 def get_withdrawal_settings(
     agency_id: str,
     session: Session = Depends(get_db_session),
-    _actor: RequestActor = Depends(require_permission("finance.view_withdrawal")),
+    actor: RequestActor = Depends(require_permission("finance.view_withdrawal")),
 ) -> dict:
+    actor.require_account_access(agency_id)
     svc = WithdrawalService(session)
     settings = svc.get_settings(agency_id)
     if settings is None:
@@ -215,8 +275,9 @@ def update_withdrawal_settings(
     agency_id: str,
     data: WithdrawalSettingsUpdate,
     session: Session = Depends(get_db_session),
-    _actor: RequestActor = Depends(require_permission("finance.approve_withdrawal")),
+    actor: RequestActor = Depends(require_permission("finance.approve_withdrawal")),
 ) -> dict:
+    actor.require_account_access(agency_id)
     svc = WithdrawalService(session)
     return svc.upsert_settings(agency_id, data.model_dump(exclude_none=True))
 
@@ -230,15 +291,26 @@ def recharge_report(
     agency_id: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    source_type: str | None = None,
+    fund_scope: str | None = None,
+    include_bonus: bool = True,
 ) -> list[dict]:
     svc = FinanceReportService(session)
     filters = {}
-    if agency_id:
-        filters["agency_id"] = agency_id
+    effective_account_id = _resolve_effective_finance_account_id(actor, agency_id)
+    if effective_account_id:
+        filters["agency_id"] = effective_account_id
+    elif not actor.is_super_admin:
+        return []
     if date_from:
         filters["date_from"] = datetime.fromisoformat(date_from)
     if date_to:
         filters["date_to"] = datetime.fromisoformat(date_to)
+    if source_type:
+        filters["source_type"] = source_type
+    if fund_scope:
+        filters["fund_scope"] = fund_scope
+    filters["include_bonus"] = include_bonus
     return svc.get_recharge_report(filters or None)
 
 
@@ -249,15 +321,23 @@ def withdrawal_report(
     agency_id: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    fund_scope: str | None = None,
+    include_bonus: bool = True,
 ) -> list[dict]:
     svc = FinanceReportService(session)
     filters = {}
-    if agency_id:
-        filters["agency_id"] = agency_id
+    effective_account_id = _resolve_effective_finance_account_id(actor, agency_id)
+    if effective_account_id:
+        filters["agency_id"] = effective_account_id
+    elif not actor.is_super_admin:
+        return []
     if date_from:
         filters["date_from"] = datetime.fromisoformat(date_from)
     if date_to:
         filters["date_to"] = datetime.fromisoformat(date_to)
+    if fund_scope:
+        filters["fund_scope"] = fund_scope
+    filters["include_bonus"] = include_bonus
     return svc.get_withdrawal_report(filters or None)
 
 
@@ -266,14 +346,15 @@ def finance_summary(
     session: Session = Depends(get_db_session),
     actor: RequestActor = Depends(require_permission("reports.finance")),
     agency_id: str | None = None,
+    include_bonus: bool = True,
 ) -> dict:
     svc = FinanceReportService(session)
-    effective_agency = agency_id if actor.is_super_admin else actor.agency_id
-    if effective_agency:
-        return svc.get_finance_summary({"agency_id": effective_agency})
+    effective_account_id = _resolve_effective_finance_account_id(actor, agency_id)
+    if effective_account_id:
+        return svc.get_finance_summary({"agency_id": effective_account_id, "include_bonus": include_bonus})
     if not actor.is_super_admin:
         return {"recharge_amount": 0, "recharge_count": 0, "withdrawal_amount": 0, "withdrawal_fee": 0, "withdrawal_count": 0, "net_recharge": 0}
-    return svc.get_finance_summary()
+    return svc.get_finance_summary({"include_bonus": include_bonus})
 
 
 # ── Anomaly Alerts ──
@@ -284,8 +365,10 @@ def anomaly_alerts(
     actor: RequestActor = Depends(require_permission("reports.finance")),
 ) -> list[dict]:
     svc = FinanceReportService(session)
-    agency_id = None if actor.is_super_admin else actor.agency_id
-    return svc.get_anomaly_alerts(agency_id=agency_id)
+    account_id = None if actor.is_super_admin else _resolve_effective_finance_account_id(actor, None)
+    if account_id is None and not actor.is_super_admin:
+        return []
+    return svc.get_anomaly_alerts(agency_id=account_id)
 
 
 # ── Manual Recharge ──
@@ -297,15 +380,221 @@ def manual_recharge(
     _actor: RequestActor = Depends(require_permission("finance.edit_channels")),
 ) -> dict:
     svc = FinanceReportService(session)
-    return svc.manual_recharge(
-        user_id=data.user_id,
-        amount=Decimal(str(data.amount)),
-        agency_id=data.agency_id,
-        site_id=data.site_id,
-    )
+    try:
+        return svc.manual_recharge(
+            user_id=data.user_id,
+            amount=Decimal(str(data.amount)),
+            agency_id=data.agency_id,
+            site_id=data.site_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # ── Reconciliation ──
+
+def _resolve_public_user_id(session: Session, user_id: str | None) -> str | None:
+    if not user_id:
+        return None
+    return session.execute(
+        select(AppUser.public_user_id).where(AppUser.id == user_id)
+    ).scalar_one_or_none()
+
+
+def _serialize_bonus_grant(session: Session, record: Any) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "account_id": record.account_id,
+        "grant_no": record.grant_no,
+        "user_id": record.user_id,
+        "public_user_id": _resolve_public_user_id(session, record.user_id),
+        "amount": float(record.amount),
+        "currency": record.currency,
+        "source_type": record.source_type,
+        "reason": record.reason,
+        "remark": record.remark,
+        "status": record.status,
+        "operator_id": record.operator_id,
+        "approved_by": record.approved_by,
+        "approved_at": record.approved_at.isoformat() if record.approved_at else None,
+        "credited_at": record.credited_at.isoformat() if record.credited_at else None,
+        "rejected_at": record.rejected_at.isoformat() if record.rejected_at else None,
+        "ledger_id": record.ledger_id,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+    }
+
+
+def _serialize_recharge_repair(session: Session, record: Any) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "account_id": record.account_id,
+        "repair_no": record.repair_no,
+        "user_id": record.user_id,
+        "public_user_id": _resolve_public_user_id(session, record.user_id),
+        "amount": float(record.amount),
+        "currency": record.currency,
+        "repair_type": record.repair_type,
+        "reason": record.reason,
+        "remark": record.remark,
+        "status": record.status,
+        "channel_id": record.channel_id,
+        "platform_order_no": record.platform_order_no,
+        "channel_order_no": record.channel_order_no,
+        "operator_id": record.operator_id,
+        "approved_by": record.approved_by,
+        "approved_at": record.approved_at.isoformat() if record.approved_at else None,
+        "credited_at": record.credited_at.isoformat() if record.credited_at else None,
+        "rejected_at": record.rejected_at.isoformat() if record.rejected_at else None,
+        "recharge_record_id": record.recharge_record_id,
+        "ledger_id": record.ledger_id,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+    }
+
+
+@router.get("/bonus-grants")
+def list_bonus_grants(
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("reports.finance")),
+    account_id: str | None = None,
+) -> list[dict[str, Any]]:
+    svc = BonusGrantService(session)
+    effective_account_id = _resolve_effective_finance_account_id(actor, account_id)
+    if effective_account_id is None and not actor.is_super_admin:
+        return []
+    records = svc.list_grants(account_id=effective_account_id)
+    return [_serialize_bonus_grant(session, item) for item in records if actor.can_access_account(item.account_id)]
+
+
+@router.post("/bonus-grants")
+def create_bonus_grant(
+    data: BonusGrantCreateRequest,
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("finance.edit_channels")),
+) -> dict[str, Any]:
+    actor.require_account_access(data.account_id)
+    svc = BonusGrantService(session)
+    try:
+        record = svc.create_grant(
+            account_id=data.account_id,
+            user_id=data.user_id,
+            amount=Decimal(str(data.amount)),
+            currency=data.currency,
+            reason=data.reason,
+            remark=data.remark,
+            source_type=data.source_type,
+            operator_id=actor.actor_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _serialize_bonus_grant(session, record)
+
+
+@router.post("/bonus-grants/{grant_id}/approve")
+def approve_bonus_grant(
+    grant_id: str,
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("finance.edit_channels")),
+) -> dict[str, Any]:
+    svc = BonusGrantService(session)
+    try:
+        record = svc.approve_grant(grant_id=grant_id, actor_id=actor.actor_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _serialize_bonus_grant(session, record)
+
+
+@router.post("/bonus-grants/{grant_id}/reject")
+def reject_bonus_grant(
+    grant_id: str,
+    data: BonusGrantDecisionRequest,
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("finance.edit_channels")),
+) -> dict[str, Any]:
+    svc = BonusGrantService(session)
+    try:
+        record = svc.reject_grant(grant_id=grant_id, actor_id=actor.actor_id, reason=data.reason)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _serialize_bonus_grant(session, record)
+
+
+@router.get("/recharge-repairs")
+def list_recharge_repairs(
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("reports.finance")),
+    account_id: str | None = None,
+) -> list[dict[str, Any]]:
+    svc = RechargeRepairService(session)
+    effective_account_id = _resolve_effective_finance_account_id(actor, account_id)
+    if effective_account_id is None and not actor.is_super_admin:
+        return []
+    records = svc.list_repairs(account_id=effective_account_id)
+    return [_serialize_recharge_repair(session, item) for item in records if actor.can_access_account(item.account_id)]
+
+
+@router.post("/recharge-repairs")
+def create_recharge_repair(
+    data: RechargeRepairCreateRequest,
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("finance.edit_channels")),
+) -> dict[str, Any]:
+    actor.require_account_access(data.account_id)
+    svc = RechargeRepairService(session)
+    try:
+        record = svc.create_repair(
+            account_id=data.account_id,
+            user_id=data.user_id,
+            amount=Decimal(str(data.amount)),
+            currency=data.currency,
+            repair_type=data.repair_type,
+            reason=data.reason,
+            remark=data.remark,
+            channel_id=data.channel_id,
+            platform_order_no=data.platform_order_no,
+            channel_order_no=data.channel_order_no,
+            operator_id=actor.actor_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _serialize_recharge_repair(session, record)
+
+
+@router.post("/recharge-repairs/{repair_id}/approve")
+def approve_recharge_repair(
+    repair_id: str,
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("finance.edit_channels")),
+) -> dict[str, Any]:
+    svc = RechargeRepairService(session)
+    try:
+        record = svc.approve_repair(repair_id=repair_id, actor_id=actor.actor_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _serialize_recharge_repair(session, record)
+
+
+@router.post("/recharge-repairs/{repair_id}/reject")
+def reject_recharge_repair(
+    repair_id: str,
+    data: BonusGrantDecisionRequest,
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("finance.edit_channels")),
+) -> dict[str, Any]:
+    svc = RechargeRepairService(session)
+    try:
+        record = svc.reject_repair(repair_id=repair_id, actor_id=actor.actor_id, reason=data.reason)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _serialize_recharge_repair(session, record)
+
 
 @router.post("/reconcile")
 def trigger_reconcile(

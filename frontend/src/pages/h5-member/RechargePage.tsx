@@ -286,7 +286,7 @@ export function RechargePage({
                 key={item.id}
                 meta={formatMoney(item.amount, item.currency)}
                 sideNote={formatTimestamp(item.createdAt)}
-                title={item.note || t("recharge.historyDefaultNote")}
+                title={item.displayTitle || item.note || t("recharge.historyDefaultNote")}
                 tone={item.status === "failed" ? "danger" : item.status === "processing" ? "default" : "success"}
                 value={getRechargeStatusLabel(item.status)}
               />

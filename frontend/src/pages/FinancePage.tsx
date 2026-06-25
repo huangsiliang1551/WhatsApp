@@ -1,432 +1,1429 @@
-import { useCallback, useMemo, useState, type JSX } from "react";
-import { Alert, Button, Checkbox, DatePicker, Input, Modal, Select, Space, Table, Tag, Tabs, Typography, message } from "antd";
-import { CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from "@ant-design/icons";
-import { PageShell } from "../components/PageShell";
-import { showSuccess, showError } from "../components/Feedback";
+import { useEffect, useMemo, useState, type JSX } from "react";
+import {
+  Alert,
+  Button,
+  Card,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Popover,
+  Select,
+  Space,
+  Spin,
+  Statistic,
+  Switch,
+  Table,
+  type TableProps,
+  Tabs,
+  Tag,
+  Typography,
+} from "antd";
+
+import { DataExporter, type ExportColumn } from "../components/DataExporter";
+import { showError, showSuccess } from "../components/Feedback";
+import { MemberIdLink } from "../components/member/MemberIdLink";
+import { EmptyGuide, PageShell } from "../components/PageShell";
 import { usePermissions } from "../hooks/usePermissions";
+import {
+  approveBonusGrant,
+  approveRechargeRepair,
+  createBonusGrant,
+  createRechargeRepair,
+  getFinanceSummary,
+  listAnomalyAlerts,
+  listBonusGrants,
+  listRechargeRecords,
+  listRechargeRepairs,
+  listWalletLedgers,
+  listWithdrawalRecords,
+  rejectBonusGrant,
+  rejectRechargeRepair,
+  type FinanceAnomalyAlert,
+  type FinanceBonusGrant,
+  type FinanceRechargeRecord,
+  type FinanceRechargeRepair,
+  type FinanceSummary,
+  type FinanceWalletLedger,
+  type FinanceWithdrawalRecord,
+} from "../services/financeApi";
 
-// ── Mock Data ──
-const MOCK_DEPOSITS = Array.from({ length: 25 }, (_, i) => ({
-  id: `d${i + 1}`,
-  time: `2026-06-${String(11 - Math.floor(i / 3)).padStart(2, "0")} ${String(8 + i % 10).padStart(2, "0")}:${String(i * 3 % 60).padStart(2, "0")}`,
-  member: ["张三", "李四", "王五", "赵六", "钱七"][i % 5],
-  site: ["站点A", "站点B", "站点C"][i % 3],
-  channel: ["USDT", "银行转账", "支付宝"][i % 3],
-  currency: i % 2 === 0 ? "USDT" : "CNY",
-  amount: [100, 200, 500, 1000, 2000][i % 5] + Math.floor(i * 10),
-  rate: i % 2 === 0 ? 7.25 : 1,
-  converted: i % 2 === 0 ? ([100, 200, 500, 1000, 2000][i % 5] + Math.floor(i * 10)) * 7.25 : [100, 200, 500, 1000, 2000][i % 5] + Math.floor(i * 10),
-  status: ["success", "pending", "success", "success", "failed"][i % 5],
-  is_first_deposit: i % 4 === 0,
-}));
+type FundScope = "cash" | "bonus" | undefined;
+type SortOrder = "asc" | "desc";
+type DecisionTarget =
+  | { kind: "bonus"; id: string }
+  | { kind: "repair"; id: string }
+  | null;
 
-const MOCK_WITHDRAWALS = Array.from({ length: 22 }, (_, i) => ({
-  id: `w${i + 1}`,
-  time: `2026-06-${String(11 - Math.floor(i / 3)).padStart(2, "0")} ${String(8 + i % 10).padStart(2, "0")}:${String(i * 5 % 60).padStart(2, "0")}`,
-  member: ["王五", "赵六", "钱七", "孙八", "周九"][i % 5],
-  amount: [50, 100, 200, 500, 1000][i % 5] + Math.floor(i * 5),
-  fee: [0.5, 1, 2, 5, 10][i % 5] + i * 0.1,
-  actual: 0,
-  status: ["pending", "approved", "frozen", "rejected", "pending"][i % 5],
-}));
-MOCK_WITHDRAWALS.forEach((w) => { w.actual = w.amount - w.fee; });
-
-const MOCK_DAILY = [
-  { date: "2026-06-09", deposit: 1500, deposit_cnt: 3, withdraw: 500, withdraw_cnt: 2, net: 1000, fee: 5 },
-  { date: "2026-06-10", deposit: 3000, deposit_cnt: 5, withdraw: 1200, withdraw_cnt: 3, net: 1800, fee: 12 },
-  { date: "2026-06-11", deposit: 500, deposit_cnt: 1, withdraw: 0, withdraw_cnt: 0, net: 500, fee: 0 },
-];
-
-const MOCK_CHANNEL_REPORT = [
-  { channel: "USDT", deposit_count: 12, deposit_amount: 8500, withdraw_count: 5, withdraw_amount: 2000, success_rate: 98.5, avg_fee: 0.5 },
-  { channel: "银行转账", deposit_count: 8, deposit_amount: 3500, withdraw_count: 3, withdraw_amount: 800, success_rate: 100, avg_fee: 1.0 },
-  { channel: "支付宝", deposit_count: 5, deposit_amount: 1200, withdraw_count: 2, withdraw_amount: 300, success_rate: 95.0, avg_fee: 0.3 },
-];
-
-const MOCK_SYSTEM_USAGE = [
-  { month: "2026-06", ai_msgs: 1860, ai_cost: 18.3, translate_count: 200, translate_cost: 0.6, total_cost: 18.9 },
-  { month: "2026-05", ai_msgs: 1520, ai_cost: 15.2, translate_count: 180, translate_cost: 0.54, total_cost: 15.74 },
-];
-
-const MOCK_ALERTS = [
-  { id: "a1", time: "2026-06-11 10:00", type: "large_deposit", member: "张三", detail: "单笔充值 ¥7,250（超过阈值 ¥5,000）", amount: 7250 },
-  { id: "a2", time: "2026-06-11 09:30", type: "frequent_withdraw", member: "王五", detail: "24小时内提现 3 次", amount: 0 },
-];
-
-const MOCK_CALLBACKS = [
-  { id: "c1", time: "2026-06-11 10:00", channel: "USDT", sig_ok: true, handled: true, retry: 0 },
-  { id: "c2", time: "2026-06-11 09:00", channel: "银行转账", sig_ok: false, handled: false, retry: 3 },
-];
-
-type DepositRow = (typeof MOCK_DEPOSITS)[number];
-type ChannelReportRow = (typeof MOCK_CHANNEL_REPORT)[number];
-type SystemUsageRow = (typeof MOCK_SYSTEM_USAGE)[number];
-type CallbackRow = (typeof MOCK_CALLBACKS)[number];
-
-const statusMap: Record<string, { label: string; color: string }> = {
-  success: { label: "成功", color: "green" }, pending: { label: "待处理", color: "orange" },
-  frozen: { label: "已冻结", color: "blue" }, approved: { label: "已审批", color: "green" },
-  rejected: { label: "已拒绝", color: "red" }, failed: { label: "失败", color: "red" },
-};
-const alertTypeMap: Record<string, string> = { large_deposit: "大额充值", frequent_withdraw: "频繁提现", abnormal_amount: "异常金额" };
-
-// ── Simulated API call ──
-async function mockApi(action: string): Promise<void> {
-  await new Promise((r) => setTimeout(r, 600));
-  if (Math.random() > 0.9) throw new Error("操作失败，请重试");
+interface BonusGrantFormValues {
+  accountId: string;
+  userId: string;
+  amount: string;
+  currency: string;
+  sourceType: string;
+  reason: string;
+  remark: string;
 }
+
+interface RechargeRepairFormValues {
+  accountId: string;
+  userId: string;
+  amount: string;
+  currency: string;
+  repairType: string;
+  reason: string;
+  remark: string;
+  channelId: string;
+  platformOrderNo: string;
+  channelOrderNo: string;
+}
+
+interface DecisionFormValues {
+  reason: string;
+}
+
+function formatMoney(value: number | undefined | null): string {
+  return Number(value ?? 0).toFixed(2);
+}
+
+function formatDateTime(value: string | undefined | null): string {
+  if (!value) return "-";
+  return value.replace("T", " ").replace("Z", "").slice(0, 19);
+}
+
+function buildExportColumns(columns: Array<{ key: string; label: string }>): ExportColumn[] {
+  return columns.map((column) => ({ key: column.key, label: column.label }));
+}
+
+function exportFilename(prefix: string): string {
+  const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+  return `${prefix}-${stamp}.csv`;
+}
+
+function renderStatusTag(status: string): JSX.Element {
+  const tone =
+    status === "paid" || status === "approved"
+      ? "green"
+      : status === "pending"
+        ? "orange"
+        : status === "rejected" || status === "failed"
+          ? "red"
+          : "default";
+  return <Tag color={tone}>{status}</Tag>;
+}
+
+function renderMemberLink(
+  userId: string | undefined,
+  accountId?: string | null,
+  publicUserId?: string | null,
+): JSX.Element {
+  return <MemberIdLink accountId={accountId} publicUserId={publicUserId} userId={userId} />;
+}
+
+function renderDuplicateAccountSummary(record: FinanceWithdrawalRecord): JSX.Element {
+  const duplicateCount = record.duplicate_account_count ?? 0;
+  const duplicateIds = record.duplicate_member_ids ?? [];
+  if (duplicateCount <= 0) {
+    return <Tag>无重复</Tag>;
+  }
+  const label = record.risk_level === "high" ? `重复账户 ${duplicateCount}人，高风险` : `重复账户 ${duplicateCount}人`;
+  return (
+    <Popover
+      content={(
+        <Space direction="vertical" size={4}>
+          <Typography.Text strong>重合会员ID</Typography.Text>
+          {duplicateIds.length > 0 ? (
+            duplicateIds.map((item) => (
+              <MemberIdLink key={item} accountId={record.account_id} publicUserId={item} label={item} />
+            ))
+          ) : (
+            <Typography.Text type="secondary">暂无明细</Typography.Text>
+          )}
+        </Space>
+      )}
+      title={record.account_no_masked ? `提现账户 ${record.account_no_masked}` : "重复账户"}
+      trigger="hover"
+    >
+      <Tag color={record.risk_level === "high" ? "red" : "orange"}>{label}</Tag>
+    </Popover>
+  );
+}
+
+const sortOrderOptions: Array<{ label: string; value: SortOrder }> = [
+  { label: "最新优先", value: "desc" },
+  { label: "升序", value: "asc" },
+];
+
+const rechargeSortFieldOptions = [
+  { label: "按创建时间", value: "created_at" },
+  { label: "按金额", value: "amount" },
+  { label: "按现金金额", value: "cash_amount" },
+  { label: "按赠金金额", value: "bonus_amount" },
+  { label: "按用户ID", value: "user_id" },
+];
+
+const withdrawalSortFieldOptions = [
+  { label: "按创建时间", value: "created_at" },
+  { label: "按提现总额", value: "amount" },
+  { label: "按现金部分", value: "cash_amount" },
+  { label: "按赠金部分", value: "bonus_amount" },
+  { label: "按用户ID", value: "user_id" },
+];
+
+const walletLedgerSortFieldOptions = [
+  { label: "按创建时间", value: "created_at" },
+  { label: "按金额", value: "amount" },
+  { label: "按现金金额", value: "cash_amount" },
+  { label: "按赠金金额", value: "bonus_amount" },
+  { label: "按用户ID", value: "user_id" },
+  { label: "按流水后余额", value: "balance_after" },
+];
 
 export function FinancePage(): JSX.Element {
   const { can } = usePermissions();
   const canViewRecharge = can("finance.view_recharge");
   const canViewWithdrawal = can("finance.view_withdrawal") || can("finance.approve_withdrawal");
   const canViewFinanceReports = can("reports.finance");
-  const canViewChannels = can("finance.view_channels") || can("finance.edit_channels");
-  const canViewCallbacks = can("finance.edit_channels");
-  // ── Deposit state ──
-  const [depositSearch, setDepositSearch] = useState("");
-  const [depositSite, setDepositSite] = useState<string | undefined>();
-  const [depositChannel, setDepositChannel] = useState<string | undefined>();
-  const [depositStatus, setDepositStatus] = useState<string | undefined>();
-  const [depositFirstOnly, setDepositFirstOnly] = useState(false);
-  const [depositPage, setDepositPage] = useState(1);
-  const [depositPageSize, setDepositPageSize] = useState(10);
+  const canExportReports = can("reports.export");
+  const canManageFinance = can("finance.edit_channels");
+  const hasPrimaryFinanceAccess = canViewRecharge || canViewWithdrawal || canViewFinanceReports;
 
-  // ── Withdrawal state ──
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [withdrawSearch, setWithdrawSearch] = useState("");
-  const [withdrawStatus, setWithdrawStatus] = useState<string | undefined>();
-  const [withdrawPage, setWithdrawPage] = useState(1);
-  const [withdrawPageSize, setWithdrawPageSize] = useState(10);
+  const [rechargeRows, setRechargeRows] = useState<FinanceRechargeRecord[]>([]);
+  const [withdrawalRows, setWithdrawalRows] = useState<FinanceWithdrawalRecord[]>([]);
+  const [summary, setSummary] = useState<FinanceSummary | null>(null);
+  const [alerts, setAlerts] = useState<FinanceAnomalyAlert[]>([]);
+  const [bonusGrantRows, setBonusGrantRows] = useState<FinanceBonusGrant[]>([]);
+  const [rechargeRepairRows, setRechargeRepairRows] = useState<FinanceRechargeRepair[]>([]);
+  const [walletLedgerRows, setWalletLedgerRows] = useState<FinanceWalletLedger[]>([]);
+
+  const [rechargeLoading, setRechargeLoading] = useState(false);
+  const [withdrawalLoading, setWithdrawalLoading] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [bonusGrantLoading, setBonusGrantLoading] = useState(false);
+  const [rechargeRepairLoading, setRechargeRepairLoading] = useState(false);
+  const [walletLedgerLoading, setWalletLedgerLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
-  // ── Withdrawal action handlers ──
-  const handleSingleAction = useCallback(async (action: string, id: string, member: string) => {
-    const titles: Record<string, string> = { approve: "审批", reject: "拒绝", unfreeze: "解除冻结" };
-    Modal.confirm({
-      title: `确认${titles[action]})`,
-      content: `确认${titles[action]}) ${member} 的提现申请？`,
-      okButtonProps: action === "reject" ? { danger: true } : undefined,
-      onOk: async () => {
-        setActionLoading(true);
-        try {
-          await mockApi(action);
-          showSuccess(`${titles[action]})成功`);
-        } catch (e) { showError(e instanceof Error ? e.message : "操作失败"); }
-        finally { setActionLoading(false); }
-      },
-    });
-  }, []);
+  const [rechargeStatus, setRechargeStatus] = useState<string | undefined>();
+  const [rechargeSourceType, setRechargeSourceType] = useState<string | undefined>();
+  const [rechargeFundScope, setRechargeFundScope] = useState<FundScope>();
+  const [rechargeIncludeBonus, setRechargeIncludeBonus] = useState(true);
+  const [rechargeSortField, setRechargeSortField] = useState("created_at");
+  const [rechargeSortOrder, setRechargeSortOrder] = useState<SortOrder>("desc");
 
-  const handleBatchAction = useCallback(async (action: "approve" | "reject") => {
-    const titles: Record<string, string> = { approve: "审批", reject: "拒绝" };
-    Modal.confirm({
-      title: `批量${titles[action]})`,
-      content: `确认批量${titles[action]}) ${selectedIds.length} 条提现申请？`,
-      okButtonProps: action === "reject" ? { danger: true } : undefined,
-      onOk: async () => {
-        setActionLoading(true);
-        try {
-          await mockApi(action);
-          showSuccess(`批量${titles[action]})成功`);
-          setSelectedIds([]);
-        } catch (e) { showError(e instanceof Error ? e.message : "操作失败"); }
-        finally { setActionLoading(false); }
-      },
-    });
-  }, [selectedIds]);
+  const [withdrawalStatus, setWithdrawalStatus] = useState<string | undefined>();
+  const [withdrawalFundScope, setWithdrawalFundScope] = useState<FundScope>();
+  const [withdrawalIncludeBonus, setWithdrawalIncludeBonus] = useState(true);
+  const [withdrawalSortField, setWithdrawalSortField] = useState("created_at");
+  const [withdrawalSortOrder, setWithdrawalSortOrder] = useState<SortOrder>("desc");
 
-  // ── Filtered data ──
-  const filteredDeposits = useMemo(() => {
-    let data = MOCK_DEPOSITS;
-    if (depositSearch) data = data.filter((r) => r.member.includes(depositSearch));
-    if (depositSite) data = data.filter((r) => r.site === depositSite);
-    if (depositChannel) data = data.filter((r) => r.channel === depositChannel);
-    if (depositStatus) data = data.filter((r) => r.status === depositStatus);
-    if (depositFirstOnly) data = data.filter((r) => r.is_first_deposit);
-    return data;
-  }, [depositSearch, depositSite, depositChannel, depositStatus, depositFirstOnly]);
+  const [summaryIncludeBonus, setSummaryIncludeBonus] = useState(true);
+  const [walletLedgerStatus, setWalletLedgerStatus] = useState<string | undefined>();
+  const [walletLedgerSourceType, setWalletLedgerSourceType] = useState<string | undefined>();
+  const [walletLedgerTransactionType, setWalletLedgerTransactionType] = useState<string | undefined>();
+  const [walletLedgerFundScope, setWalletLedgerFundScope] = useState<FundScope>();
+  const [walletLedgerSortField, setWalletLedgerSortField] = useState("created_at");
+  const [walletLedgerSortOrder, setWalletLedgerSortOrder] = useState<SortOrder>("desc");
+  const [pageError, setPageError] = useState<string | null>(null);
 
-  const filteredWithdrawals = useMemo(() => {
-    let data = MOCK_WITHDRAWALS;
-    if (withdrawSearch) data = data.filter((r) => r.member.includes(withdrawSearch));
-    if (withdrawStatus) data = data.filter((r) => r.status === withdrawStatus);
-    return data;
-  }, [withdrawSearch, withdrawStatus]);
+  const [bonusGrantModalOpen, setBonusGrantModalOpen] = useState(false);
+  const [rechargeRepairModalOpen, setRechargeRepairModalOpen] = useState(false);
+  const [decisionTarget, setDecisionTarget] = useState<DecisionTarget>(null);
 
-  const uniqueSites = useMemo(() => [...new Set(MOCK_DEPOSITS.map((r) => r.site))], []);
-  const uniqueChannels = useMemo(() => [...new Set(MOCK_DEPOSITS.map((r) => r.channel))], []);
+  const [bonusGrantForm] = Form.useForm<BonusGrantFormValues>();
+  const [rechargeRepairForm] = Form.useForm<RechargeRepairFormValues>();
+  const [decisionForm] = Form.useForm<DecisionFormValues>();
 
-  // Deposit summary
-  const depositSummary = useMemo(() => {
-    const total = MOCK_DEPOSITS.reduce((s, r) => s + r.converted, 0);
-    const count = MOCK_DEPOSITS.length;
-    const firstCount = MOCK_DEPOSITS.filter((r) => r.is_first_deposit).length;
-    return { total, count, firstCount };
-  }, []);
+  const loadRechargeRows = async (): Promise<void> => {
+    if (!canViewRecharge) return;
+    setRechargeLoading(true);
+    try {
+      const rows = await listRechargeRecords({
+        status: rechargeStatus,
+        sourceType: rechargeSourceType,
+        fundScope: rechargeFundScope,
+        includeBonus: rechargeIncludeBonus,
+        sortField: rechargeSortField,
+        sortOrder: rechargeSortOrder,
+      });
+      setRechargeRows(rows);
+    } catch (error) {
+      setPageError("充值记录加载失败");
+      showError(error instanceof Error ? error.message : "充值记录加载失败");
+    } finally {
+      setRechargeLoading(false);
+    }
+  };
 
-  // Withdrawal summary
-  const withdrawSummary = useMemo(() => {
-    const total = MOCK_WITHDRAWALS.reduce((s, r) => s + r.amount, 0);
-    const totalFee = MOCK_WITHDRAWALS.reduce((s, r) => s + r.fee, 0);
-    const pendingCount = MOCK_WITHDRAWALS.filter((r) => r.status === "pending").length;
-    const frozenCount = MOCK_WITHDRAWALS.filter((r) => r.status === "frozen").length;
-    return { total, totalFee, pendingCount, frozenCount };
-  }, []);
+  const loadWithdrawalRows = async (): Promise<void> => {
+    if (!canViewWithdrawal) return;
+    setWithdrawalLoading(true);
+    try {
+      const rows = await listWithdrawalRecords({
+        status: withdrawalStatus,
+        fundScope: withdrawalFundScope,
+        includeBonus: withdrawalIncludeBonus,
+        sortField: withdrawalSortField,
+        sortOrder: withdrawalSortOrder,
+      });
+      setWithdrawalRows(rows);
+    } catch (error) {
+      setPageError("提现记录加载失败");
+      showError(error instanceof Error ? error.message : "提现记录加载失败");
+    } finally {
+      setWithdrawalLoading(false);
+    }
+  };
 
-  // ── Columns ──
-  const depositColumns = [
-    { title: "时间", dataIndex: "time", key: "time", width: 140,
-      sorter: (a: typeof MOCK_DEPOSITS[0], b: typeof MOCK_DEPOSITS[0]) => (a.time ?? "").localeCompare(b.time ?? ""),
-      defaultSortOrder: "descend" as const,
-    },
-    { title: "会员", dataIndex: "member", key: "member",
-      sorter: (a: typeof MOCK_DEPOSITS[0], b: typeof MOCK_DEPOSITS[0]) => (a.member ?? "").localeCompare(b.member ?? ""),
-    },
-    { title: "站点", dataIndex: "site", key: "site",
-      sorter: (a: typeof MOCK_DEPOSITS[0], b: typeof MOCK_DEPOSITS[0]) => (a.site ?? "").localeCompare(b.site ?? ""),
-    },
-    { title: "渠道", dataIndex: "channel", key: "channel",
-      sorter: (a: typeof MOCK_DEPOSITS[0], b: typeof MOCK_DEPOSITS[0]) => (a.channel ?? "").localeCompare(b.channel ?? ""),
-    },
-    { title: "充值币种", dataIndex: "currency", key: "currency",
-      sorter: (a: typeof MOCK_DEPOSITS[0], b: typeof MOCK_DEPOSITS[0]) => (a.currency ?? "").localeCompare(b.currency ?? ""),
-    },
-    { title: "金额", dataIndex: "amount", key: "amount",
-      sorter: (a: typeof MOCK_DEPOSITS[0], b: typeof MOCK_DEPOSITS[0]) => (a.amount ?? 0) - (b.amount ?? 0),
-    },
-    { title: "汇率", dataIndex: "rate", key: "rate",
-      sorter: (a: typeof MOCK_DEPOSITS[0], b: typeof MOCK_DEPOSITS[0]) => (a.rate ?? 0) - (b.rate ?? 0),
-    },
-    { title: "转换金额", dataIndex: "converted", key: "converted",
-      sorter: (a: typeof MOCK_DEPOSITS[0], b: typeof MOCK_DEPOSITS[0]) => (a.converted ?? 0) - (b.converted ?? 0),
-    },
-    { title: "首充", key: "first", width: 60, sorter: (a: DepositRow, b: DepositRow) => (a.is_first_deposit ? 1 : 0) - (b.is_first_deposit ? 1 : 0),
-      render: (_: unknown, r: typeof MOCK_DEPOSITS[0]) => r.is_first_deposit ? <Tag color="green">首充</Tag> : null,
-    },
-    { title: "状态", dataIndex: "status", key: "status",
-      sorter: (a: typeof MOCK_DEPOSITS[0], b: typeof MOCK_DEPOSITS[0]) => (a.status ?? "").localeCompare(b.status ?? ""),
-      render: (s: string) => <Tag color={statusMap[s]?.color}>{statusMap[s]?.label || s}</Tag>,
-    },
-    { title: "操作", key: "actions", width: 80, render: () => <Button size="small">详情</Button> },
-  ];
+  const loadSummary = async (): Promise<void> => {
+    if (!canViewFinanceReports) return;
+    setSummaryLoading(true);
+    try {
+      const nextSummary = await getFinanceSummary({ includeBonus: summaryIncludeBonus });
+      setSummary(nextSummary);
+    } catch (error) {
+      setPageError("财务汇总加载失败");
+      showError(error instanceof Error ? error.message : "财务汇总加载失败");
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
 
-  // Withdrawal rowSelection
-  const rowSelection = useMemo(() => ({
-    selectedRowKeys: selectedIds,
-    onChange: (keys: React.Key[]) => setSelectedIds(keys.map(String)),
-    columnTitle: <Checkbox
-      checked={filteredWithdrawals.length > 0 && filteredWithdrawals.every((r) => selectedIds.includes(r.id))}
-      indeterminate={selectedIds.length > 0 && selectedIds.length < filteredWithdrawals.length}
-      onChange={() => {
-        const allIds = filteredWithdrawals.map((r) => r.id);
-        if (selectedIds.length === filteredWithdrawals.length) setSelectedIds([]);
-        else setSelectedIds(allIds);
-      }}
-    />,
-  }), [selectedIds, filteredWithdrawals]);
+  const loadAlerts = async (): Promise<void> => {
+    if (!canViewFinanceReports) return;
+    setAlertsLoading(true);
+    try {
+      setAlerts(await listAnomalyAlerts());
+    } catch (error) {
+      setPageError("异常告警加载失败");
+      showError(error instanceof Error ? error.message : "异常告警加载失败");
+    } finally {
+      setAlertsLoading(false);
+    }
+  };
 
-  const withdrawColumns = [
-    { title: "时间", dataIndex: "time", key: "time", width: 140,
-      sorter: (a: typeof MOCK_WITHDRAWALS[0], b: typeof MOCK_WITHDRAWALS[0]) => (a.time ?? "").localeCompare(b.time ?? ""),
-      defaultSortOrder: "descend" as const,
-    },
-    { title: "会员", dataIndex: "member", key: "member",
-      sorter: (a: typeof MOCK_WITHDRAWALS[0], b: typeof MOCK_WITHDRAWALS[0]) => (a.member ?? "").localeCompare(b.member ?? ""),
-    },
-    { title: "金额", dataIndex: "amount", key: "amount",
-      sorter: (a: typeof MOCK_WITHDRAWALS[0], b: typeof MOCK_WITHDRAWALS[0]) => (a.amount ?? 0) - (b.amount ?? 0),
-    },
-    { title: "手续费", dataIndex: "fee", key: "fee",
-      sorter: (a: typeof MOCK_WITHDRAWALS[0], b: typeof MOCK_WITHDRAWALS[0]) => (a.fee ?? 0) - (b.fee ?? 0),
-    },
-    { title: "实到", dataIndex: "actual", key: "actual",
-      sorter: (a: typeof MOCK_WITHDRAWALS[0], b: typeof MOCK_WITHDRAWALS[0]) => (a.actual ?? 0) - (b.actual ?? 0),
-    },
-    { title: "状态", dataIndex: "status", key: "status",
-      sorter: (a: typeof MOCK_WITHDRAWALS[0], b: typeof MOCK_WITHDRAWALS[0]) => (a.status ?? "").localeCompare(b.status ?? ""),
-      render: (s: string) => <Tag color={statusMap[s]?.color}>{statusMap[s]?.label || s}</Tag>,
-    },
-    { title: "操作", key: "actions", width: 260, render: (_: unknown, r: typeof MOCK_WITHDRAWALS[0]) => (
-      <Space>
-        {r.status === "pending" && <><Button size="small" type="primary" loading={actionLoading} onClick={() => handleSingleAction("approve", r.id, r.member)}>审批</Button><Button size="small" danger loading={actionLoading} onClick={() => handleSingleAction("reject", r.id, r.member)}>拒绝</Button></>}
-        {r.status === "frozen" && <Button size="small" loading={actionLoading} onClick={() => handleSingleAction("unfreeze", r.id, r.member)}>解除冻结</Button>}
+  const loadBonusGrants = async (): Promise<void> => {
+    if (!canViewFinanceReports) return;
+    setBonusGrantLoading(true);
+    try {
+      setBonusGrantRows(await listBonusGrants());
+    } catch (error) {
+      setPageError("赠金记录加载失败");
+      showError(error instanceof Error ? error.message : "赠金记录加载失败");
+    } finally {
+      setBonusGrantLoading(false);
+    }
+  };
+
+  const loadRechargeRepairs = async (): Promise<void> => {
+    if (!canViewFinanceReports) return;
+    setRechargeRepairLoading(true);
+    try {
+      setRechargeRepairRows(await listRechargeRepairs());
+    } catch (error) {
+      setPageError("补单记录加载失败");
+      showError(error instanceof Error ? error.message : "补单记录加载失败");
+    } finally {
+      setRechargeRepairLoading(false);
+    }
+  };
+
+  const loadWalletLedgers = async (): Promise<void> => {
+    if (!canViewFinanceReports) return;
+    setWalletLedgerLoading(true);
+    try {
+      const rows = await listWalletLedgers({
+        status: walletLedgerStatus,
+        sourceType: walletLedgerSourceType,
+        transactionType: walletLedgerTransactionType,
+        fundScope: walletLedgerFundScope,
+        sortField: walletLedgerSortField,
+        sortOrder: walletLedgerSortOrder,
+      });
+      setWalletLedgerRows(rows);
+    } catch (error) {
+      setPageError("钱包流水加载失败");
+      showError(error instanceof Error ? error.message : "钱包流水加载失败");
+    } finally {
+      setWalletLedgerLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setPageError(null);
+    void loadRechargeRows();
+  }, [canViewRecharge, rechargeStatus, rechargeSourceType, rechargeFundScope, rechargeIncludeBonus, rechargeSortField, rechargeSortOrder]);
+
+  useEffect(() => {
+    setPageError(null);
+    void loadWithdrawalRows();
+  }, [canViewWithdrawal, withdrawalStatus, withdrawalFundScope, withdrawalIncludeBonus, withdrawalSortField, withdrawalSortOrder]);
+
+  useEffect(() => {
+    setPageError(null);
+    void loadSummary();
+  }, [canViewFinanceReports, summaryIncludeBonus]);
+
+  useEffect(() => {
+    setPageError(null);
+    void loadAlerts();
+  }, [canViewFinanceReports, canViewWithdrawal]);
+
+  useEffect(() => {
+    setPageError(null);
+    void loadBonusGrants();
+    void loadRechargeRepairs();
+  }, [canViewFinanceReports]);
+
+  useEffect(() => {
+    setPageError(null);
+    void loadWalletLedgers();
+  }, [canViewFinanceReports, walletLedgerStatus, walletLedgerSourceType, walletLedgerTransactionType, walletLedgerFundScope, walletLedgerSortField, walletLedgerSortOrder]);
+
+  const summaryCards = useMemo(() => {
+    if (!summary) return null;
+    return (
+      <Space wrap size={16}>
+        <Card size="small"><Statistic title="真实充值" value={summary.recharge_amount} precision={2} /></Card>
+        <Card size="small"><Statistic title="赠金发放" value={summary.bonus_amount} precision={2} /></Card>
+        <Card size="small"><Statistic title="提现总额" value={summary.withdrawal_amount} precision={2} /></Card>
+        <Card size="small"><Statistic title="提现现金部分" value={summary.withdrawal_cash_amount} precision={2} /></Card>
+        <Card size="small"><Statistic title="提现赠金部分" value={summary.withdrawal_bonus_amount} precision={2} /></Card>
+        <Card size="small"><Statistic title="净充值" value={summary.net_recharge} precision={2} /></Card>
       </Space>
-    )},
+    );
+  }, [summary]);
+
+  const duplicateWithdrawalAlerts = useMemo(
+    () => withdrawalRows.filter((item) => (item.duplicate_account_count ?? 0) > 0),
+    [withdrawalRows],
+  );
+
+  const openBonusGrantModal = (): void => {
+    bonusGrantForm.setFieldsValue({
+      accountId: "",
+      userId: "",
+      amount: "",
+      currency: "USD",
+      sourceType: "admin_bonus",
+      reason: "",
+      remark: "",
+    });
+    setBonusGrantModalOpen(true);
+  };
+
+  const openRechargeRepairModal = (): void => {
+    rechargeRepairForm.setFieldsValue({
+      accountId: "",
+      userId: "",
+      amount: "",
+      currency: "USD",
+      repairType: "manual_real_recharge",
+      reason: "",
+      remark: "",
+      channelId: "",
+      platformOrderNo: "",
+      channelOrderNo: "",
+    });
+    setRechargeRepairModalOpen(true);
+  };
+
+  const handleCreateBonusGrant = async (): Promise<void> => {
+    try {
+      const values = await bonusGrantForm.validateFields();
+      setActionLoading(true);
+      await createBonusGrant({
+        accountId: values.accountId,
+        userId: values.userId,
+        amount: Number(values.amount),
+        currency: values.currency,
+        sourceType: values.sourceType,
+        reason: values.reason,
+        remark: values.remark,
+      });
+      showSuccess("赠金申请已创建");
+      setBonusGrantModalOpen(false);
+      bonusGrantForm.resetFields();
+      await loadBonusGrants();
+    } catch (error) {
+      if (error instanceof Error) {
+        showError(error.message);
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCreateRechargeRepair = async (): Promise<void> => {
+    try {
+      const values = await rechargeRepairForm.validateFields();
+      setActionLoading(true);
+      await createRechargeRepair({
+        accountId: values.accountId,
+        userId: values.userId,
+        amount: Number(values.amount),
+        currency: values.currency,
+        repairType: values.repairType,
+        reason: values.reason,
+        remark: values.remark,
+        channelId: values.channelId,
+        platformOrderNo: values.platformOrderNo,
+        channelOrderNo: values.channelOrderNo,
+      });
+      showSuccess("补单申请已创建");
+      setRechargeRepairModalOpen(false);
+      rechargeRepairForm.resetFields();
+      await loadRechargeRepairs();
+    } catch (error) {
+      if (error instanceof Error) {
+        showError(error.message);
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleApproveBonusGrant = async (grantId: string): Promise<void> => {
+    try {
+      setActionLoading(true);
+      await approveBonusGrant(grantId);
+      showSuccess("赠金已审核通过");
+      await loadBonusGrants();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "赠金审核失败");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleApproveRechargeRepair = async (repairId: string): Promise<void> => {
+    try {
+      setActionLoading(true);
+      await approveRechargeRepair(repairId);
+      showSuccess("补单已审核通过");
+      await loadRechargeRepairs();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "补单审核失败");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const openDecisionModal = (target: DecisionTarget): void => {
+    decisionForm.setFieldsValue({ reason: "" });
+    setDecisionTarget(target);
+  };
+
+  const handleSubmitDecision = async (): Promise<void> => {
+    if (!decisionTarget) return;
+    try {
+      const values = await decisionForm.validateFields();
+      setActionLoading(true);
+      if (decisionTarget.kind === "bonus") {
+        await rejectBonusGrant(decisionTarget.id, { reason: values.reason || undefined });
+        showSuccess("赠金已驳回");
+        await loadBonusGrants();
+      } else {
+        await rejectRechargeRepair(decisionTarget.id, { reason: values.reason || undefined });
+        showSuccess("补单已驳回");
+        await loadRechargeRepairs();
+      }
+      setDecisionTarget(null);
+      decisionForm.resetFields();
+    } catch (error) {
+      if (error instanceof Error) {
+        showError(error.message);
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const rechargeColumns = [
+    {
+      title: "时间",
+      dataIndex: "created_at",
+      key: "created_at",
+      render: (value: string | null | undefined) => formatDateTime(value),
+    },
+    {
+      title: "用户ID",
+      dataIndex: "user_id",
+      key: "user_id",
+      render: (value: string | undefined, record: FinanceRechargeRecord) =>
+        renderMemberLink(value, record.account_id, record.public_user_id ?? value),
+    },
+    { title: "来源", dataIndex: "source_type", key: "source_type", render: (value: string | null | undefined) => value || "-" },
+    { title: "总额", dataIndex: "amount", key: "amount", render: (value: number) => formatMoney(value) },
+    { title: "现金", dataIndex: "cash_amount", key: "cash_amount", render: (value: number) => formatMoney(value) },
+    { title: "赠金", dataIndex: "bonus_amount", key: "bonus_amount", render: (value: number) => formatMoney(value) },
+    { title: "资金口径", dataIndex: "fund_type", key: "fund_type", render: (value: string | null | undefined) => value || "-" },
+    { title: "状态", dataIndex: "status", key: "status", render: (value: string) => renderStatusTag(value) },
   ];
 
-  const dailyColumns = [
-    { title: "日期", dataIndex: "date", key: "date",
-      sorter: (a: typeof MOCK_DAILY[0], b: typeof MOCK_DAILY[0]) => (a.date ?? "").localeCompare(b.date ?? ""),
-      defaultSortOrder: "descend" as const,
+  const withdrawalColumns: TableProps<FinanceWithdrawalRecord>["columns"] = [
+    {
+      title: "时间",
+      dataIndex: "created_at",
+      key: "created_at",
+      render: (value: string | null | undefined) => formatDateTime(value),
     },
-    { title: "充值金额", dataIndex: "deposit", key: "deposit",
-      sorter: (a: typeof MOCK_DAILY[0], b: typeof MOCK_DAILY[0]) => (a.deposit ?? 0) - (b.deposit ?? 0),
+    {
+      title: "用户ID",
+      dataIndex: "user_id",
+      key: "user_id",
+      render: (value: string | undefined, record: FinanceWithdrawalRecord) =>
+        renderMemberLink(value, record.account_id, record.public_user_id ?? value),
     },
-    { title: "充值笔数", dataIndex: "deposit_cnt", key: "deposit_cnt",
-      sorter: (a: typeof MOCK_DAILY[0], b: typeof MOCK_DAILY[0]) => (a.deposit_cnt ?? 0) - (b.deposit_cnt ?? 0),
+    { title: "提现总额", dataIndex: "amount", key: "amount", render: (value: number) => formatMoney(value) },
+    { title: "现金部分", dataIndex: "cash_amount", key: "cash_amount", render: (value: number) => formatMoney(value) },
+    { title: "赠金部分", dataIndex: "bonus_amount", key: "bonus_amount", render: (value: number) => formatMoney(value) },
+    {
+      title: "实际打款",
+      dataIndex: "actual_payout_amount",
+      key: "actual_payout_amount",
+      render: (value: number | undefined) => formatMoney(value),
     },
-    { title: "提现金额", dataIndex: "withdraw", key: "withdraw",
-      sorter: (a: typeof MOCK_DAILY[0], b: typeof MOCK_DAILY[0]) => (a.withdraw ?? 0) - (b.withdraw ?? 0),
-    },
-    { title: "提现笔数", dataIndex: "withdraw_cnt", key: "withdraw_cnt",
-      sorter: (a: typeof MOCK_DAILY[0], b: typeof MOCK_DAILY[0]) => (a.withdraw_cnt ?? 0) - (b.withdraw_cnt ?? 0),
-    },
-    { title: "净充值", dataIndex: "net", key: "net",
-      sorter: (a: typeof MOCK_DAILY[0], b: typeof MOCK_DAILY[0]) => (a.net ?? 0) - (b.net ?? 0),
-      render: (v: number) => <Typography.Text strong>{v}</Typography.Text>,
-    },
-    { title: "手续费", dataIndex: "fee", key: "fee",
-      sorter: (a: typeof MOCK_DAILY[0], b: typeof MOCK_DAILY[0]) => (a.fee ?? 0) - (b.fee ?? 0),
-    },
+    { title: "状态", dataIndex: "status", key: "status", render: (value: string) => renderStatusTag(value) },
   ];
 
-  const channelColumns = [
-    { title: "渠道", dataIndex: "channel", key: "channel",
-      sorter: (a: typeof MOCK_CHANNEL_REPORT[0], b: typeof MOCK_CHANNEL_REPORT[0]) => (a.channel ?? "").localeCompare(b.channel ?? ""),
+  withdrawalColumns.splice(withdrawalColumns.length - 1, 0,
+    {
+      title: "鎻愮幇璐︽埛",
+      dataIndex: "account_no_masked",
+      key: "account_no_masked",
+      render: (value: string | null | undefined) => value || "-",
     },
-    { title: "充值笔数", dataIndex: "deposit_count", key: "deposit_count", sorter: (a: ChannelReportRow, b: ChannelReportRow) => (a.deposit_count ?? 0) - (b.deposit_count ?? 0) },
-    { title: "充值金额", dataIndex: "deposit_amount", key: "deposit_amount", sorter: (a: ChannelReportRow, b: ChannelReportRow) => (a.deposit_amount ?? 0) - (b.deposit_amount ?? 0) },
-    { title: "提现笔数", dataIndex: "withdraw_count", key: "withdraw_count", sorter: (a: ChannelReportRow, b: ChannelReportRow) => (a.withdraw_count ?? 0) - (b.withdraw_count ?? 0) },
-    { title: "提现金额", dataIndex: "withdraw_amount", key: "withdraw_amount", sorter: (a: ChannelReportRow, b: ChannelReportRow) => (a.withdraw_amount ?? 0) - (b.withdraw_amount ?? 0) },
-    { title: "成功率", dataIndex: "success_rate", key: "success_rate", sorter: (a: ChannelReportRow, b: ChannelReportRow) => (a.success_rate ?? 0) - (b.success_rate ?? 0),
-      render: (v: number) => `${v}%` },
-    { title: "平均手续费", dataIndex: "avg_fee", key: "avg_fee", sorter: (a: ChannelReportRow, b: ChannelReportRow) => (a.avg_fee ?? 0) - (b.avg_fee ?? 0),
-      render: (v: number) => `¥${v.toFixed(2)}` },
-  ];
-
-  const usageColumns = [
-    { title: "月份", dataIndex: "month", key: "month",
-      sorter: (a: typeof MOCK_SYSTEM_USAGE[0], b: typeof MOCK_SYSTEM_USAGE[0]) => (a.month ?? "").localeCompare(b.month ?? ""),
-      defaultSortOrder: "descend" as const,
+    {
+      title: "閲嶅璐︽埛",
+      key: "duplicate_account_count",
+      render: (_: unknown, record: FinanceWithdrawalRecord) => renderDuplicateAccountSummary(record),
     },
-    { title: "AI消息数", dataIndex: "ai_msgs", key: "ai_msgs", sorter: (a: SystemUsageRow, b: SystemUsageRow) => (a.ai_msgs ?? 0) - (b.ai_msgs ?? 0) },
-    { title: "AI费用", dataIndex: "ai_cost", key: "ai_cost", sorter: (a: SystemUsageRow, b: SystemUsageRow) => (a.ai_cost ?? 0) - (b.ai_cost ?? 0),
-      render: (v: number) => `¥${v.toFixed(2)}` },
-    { title: "翻译次数", dataIndex: "translate_count", key: "translate_count", sorter: (a: SystemUsageRow, b: SystemUsageRow) => (a.translate_count ?? 0) - (b.translate_count ?? 0) },
-    { title: "翻译费用", dataIndex: "translate_cost", key: "translate_cost", sorter: (a: SystemUsageRow, b: SystemUsageRow) => (a.translate_cost ?? 0) - (b.translate_cost ?? 0),
-      render: (v: number) => `¥${v.toFixed(2)}` },
-    { title: "总费用", dataIndex: "total_cost", key: "total_cost", sorter: (a: SystemUsageRow, b: SystemUsageRow) => (a.total_cost ?? 0) - (b.total_cost ?? 0),
-      render: (v: number) => <Typography.Text strong>¥{v.toFixed(2)}</Typography.Text> },
-  ];
+  );
 
   const alertColumns = [
-    { title: "时间", dataIndex: "time", key: "time",
-      sorter: (a: typeof MOCK_ALERTS[0], b: typeof MOCK_ALERTS[0]) => (a.time ?? "").localeCompare(b.time ?? ""),
-      defaultSortOrder: "descend" as const,
+    { title: "类型", dataIndex: "type", key: "type", render: (value: string) => <Tag color="red">{value}</Tag> },
+    {
+      title: "用户ID",
+      dataIndex: "user_id",
+      key: "user_id",
+      render: (value: string | undefined, record: FinanceAnomalyAlert) =>
+        record.user_id ? renderMemberLink(value, record.account_id, record.public_user_id ?? value) : value || "-",
     },
-    { title: "类型", dataIndex: "type", key: "type",
-      sorter: (a: typeof MOCK_ALERTS[0], b: typeof MOCK_ALERTS[0]) => (a.type ?? "").localeCompare(b.type ?? ""),
-      render: (t: string) => <Tag color="red">{alertTypeMap[t] || t}</Tag>,
-    },
-    { title: "会员", dataIndex: "member", key: "member",
-      sorter: (a: typeof MOCK_ALERTS[0], b: typeof MOCK_ALERTS[0]) => (a.member ?? "").localeCompare(b.member ?? ""),
-    },
-    { title: "详情", dataIndex: "detail", key: "detail" },
-    { title: "金额", dataIndex: "amount", key: "amount",
-      sorter: (a: typeof MOCK_ALERTS[0], b: typeof MOCK_ALERTS[0]) => (a.amount ?? 0) - (b.amount ?? 0),
-    },
+    { title: "金额", dataIndex: "amount", key: "amount", render: (value: number | undefined) => formatMoney(value) },
+    { title: "时间", dataIndex: "time", key: "time", render: (value: string | undefined) => formatDateTime(value) },
+    { title: "说明", dataIndex: "message", key: "message" },
   ];
 
-  const callbackColumns = [
-    { title: "时间", dataIndex: "time", key: "time",
-      sorter: (a: typeof MOCK_CALLBACKS[0], b: typeof MOCK_CALLBACKS[0]) => (a.time ?? "").localeCompare(b.time ?? ""),
-      defaultSortOrder: "descend" as const,
+  const bonusGrantColumns = [
+    { title: "单号", dataIndex: "grant_no", key: "grant_no" },
+    {
+      title: "用户ID",
+      dataIndex: "user_id",
+      key: "user_id",
+      render: (value: string | undefined, record: FinanceBonusGrant) =>
+        renderMemberLink(value, record.account_id, record.public_user_id ?? value),
     },
-    { title: "渠道", dataIndex: "channel", key: "channel",
-      sorter: (a: typeof MOCK_CALLBACKS[0], b: typeof MOCK_CALLBACKS[0]) => (a.channel ?? "").localeCompare(b.channel ?? ""),
-    },
-    { title: "签名验证", dataIndex: "sig_ok", key: "sig_ok", sorter: (a: CallbackRow, b: CallbackRow) => (a.sig_ok === b.sig_ok ? 0 : a.sig_ok ? 1 : -1),
-      render: (v: boolean) => v ? <Tag icon={<CheckCircleOutlined />} color="success">✓</Tag> : <Tag icon={<CloseCircleOutlined />} color="error">✗</Tag>,
-    },
-    { title: "已处理", dataIndex: "handled", key: "handled", sorter: (a: CallbackRow, b: CallbackRow) => (a.handled === b.handled ? 0 : a.handled ? 1 : -1),
-      render: (v: boolean) => v ? <Tag color="green">✓</Tag> : <Tag color="orange">✗</Tag>,
-    },
-    { title: "重试次数", dataIndex: "retry", key: "retry", sorter: (a: CallbackRow, b: CallbackRow) => (a.retry ?? 0) - (b.retry ?? 0) },
-    { title: "操作", key: "actions", width: 100, render: () => <Button size="small" icon={<ReloadOutlined />}>重试</Button> },
+    { title: "来源", dataIndex: "source_type", key: "source_type" },
+    { title: "金额", dataIndex: "amount", key: "amount", render: (value: number) => formatMoney(value) },
+    { title: "原因", dataIndex: "reason", key: "reason" },
+    { title: "状态", dataIndex: "status", key: "status", render: (value: string) => renderStatusTag(value) },
+    { title: "创建时间", dataIndex: "created_at", key: "created_at", render: (value: string | null | undefined) => formatDateTime(value) },
+    ...(canManageFinance
+      ? [{
+          title: "操作",
+          key: "actions",
+          render: (_: unknown, record: FinanceBonusGrant) =>
+            record.status === "pending" ? (
+              <Space>
+                <Button
+                  size="small"
+                  aria-label={`approve-bonus-grant-${record.id}`}
+                  loading={actionLoading}
+                  onClick={() => { void handleApproveBonusGrant(record.id); }}
+                >
+                  通过
+                </Button>
+                <Button
+                  size="small"
+                  danger
+                  aria-label={`reject-bonus-grant-${record.id}`}
+                  onClick={() => openDecisionModal({ kind: "bonus", id: record.id })}
+                >
+                  驳回
+                </Button>
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">-</Typography.Text>
+            ),
+        }]
+      : []),
   ];
 
-  const statCardStyle: React.CSSProperties = { background: "#fafafa", borderRadius: 8, padding: "12px 20px", textAlign: "center", minWidth: 130 };
+  const rechargeRepairColumns = [
+    { title: "单号", dataIndex: "repair_no", key: "repair_no" },
+    {
+      title: "用户ID",
+      dataIndex: "user_id",
+      key: "user_id",
+      render: (value: string | undefined, record: FinanceRechargeRepair) =>
+        renderMemberLink(value, record.account_id, record.public_user_id ?? value),
+    },
+    { title: "补单类型", dataIndex: "repair_type", key: "repair_type" },
+    { title: "金额", dataIndex: "amount", key: "amount", render: (value: number) => formatMoney(value) },
+    { title: "平台订单号", dataIndex: "platform_order_no", key: "platform_order_no", render: (value: string | null | undefined) => value || "-" },
+    { title: "渠道订单号", dataIndex: "channel_order_no", key: "channel_order_no", render: (value: string | null | undefined) => value || "-" },
+    { title: "状态", dataIndex: "status", key: "status", render: (value: string) => renderStatusTag(value) },
+    { title: "创建时间", dataIndex: "created_at", key: "created_at", render: (value: string | null | undefined) => formatDateTime(value) },
+    ...(canManageFinance
+      ? [{
+          title: "操作",
+          key: "actions",
+          render: (_: unknown, record: FinanceRechargeRepair) =>
+            record.status === "pending" ? (
+              <Space>
+                <Button
+                  size="small"
+                  aria-label={`approve-recharge-repair-${record.id}`}
+                  loading={actionLoading}
+                  onClick={() => { void handleApproveRechargeRepair(record.id); }}
+                >
+                  通过
+                </Button>
+                <Button
+                  size="small"
+                  danger
+                  aria-label={`reject-recharge-repair-${record.id}`}
+                  onClick={() => openDecisionModal({ kind: "repair", id: record.id })}
+                >
+                  驳回
+                </Button>
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">-</Typography.Text>
+            ),
+        }]
+      : []),
+  ];
 
-  const tabItems = [
-    ...(canViewRecharge ? [{ key: "deposits", label: "充值记录", children: (
-      <>
-        <Space style={{ marginBottom: 16 }} wrap>
-          <Input.Search placeholder="搜索会员" style={{ width: 160 }} value={depositSearch} onSearch={(v) => setDepositSearch(v)} onChange={(e) => { if (!e.target.value) setDepositSearch(""); }} />
-          <Select placeholder="站点" allowClear style={{ width: 120 }} value={depositSite} onChange={setDepositSite} options={uniqueSites.map((s) => ({ label: s, value: s }))} />
-          <Select placeholder="渠道" allowClear style={{ width: 120 }} value={depositChannel} onChange={setDepositChannel} options={uniqueChannels.map((c) => ({ label: c, value: c }))} />
-          <Select placeholder="状态" allowClear style={{ width: 120 }} value={depositStatus} onChange={setDepositStatus} options={Object.entries(statusMap).map(([k, v]) => ({ label: v.label, value: k }))} />
-          <DatePicker placeholder="开始日期" />
-          <DatePicker placeholder="结束日期" />
-          <Checkbox checked={depositFirstOnly} onChange={(e) => setDepositFirstOnly(e.target.checked)}>首充用户</Checkbox>
-        </Space>
-        <Table rowKey="id" dataSource={filteredDeposits} columns={depositColumns}
-          pagination={{ current: depositPage, onChange: setDepositPage, pageSize: depositPageSize, onShowSizeChange: (_c, s) => { setDepositPageSize(s); setDepositPage(1); }, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+  const walletLedgerColumns = [
+    { title: "流水 ID", dataIndex: "id", key: "id" },
+    {
+      title: "用户ID",
+      dataIndex: "user_id",
+      key: "user_id",
+      render: (value: string | undefined, record: FinanceWalletLedger) =>
+        renderMemberLink(value, record.account_id, record.public_user_id ?? value),
+    },
+    { title: "方向", dataIndex: "direction", key: "direction", render: (value: string) => renderStatusTag(value) },
+    { title: "交易类型", dataIndex: "transaction_type", key: "transaction_type" },
+    { title: "来源", dataIndex: "source_type", key: "source_type", render: (value: string | null | undefined) => value || "-" },
+    { title: "展示标题", dataIndex: "display_title", key: "display_title", render: (value: string | null | undefined) => value || "-" },
+    { title: "金额", dataIndex: "amount", key: "amount", render: (value: number) => formatMoney(value) },
+    { title: "现金", dataIndex: "cash_amount", key: "cash_amount", render: (value: number) => formatMoney(value) },
+    { title: "赠金", dataIndex: "bonus_amount", key: "bonus_amount", render: (value: number) => formatMoney(value) },
+    { title: "状态", dataIndex: "status", key: "status", render: (value: string) => renderStatusTag(value) },
+    { title: "入账后余额", dataIndex: "balance_after", key: "balance_after", render: (value: number | null | undefined) => formatMoney(value) },
+    { title: "创建时间", dataIndex: "created_at", key: "created_at", render: (value: string | null | undefined) => formatDateTime(value) },
+  ];
+
+  const rechargeExportColumns = buildExportColumns([
+    { key: "created_at", label: "created_at" },
+    { key: "account_id", label: "account_id" },
+    { key: "user_id", label: "user_id" },
+    { key: "public_user_id", label: "public_user_id" },
+    { key: "source_type", label: "source_type" },
+    { key: "amount", label: "amount" },
+    { key: "cash_amount", label: "cash_amount" },
+    { key: "bonus_amount", label: "bonus_amount" },
+    { key: "fund_type", label: "fund_type" },
+    { key: "status", label: "status" },
+  ]);
+  const withdrawalExportColumns = buildExportColumns([
+    { key: "created_at", label: "created_at" },
+    { key: "account_id", label: "account_id" },
+    { key: "user_id", label: "user_id" },
+    { key: "public_user_id", label: "public_user_id" },
+    { key: "amount", label: "amount" },
+    { key: "cash_amount", label: "cash_amount" },
+    { key: "bonus_amount", label: "bonus_amount" },
+    { key: "actual_payout_amount", label: "actual_payout_amount" },
+    { key: "account_no_masked", label: "account_no_masked" },
+    { key: "duplicate_account_count", label: "duplicate_account_count" },
+    { key: "duplicate_member_ids", label: "duplicate_member_ids" },
+    { key: "risk_level", label: "risk_level" },
+    { key: "status", label: "status" },
+  ]);
+  const bonusGrantExportColumns = buildExportColumns([
+    { key: "grant_no", label: "grant_no" },
+    { key: "account_id", label: "account_id" },
+    { key: "user_id", label: "user_id" },
+    { key: "public_user_id", label: "public_user_id" },
+    { key: "source_type", label: "source_type" },
+    { key: "amount", label: "amount" },
+    { key: "reason", label: "reason" },
+    { key: "status", label: "status" },
+    { key: "created_at", label: "created_at" },
+  ]);
+  const rechargeRepairExportColumns = buildExportColumns([
+    { key: "repair_no", label: "repair_no" },
+    { key: "account_id", label: "account_id" },
+    { key: "user_id", label: "user_id" },
+    { key: "public_user_id", label: "public_user_id" },
+    { key: "repair_type", label: "repair_type" },
+    { key: "amount", label: "amount" },
+    { key: "platform_order_no", label: "platform_order_no" },
+    { key: "channel_order_no", label: "channel_order_no" },
+    { key: "status", label: "status" },
+    { key: "created_at", label: "created_at" },
+  ]);
+  const walletLedgerExportColumns = buildExportColumns([
+    { key: "id", label: "id" },
+    { key: "account_id", label: "account_id" },
+    { key: "user_id", label: "user_id" },
+    { key: "public_user_id", label: "public_user_id" },
+    { key: "direction", label: "direction" },
+    { key: "transaction_type", label: "transaction_type" },
+    { key: "source_type", label: "source_type" },
+    { key: "display_title", label: "display_title" },
+    { key: "amount", label: "amount" },
+    { key: "cash_amount", label: "cash_amount" },
+    { key: "bonus_amount", label: "bonus_amount" },
+    { key: "status", label: "status" },
+    { key: "balance_after", label: "balance_after" },
+    { key: "created_at", label: "created_at" },
+  ]);
+  const alertsExportColumns = buildExportColumns([
+    { key: "type", label: "type" },
+    { key: "account_id", label: "account_id" },
+    { key: "user_id", label: "user_id" },
+    { key: "public_user_id", label: "public_user_id" },
+    { key: "amount", label: "amount" },
+    { key: "time", label: "time" },
+    { key: "message", label: "message" },
+  ]);
+  const summaryExportColumns = buildExportColumns([
+    { key: "recharge_amount", label: "recharge_amount" },
+    { key: "recharge_count", label: "recharge_count" },
+    { key: "bonus_amount", label: "bonus_amount" },
+    { key: "withdrawal_amount", label: "withdrawal_amount" },
+    { key: "withdrawal_cash_amount", label: "withdrawal_cash_amount" },
+    { key: "withdrawal_bonus_amount", label: "withdrawal_bonus_amount" },
+    { key: "withdrawal_fee", label: "withdrawal_fee" },
+    { key: "withdrawal_count", label: "withdrawal_count" },
+    { key: "net_recharge", label: "net_recharge" },
+    { key: "include_bonus", label: "include_bonus" },
+  ]);
+
+  function renderExportAction(
+    exportKey: string,
+    columns: ExportColumn[],
+    rows: Record<string, unknown>[],
+  ): JSX.Element | null {
+    if (!canExportReports) {
+      return null;
+    }
+    return (
+      <DataExporter
+        columns={columns}
+        filename={exportFilename(exportKey)}
+        fetchData={async () => ({ data: rows, total: rows.length })}
+        maxRows={10000}
+      />
+    );
+  }
+
+  /*
+    <EmptyGuide
+      title="该模块已移除 mock 数据"
+      description="当前后端尚未提供正式接口，因此这里不再展示伪造统计。待接口接通后再恢复。"
+    />
+  */
+
+  const refreshAll = (): void => {
+    void loadRechargeRows();
+    void loadWithdrawalRows();
+    void loadSummary();
+    void loadAlerts();
+    void loadBonusGrants();
+    void loadRechargeRepairs();
+    void loadWalletLedgers();
+  };
+
+  if (!hasPrimaryFinanceAccess) {
+    return (
+      <PageShell
+        title="璐㈠姟绠＄悊"
+        subtitle="鐪熷疄鍏呭€笺€佹彁鐜般€佽禒閲戜笌寮傚父鍛婅缁熶竴姹囨€?"
+      >
+        <EmptyGuide
+          title="鏆傛棤鍙敤璐㈠姟鑳藉姏"
+          description="褰撳墠瑙掕壊灏氭湭寮€閫氬厖鍊笺€佹彁鐜版垨璐㈠姟鎶ヨ〃鏉冮檺锛岃鑱旂郴绠＄悊鍛樿皟鏁存潈闄愰厤缃€?"
         />
-        <Space style={{ marginTop: 16 }} wrap>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>充值总额</div><div style={{ fontSize: 22, fontWeight: 600 }}>¥{depositSummary.total.toFixed(2)}</div></div>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>总笔数</div><div style={{ fontSize: 22, fontWeight: 600 }}>{depositSummary.count}</div></div>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>首充用户</div><div style={{ fontSize: 22, fontWeight: 600, color: "#52c41a" }}>{depositSummary.firstCount}</div></div>
-        </Space>
-      </>
-    )}] : []),
-    ...(canViewWithdrawal ? [{ key: "withdrawals", label: "提现记录", children: (
-      <>
-        <Space style={{ marginBottom: 16 }} wrap>
-          <Input.Search placeholder="搜索会员" style={{ width: 160 }} value={withdrawSearch} onSearch={(v) => setWithdrawSearch(v)} onChange={(e) => { if (!e.target.value) setWithdrawSearch(""); }} />
-          <Select placeholder="状态" allowClear style={{ width: 120 }} value={withdrawStatus} onChange={setWithdrawStatus} options={Object.entries(statusMap).map(([k, v]) => ({ label: v.label, value: k }))} />
-          <DatePicker placeholder="开始日期" />
-          <DatePicker placeholder="结束日期" />
-          {selectedIds.length > 0 && <><Button type="primary" loading={actionLoading} onClick={() => handleBatchAction("approve")}>批量审批</Button><Button danger loading={actionLoading} onClick={() => handleBatchAction("reject")}>批量拒绝</Button></>}
-        </Space>
-        <Table rowKey="id" dataSource={filteredWithdrawals} columns={withdrawColumns}
-          rowSelection={rowSelection}
-          pagination={{ current: withdrawPage, onChange: setWithdrawPage, pageSize: withdrawPageSize, onShowSizeChange: (_c, s) => { setWithdrawPageSize(s); setWithdrawPage(1); }, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
-        />
-        <Space style={{ marginTop: 16 }} wrap>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>提现总额</div><div style={{ fontSize: 22, fontWeight: 600 }}>¥{withdrawSummary.total.toFixed(2)}</div></div>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>手续费收入</div><div style={{ fontSize: 22, fontWeight: 600 }}>¥{withdrawSummary.totalFee.toFixed(2)}</div></div>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>待审批</div><div style={{ fontSize: 22, fontWeight: 600, color: "#faad14" }}>{withdrawSummary.pendingCount}</div></div>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>冻结</div><div style={{ fontSize: 22, fontWeight: 600, color: "#1677ff" }}>{withdrawSummary.frozenCount}</div></div>
-        </Space>
-      </>
-    )}] : []),
-    ...(canViewFinanceReports ? [{ key: "reports", label: "财务报表", children: (
-      <>
-        <Space style={{ marginBottom: 16 }} wrap>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>充值总额</div><div style={{ fontSize: 22, fontWeight: 600 }}>¥5,000</div></div>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>充值笔数</div><div style={{ fontSize: 22, fontWeight: 600 }}>9</div></div>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>提现总额</div><div style={{ fontSize: 22, fontWeight: 600 }}>¥1,700</div></div>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>提现笔数</div><div style={{ fontSize: 22, fontWeight: 600 }}>5</div></div>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>净充值</div><div style={{ fontSize: 22, fontWeight: 600, color: "#52c41a" }}>¥3,300</div></div>
-          <div style={statCardStyle}><div style={{ fontSize: 13, color: "#8c8c8c" }}>手续费收入</div><div style={{ fontSize: 22, fontWeight: 600 }}>¥17</div></div>
-        </Space>
-        <Table rowKey="date" dataSource={MOCK_DAILY} columns={dailyColumns} pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条` }} />
-      </>
-    )}] : []),
-    ...(canViewChannels ? [{
-      key: "channels", label: "渠道报表", children: (
-        <>
-          <Typography.Title level={5}>各渠道充提统计</Typography.Title>
-          <Table rowKey="channel" dataSource={MOCK_CHANNEL_REPORT} columns={channelColumns} pagination={false} style={{ marginBottom: 24 }} />
-          <Typography.Title level={5}>系统使用费用（AI / 翻译）</Typography.Title>
-          <Table rowKey="month" dataSource={MOCK_SYSTEM_USAGE} columns={usageColumns} pagination={false} />
-        </>
-      )
-    }] : []),
-    ...((canViewFinanceReports || canViewWithdrawal) ? [{ key: "alerts", label: "异常告警", children: (
-      <><Alert message="系统自动监控异常交易。大额充值、频繁提现、异常金额会在这里显示。" type="info" showIcon style={{ marginBottom: 16 }} /><Table rowKey="id" dataSource={MOCK_ALERTS} columns={alertColumns} pagination={false} /></>
-    )}] : []),
-    ...(canViewCallbacks ? [{
-      key: "callbacks", label: "回调管理", children: (
-        <><Table rowKey="id" dataSource={MOCK_CALLBACKS} columns={callbackColumns} pagination={false} /></>
-      )
-    }] : []),
+      </PageShell>
+    );
+  }
+
+  const tabs = [
+    ...(canViewRecharge
+      ? [{
+          key: "recharges",
+          label: "充值记录",
+          children: (
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space wrap>
+                <Select
+                  allowClear
+                  placeholder="状态"
+                  style={{ width: 140 }}
+                  value={rechargeStatus}
+                  onChange={(value) => setRechargeStatus(value)}
+                  options={[
+                    { label: "paid", value: "paid" },
+                    { label: "pending", value: "pending" },
+                    { label: "failed", value: "failed" },
+                  ]}
+                />
+                <Select
+                  allowClear
+                  placeholder="来源"
+                  style={{ width: 180 }}
+                  value={rechargeSourceType}
+                  onChange={(value) => setRechargeSourceType(value)}
+                  options={[
+                    { label: "manual_real_recharge", value: "manual_real_recharge" },
+                    { label: "admin_bonus", value: "admin_bonus" },
+                    { label: "payment_callback", value: "payment_callback" },
+                    { label: "callback_repair", value: "callback_repair" },
+                  ]}
+                />
+                <Select
+                  allowClear
+                  placeholder="资金口径"
+                  style={{ width: 160 }}
+                  value={rechargeFundScope}
+                  onChange={(value) => setRechargeFundScope(value)}
+                  options={[
+                    { label: "只看现金", value: "cash" },
+                    { label: "只看赠金", value: "bonus" },
+                  ]}
+                />
+                <Space>
+                  <Typography.Text>包含赠金</Typography.Text>
+                  <Switch checked={rechargeIncludeBonus} onChange={setRechargeIncludeBonus} />
+                </Space>
+                <Select
+                  aria-label="recharge-sort-field"
+                  style={{ width: 160 }}
+                  value={rechargeSortField}
+                  onChange={setRechargeSortField}
+                  options={rechargeSortFieldOptions}
+                />
+                <Select
+                  aria-label="recharge-sort-order"
+                  style={{ width: 140 }}
+                  value={rechargeSortOrder}
+                  onChange={(value) => setRechargeSortOrder(value as SortOrder)}
+                  options={sortOrderOptions}
+                />
+                <Button onClick={() => void loadRechargeRows()}>刷新</Button>
+                {renderExportAction("finance-recharges", rechargeExportColumns, rechargeRows.map((row) => ({
+                  created_at: formatDateTime(row.created_at),
+                  account_id: row.account_id ?? "",
+                  user_id: row.user_id,
+                  public_user_id: row.public_user_id ?? "",
+                  source_type: row.source_type ?? "",
+                  amount: row.amount,
+                  cash_amount: row.cash_amount,
+                  bonus_amount: row.bonus_amount,
+                  fund_type: row.fund_type ?? "",
+                  status: row.status,
+                })))}
+              </Space>
+              <Table
+                rowKey="id"
+                loading={rechargeLoading}
+                dataSource={rechargeRows}
+                columns={rechargeColumns}
+                pagination={{ pageSize: 10 }}
+                locale={{ emptyText: rechargeLoading ? <Spin size="small" /> : <Empty description="暂无充值记录" /> }}
+              />
+            </Space>
+          ),
+        }]
+      : []),
+    ...(canViewWithdrawal
+      ? [{
+          key: "withdrawals",
+          label: "提现记录",
+          children: (
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space wrap>
+                <Select
+                  allowClear
+                  placeholder="状态"
+                  style={{ width: 140 }}
+                  value={withdrawalStatus}
+                  onChange={(value) => setWithdrawalStatus(value)}
+                  options={[
+                    { label: "pending", value: "pending" },
+                    { label: "approved", value: "approved" },
+                    { label: "paid", value: "paid" },
+                    { label: "rejected", value: "rejected" },
+                  ]}
+                />
+                <Select
+                  allowClear
+                  placeholder="资金口径"
+                  style={{ width: 160 }}
+                  value={withdrawalFundScope}
+                  onChange={(value) => setWithdrawalFundScope(value)}
+                  options={[
+                    { label: "只看现金", value: "cash" },
+                    { label: "只看赠金", value: "bonus" },
+                  ]}
+                />
+                <Space>
+                  <Typography.Text>包含赠金</Typography.Text>
+                  <Switch checked={withdrawalIncludeBonus} onChange={setWithdrawalIncludeBonus} />
+                </Space>
+                <Select
+                  aria-label="withdrawal-sort-field"
+                  style={{ width: 160 }}
+                  value={withdrawalSortField}
+                  onChange={setWithdrawalSortField}
+                  options={withdrawalSortFieldOptions}
+                />
+                <Select
+                  aria-label="withdrawal-sort-order"
+                  style={{ width: 140 }}
+                  value={withdrawalSortOrder}
+                  onChange={(value) => setWithdrawalSortOrder(value as SortOrder)}
+                  options={sortOrderOptions}
+                />
+                <Button onClick={() => void loadWithdrawalRows()}>刷新</Button>
+                {renderExportAction("finance-withdrawals", withdrawalExportColumns, withdrawalRows.map((row) => ({
+                  created_at: formatDateTime(row.created_at),
+                  account_id: row.account_id ?? "",
+                  user_id: row.user_id,
+                  public_user_id: row.public_user_id ?? "",
+                  amount: row.amount,
+                  cash_amount: row.cash_amount,
+                  bonus_amount: row.bonus_amount,
+                  actual_payout_amount: row.actual_payout_amount ?? 0,
+                  account_no_masked: row.account_no_masked ?? "",
+                  duplicate_account_count: row.duplicate_account_count ?? 0,
+                  duplicate_member_ids: (row.duplicate_member_ids ?? []).join("|"),
+                  risk_level: row.risk_level ?? "",
+                  status: row.status,
+                })))}
+              </Space>
+              <Alert
+                type="info"
+                showIcon
+                message="当前页面已接真实提现列表。审批与驳回按钮后续会继续接入正式审核流，这里不再保留假成功动作。"
+              />
+              <Table
+                rowKey="id"
+                loading={withdrawalLoading}
+                dataSource={withdrawalRows}
+                columns={withdrawalColumns}
+                pagination={{ pageSize: 10 }}
+                locale={{ emptyText: withdrawalLoading ? <Spin size="small" /> : <Empty description="暂无提现记录" /> }}
+              />
+            </Space>
+          ),
+        }]
+      : []),
+    ...(canViewFinanceReports
+      ? [{
+          key: "summary",
+          label: "财务报表",
+          children: (
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space>
+                <Typography.Text>报表包含赠金</Typography.Text>
+                <Switch checked={summaryIncludeBonus} onChange={setSummaryIncludeBonus} />
+                <Button onClick={() => void loadSummary()}>刷新</Button>
+                {summary ? renderExportAction("finance-summary", summaryExportColumns, [{
+                  recharge_amount: summary.recharge_amount,
+                  recharge_count: summary.recharge_count,
+                  bonus_amount: summary.bonus_amount,
+                  withdrawal_amount: summary.withdrawal_amount,
+                  withdrawal_cash_amount: summary.withdrawal_cash_amount,
+                  withdrawal_bonus_amount: summary.withdrawal_bonus_amount,
+                  withdrawal_fee: summary.withdrawal_fee,
+                  withdrawal_count: summary.withdrawal_count,
+                  net_recharge: summary.net_recharge,
+                  include_bonus: summaryIncludeBonus,
+                }]) : null}
+              </Space>
+              {summaryLoading ? <Spin /> : summaryCards}
+            </Space>
+          ),
+        }]
+      : []),
+    ...(canViewFinanceReports
+      ? [{
+          key: "bonus-grants",
+          label: "赠金管理",
+          children: (
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Alert
+                type="info"
+                showIcon
+                message="赠金列表已经接入真实接口。本轮补齐创建、通过、驳回动作，便于财务后台直接闭环处理。"
+              />
+              <Space>
+                {canManageFinance ? (
+                  <Button type="primary" aria-label="create-bonus-grant" onClick={openBonusGrantModal}>
+                    新建赠金
+                  </Button>
+                ) : null}
+                <Button onClick={() => void loadBonusGrants()}>刷新</Button>
+                {renderExportAction("finance-bonus-grants", bonusGrantExportColumns, bonusGrantRows.map((row) => ({
+                  grant_no: row.grant_no,
+                  account_id: row.account_id,
+                  user_id: row.user_id,
+                  public_user_id: row.public_user_id ?? "",
+                  source_type: row.source_type,
+                  amount: row.amount,
+                  reason: row.reason,
+                  status: row.status,
+                  created_at: formatDateTime(row.created_at),
+                })))}
+              </Space>
+              <Table
+                rowKey="id"
+                loading={bonusGrantLoading}
+                dataSource={bonusGrantRows}
+                columns={bonusGrantColumns}
+                pagination={{ pageSize: 10 }}
+                locale={{ emptyText: bonusGrantLoading ? <Spin size="small" /> : <Empty description="暂无赠金记录" /> }}
+              />
+            </Space>
+          ),
+        }]
+      : []),
+    ...(canViewFinanceReports
+      ? [{
+          key: "recharge-repairs",
+          label: "补单中心",
+          children: (
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Alert
+                type="info"
+                showIcon
+                message="补单列表已经接入真实接口。本轮补齐创建、通过、驳回动作，避免继续停留在只读状态。"
+              />
+              <Space>
+                {canManageFinance ? (
+                  <Button type="primary" aria-label="create-recharge-repair" onClick={openRechargeRepairModal}>
+                    新建补单
+                  </Button>
+                ) : null}
+                <Button onClick={() => void loadRechargeRepairs()}>刷新</Button>
+                {renderExportAction("finance-recharge-repairs", rechargeRepairExportColumns, rechargeRepairRows.map((row) => ({
+                  repair_no: row.repair_no,
+                  account_id: row.account_id,
+                  user_id: row.user_id,
+                  public_user_id: row.public_user_id ?? "",
+                  repair_type: row.repair_type,
+                  amount: row.amount,
+                  platform_order_no: row.platform_order_no ?? "",
+                  channel_order_no: row.channel_order_no ?? "",
+                  status: row.status,
+                  created_at: formatDateTime(row.created_at),
+                })))}
+              </Space>
+              <Table
+                rowKey="id"
+                loading={rechargeRepairLoading}
+                dataSource={rechargeRepairRows}
+                columns={rechargeRepairColumns}
+                pagination={{ pageSize: 10 }}
+                locale={{ emptyText: rechargeRepairLoading ? <Spin size="small" /> : <Empty description="暂无补单记录" /> }}
+              />
+            </Space>
+          ),
+        }]
+      : []),
+    ...(canViewFinanceReports
+      ? [{
+          key: "wallet-ledgers",
+          label: "钱包流水",
+          children: (
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space wrap>
+                <Select
+                  allowClear
+                  placeholder="状态"
+                  style={{ width: 140 }}
+                  value={walletLedgerStatus}
+                  onChange={(value) => setWalletLedgerStatus(value)}
+                  options={[
+                    { label: "paid", value: "paid" },
+                    { label: "submitted", value: "submitted" },
+                    { label: "approved", value: "approved" },
+                    { label: "rejected", value: "rejected" },
+                  ]}
+                />
+                <Select
+                  allowClear
+                  placeholder="来源"
+                  style={{ width: 180 }}
+                  value={walletLedgerSourceType}
+                  onChange={(value) => setWalletLedgerSourceType(value)}
+                  options={[
+                    { label: "manual_real_recharge", value: "manual_real_recharge" },
+                    { label: "admin_bonus", value: "admin_bonus" },
+                    { label: "withdrawal", value: "withdrawal" },
+                    { label: "withdrawal_reject_refund", value: "withdrawal_reject_refund" },
+                    { label: "callback_repair", value: "callback_repair" },
+                  ]}
+                />
+                <Select
+                  allowClear
+                  placeholder="交易类型"
+                  style={{ width: 180 }}
+                  value={walletLedgerTransactionType}
+                  onChange={(value) => setWalletLedgerTransactionType(value)}
+                  options={[
+                    { label: "manual_recharge", value: "manual_recharge" },
+                    { label: "bonus_grant", value: "bonus_grant" },
+                    { label: "withdraw_request", value: "withdraw_request" },
+                    { label: "withdraw_reject_refund", value: "withdraw_reject_refund" },
+                    { label: "recharge_repair", value: "recharge_repair" },
+                  ]}
+                />
+                <Select
+                  allowClear
+                  placeholder="资金口径"
+                  style={{ width: 160 }}
+                  value={walletLedgerFundScope}
+                  onChange={(value) => setWalletLedgerFundScope(value)}
+                  options={[
+                    { label: "只看现金", value: "cash" },
+                    { label: "只看赠金", value: "bonus" },
+                  ]}
+                />
+                <Select
+                  aria-label="wallet-ledger-sort-field"
+                  style={{ width: 160 }}
+                  value={walletLedgerSortField}
+                  onChange={setWalletLedgerSortField}
+                  options={walletLedgerSortFieldOptions}
+                />
+                <Select
+                  aria-label="wallet-ledger-sort-order"
+                  style={{ width: 140 }}
+                  value={walletLedgerSortOrder}
+                  onChange={(value) => setWalletLedgerSortOrder(value as SortOrder)}
+                  options={sortOrderOptions}
+                />
+                <Button onClick={() => void loadWalletLedgers()}>刷新</Button>
+                {renderExportAction("finance-wallet-ledgers", walletLedgerExportColumns, walletLedgerRows.map((row) => ({
+                  id: row.id,
+                  account_id: row.account_id ?? "",
+                  user_id: row.user_id,
+                  public_user_id: row.public_user_id ?? "",
+                  direction: row.direction,
+                  transaction_type: row.transaction_type,
+                  source_type: row.source_type ?? "",
+                  display_title: row.display_title ?? "",
+                  amount: row.amount,
+                  cash_amount: row.cash_amount,
+                  bonus_amount: row.bonus_amount,
+                  status: row.status,
+                  balance_after: row.balance_after ?? "",
+                  created_at: formatDateTime(row.created_at),
+                })))}
+              </Space>
+              <Table
+                rowKey="id"
+                loading={walletLedgerLoading}
+                dataSource={walletLedgerRows}
+                columns={walletLedgerColumns}
+                pagination={{ pageSize: 10 }}
+                locale={{ emptyText: walletLedgerLoading ? <Spin size="small" /> : <Empty description="暂无钱包流水" /> }}
+              />
+            </Space>
+          ),
+        }]
+      : []),
+    ...(canViewFinanceReports
+      ? [{
+          key: "alerts",
+          label: "异常告警",
+          children: (
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space>
+                {renderExportAction("finance-anomaly-alerts", alertsExportColumns, alerts.map((row) => ({
+                  type: row.type,
+                  account_id: row.account_id ?? "",
+                  user_id: row.user_id ?? "",
+                  public_user_id: row.public_user_id ?? "",
+                  amount: row.amount ?? "",
+                  time: formatDateTime(row.time),
+                  message: row.message,
+                })))}
+              </Space>
+              <Table
+                rowKey={(record) => record.record_id || `${record.type}-${record.user_id || "none"}-${record.time || "none"}`}
+                loading={alertsLoading}
+                dataSource={alerts}
+                columns={alertColumns}
+                pagination={{ pageSize: 10 }}
+                locale={{ emptyText: alertsLoading ? <Spin size="small" /> : <Empty description="暂无异常告警" /> }}
+              />
+            </Space>
+          ),
+        }]
+      : []),
   ];
 
   return (
-    <PageShell title="财务管理" subtitle="查看充值提现记录和财务报表">
-      <Tabs items={tabItems} />
+    <PageShell
+      title="财务管理"
+      subtitle="真实充值、提现、赠金与异常告警统一汇总"
+      actions={<Button onClick={refreshAll}>全部刷新</Button>}
+    >
+      <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        {pageError ? <Alert type="error" showIcon message={pageError} /> : null}
+        {duplicateWithdrawalAlerts.length > 0 ? (
+          <Alert
+            type="warning"
+            showIcon
+            message={`检测到 ${duplicateWithdrawalAlerts.length} 条重复提现账户风险`}
+            description={(
+              <Space wrap>
+                {duplicateWithdrawalAlerts.map((item) => (
+                  <Space key={item.id} size={8}>
+                    <Tag color="default">{item.account_no_masked || "未配置账户"}</Tag>
+                    <Tag color="orange">{`重复账户 ${String(item.duplicate_account_count ?? 0)}人`}</Tag>
+                  </Space>
+                ))}
+              </Space>
+            )}
+          />
+        ) : null}
+        <Tabs items={tabs} />
+
+        <Modal
+          title="新建赠金"
+          open={bonusGrantModalOpen}
+          onCancel={() => setBonusGrantModalOpen(false)}
+          footer={null}
+          destroyOnHidden
+        >
+          <Form form={bonusGrantForm} layout="vertical" initialValues={{ currency: "USD", sourceType: "admin_bonus" }}>
+            <Form.Item label="账号 ID" name="accountId" rules={[{ required: true, message: "请输入账号 ID" }]}>
+              <Input aria-label="bonus-grant-account-id" />
+            </Form.Item>
+            <Form.Item label="用户 ID" name="userId" rules={[{ required: true, message: "请输入用户 ID" }]}>
+              <Input aria-label="bonus-grant-user-id" />
+            </Form.Item>
+            <Form.Item label="金额" name="amount" rules={[{ required: true, message: "请输入金额" }]}>
+              <Input aria-label="bonus-grant-amount" inputMode="decimal" />
+            </Form.Item>
+            <Form.Item label="币种" name="currency">
+              <Input aria-label="bonus-grant-currency" />
+            </Form.Item>
+            <Form.Item label="来源类型" name="sourceType">
+              <Input aria-label="bonus-grant-source-type" />
+            </Form.Item>
+            <Form.Item label="原因" name="reason" rules={[{ required: true, message: "请输入原因" }]}>
+              <Input aria-label="bonus-grant-reason" />
+            </Form.Item>
+            <Form.Item label="备注" name="remark">
+              <Input.TextArea aria-label="bonus-grant-remark" rows={3} />
+            </Form.Item>
+            <Space style={{ width: "100%", justifyContent: "flex-end" }}>
+              <Button onClick={() => setBonusGrantModalOpen(false)}>取消</Button>
+              <Button type="primary" aria-label="submit-bonus-grant" loading={actionLoading} onClick={() => { void handleCreateBonusGrant(); }}>
+                提交
+              </Button>
+            </Space>
+          </Form>
+        </Modal>
+
+        <Modal
+          title="新建补单"
+          open={rechargeRepairModalOpen}
+          onCancel={() => setRechargeRepairModalOpen(false)}
+          footer={null}
+          destroyOnHidden
+        >
+          <Form
+            form={rechargeRepairForm}
+            layout="vertical"
+            initialValues={{ currency: "USD", repairType: "manual_real_recharge" }}
+          >
+            <Form.Item label="账号 ID" name="accountId" rules={[{ required: true, message: "请输入账号 ID" }]}>
+              <Input aria-label="recharge-repair-account-id" />
+            </Form.Item>
+            <Form.Item label="用户 ID" name="userId" rules={[{ required: true, message: "请输入用户 ID" }]}>
+              <Input aria-label="recharge-repair-user-id" />
+            </Form.Item>
+            <Form.Item label="金额" name="amount" rules={[{ required: true, message: "请输入金额" }]}>
+              <Input aria-label="recharge-repair-amount" inputMode="decimal" />
+            </Form.Item>
+            <Form.Item label="币种" name="currency">
+              <Input aria-label="recharge-repair-currency" />
+            </Form.Item>
+            <Form.Item label="补单类型" name="repairType">
+              <Input aria-label="recharge-repair-type" />
+            </Form.Item>
+            <Form.Item label="平台订单号" name="platformOrderNo">
+              <Input aria-label="recharge-repair-platform-order-no" />
+            </Form.Item>
+            <Form.Item label="渠道订单号" name="channelOrderNo">
+              <Input aria-label="recharge-repair-channel-order-no" />
+            </Form.Item>
+            <Form.Item label="渠道 ID" name="channelId">
+              <Input aria-label="recharge-repair-channel-id" />
+            </Form.Item>
+            <Form.Item label="原因" name="reason" rules={[{ required: true, message: "请输入原因" }]}>
+              <Input aria-label="recharge-repair-reason" />
+            </Form.Item>
+            <Form.Item label="备注" name="remark">
+              <Input.TextArea aria-label="recharge-repair-remark" rows={3} />
+            </Form.Item>
+            <Space style={{ width: "100%", justifyContent: "flex-end" }}>
+              <Button onClick={() => setRechargeRepairModalOpen(false)}>取消</Button>
+              <Button
+                type="primary"
+                aria-label="submit-recharge-repair"
+                loading={actionLoading}
+                onClick={() => { void handleCreateRechargeRepair(); }}
+              >
+                提交
+              </Button>
+            </Space>
+          </Form>
+        </Modal>
+
+        <Modal
+          title={decisionTarget?.kind === "bonus" ? "驳回赠金" : "驳回补单"}
+          open={decisionTarget !== null}
+          onCancel={() => setDecisionTarget(null)}
+          footer={null}
+          destroyOnHidden
+        >
+          <Form form={decisionForm} layout="vertical">
+            <Form.Item label="驳回原因" name="reason">
+              <Input.TextArea aria-label="decision-reason" rows={4} />
+            </Form.Item>
+            <Space style={{ width: "100%", justifyContent: "flex-end" }}>
+              <Button onClick={() => setDecisionTarget(null)}>取消</Button>
+              <Button type="primary" danger aria-label="submit-decision" loading={actionLoading} onClick={() => { void handleSubmitDecision(); }}>
+                确认驳回
+              </Button>
+            </Space>
+          </Form>
+        </Modal>
+      </Space>
     </PageShell>
   );
 }

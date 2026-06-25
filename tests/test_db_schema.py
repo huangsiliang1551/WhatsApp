@@ -316,10 +316,24 @@ def test_key_relationship_columns_exist() -> None:
     assert "ticket_type" in Base.metadata.tables["tickets"].c
     assert "attachments_json" in Base.metadata.tables["ticket_messages"].c
     assert "system_balance" in WalletAccount.__table__.c
+    assert "frozen_balance" in WalletAccount.__table__.c
+    assert "system_cash_balance" in WalletAccount.__table__.c
+    assert "system_bonus_balance" in WalletAccount.__table__.c
+    assert "system_cash_frozen" in WalletAccount.__table__.c
+    assert "system_bonus_frozen" in WalletAccount.__table__.c
     assert "transaction_type" in WalletLedgerEntry.__table__.c
+    assert "cash_amount" in WalletLedgerEntry.__table__.c
+    assert "bonus_amount" in WalletLedgerEntry.__table__.c
+    assert "cash_balance_before" in WalletLedgerEntry.__table__.c
+    assert "cash_balance_after" in WalletLedgerEntry.__table__.c
+    assert "bonus_balance_before" in WalletLedgerEntry.__table__.c
+    assert "bonus_balance_after" in WalletLedgerEntry.__table__.c
     assert "wallet_account_id" in WalletTransferRequest.__table__.c
     assert "credited_at" in WalletRechargeOrder.__table__.c
     assert "request_no" in WithdrawalRequest.__table__.c
+    assert "cash_amount" in WithdrawalRequest.__table__.c
+    assert "bonus_amount" in WithdrawalRequest.__table__.c
+    assert "account_fingerprint" in WithdrawalRequest.__table__.c
     assert "withdrawal_request_id" in WithdrawalAuditLog.__table__.c
     assert "fragment_key" in FragmentDefinition.__table__.c
     assert "owned_count" in FragmentInventory.__table__.c

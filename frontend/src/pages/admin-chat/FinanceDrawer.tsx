@@ -1,6 +1,7 @@
 import { type JSX, useEffect, useState } from "react";
 import { Descriptions, Drawer, Spin, Tabs, Typography } from "antd";
-import { getCustomerSummary, type CustomerSummaryResponse } from "../../services/api";
+import { getMemberSummary } from "../../services/memberApi";
+import type { CustomerSummaryResponse } from "../../types/member";
 
 const { Text } = Typography;
 
@@ -35,7 +36,7 @@ export function FinanceDrawer({ open, customerId, accountId, onClose }: FinanceD
   useEffect(() => {
     if (!open || !customerId) return;
     setLoading(true);
-    getCustomerSummary(customerId, accountId ?? undefined)
+    getMemberSummary(customerId, accountId ?? undefined)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));

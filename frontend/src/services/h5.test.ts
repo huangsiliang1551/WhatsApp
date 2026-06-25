@@ -140,7 +140,7 @@ describe("H5 ticket auth contract", () => {
       ]));
     vi.stubGlobal("fetch", fetchMock);
 
-    await listSupportTickets();
+    const tickets = await listSupportTickets();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/auth/me");
@@ -148,6 +148,7 @@ describe("H5 ticket auth contract", () => {
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ credentials: "include" });
     expect(String(fetchMock.mock.calls[1]?.[0])).not.toContain("public_user_id");
     expect(String(fetchMock.mock.calls[1]?.[0])).not.toContain("site_key");
+    expect(tickets[0]?.user_id).toBe("user-1");
   });
 
   it("creates member tickets without posting client-supplied identity fields", async () => {

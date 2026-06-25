@@ -2882,33 +2882,6 @@ export async function listPlatformUsers(): Promise<PlatformUser[]> {
   return response.data;
 }
 
-export interface FinanceReport {
-  total_revenue: number;
-  total_billing: number;
-  paid_billing: number;
-  pending_billing: number;
-  recharge_amount: number;
-  withdraw_amount: number;
-  commission: number;
-  details: Array<{
-    date: string;
-    type: string;
-    description: string;
-    amount: number;
-    status: string;
-  }>;
-}
-
-export async function getFinanceReport(period: string = "monthly", agencyId?: string): Promise<FinanceReport> {
-  const response = await api.get<FinanceReport>("/api/reports/finance", {
-    params: {
-      period,
-      ...(agencyId ? { agency_id: agencyId } : {}),
-    }
-  });
-  return response.data;
-}
-
 /** CUS-001: Paginated user list with filters */
 export async function listPlatformUsersPaginated(
   params?: PlatformUserListParams

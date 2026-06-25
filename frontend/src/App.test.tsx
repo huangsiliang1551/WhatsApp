@@ -59,6 +59,18 @@ vi.mock("./pages/AgentsPage", () => ({
   ),
 }));
 
+vi.mock("./pages/InviteManagementPage", () => ({
+  InviteManagementPage: () => <div data-testid="invite-management-page">invite management</div>,
+}));
+
+vi.mock("./pages/InviteRelationsPage", () => ({
+  InviteRelationsPage: () => <div data-testid="invite-relations-page">invite relations</div>,
+}));
+
+vi.mock("./pages/InviteRewardsPage", () => ({
+  InviteRewardsPage: () => <div data-testid="invite-rewards-page">invite rewards</div>,
+}));
+
 vi.mock("./pages/H5App", () => ({
   H5App: ({ locationKey }: { locationKey: string }) => (
     <div data-testid="h5-app">H5 route: {locationKey}</div>
@@ -270,5 +282,50 @@ describe("App legacy roles compatibility routing", () => {
     });
 
     expect(screen.queryByText("页面不存在或您没有访问权限")).toBeNull();
+  });
+  it("renders the standalone invite management route", async () => {
+    window.history.replaceState({}, "", "/marketing/invites");
+    useAppStore.setState({
+      activePage: "dashboard",
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("invite-management-page")).toBeTruthy();
+    });
+
+    expect(useAppStore.getState().activePage).toBe("invite_management");
+    expect(window.location.pathname).toBe("/marketing/invites");
+  });
+
+  it("renders the standalone invite relations route", async () => {
+    window.history.replaceState({}, "", "/marketing/invite-relations");
+    useAppStore.setState({
+      activePage: "dashboard",
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("invite-relations-page")).toBeTruthy();
+    });
+
+    expect(useAppStore.getState().activePage).toBe("invite_relations");
+  });
+
+  it("renders the standalone invite rewards route", async () => {
+    window.history.replaceState({}, "", "/marketing/invite-rewards");
+    useAppStore.setState({
+      activePage: "dashboard",
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("invite-rewards-page")).toBeTruthy();
+    });
+
+    expect(useAppStore.getState().activePage).toBe("invite_rewards");
   });
 });

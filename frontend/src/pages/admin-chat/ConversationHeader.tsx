@@ -25,7 +25,6 @@ import {
 } from "@ant-design/icons";
 import type { ConversationSummary, RuntimeAgent, ConversationNote } from "../../services/api";
 import {
-  getCustomerSummary,
   getConversationTags,
   updateConversationTags,
   getConversationSentiment,
@@ -34,9 +33,11 @@ import {
   listConversationTimeline,
 } from "../../services/api";
 import type { ConversationSentiment, ConversationSla, CustomerConversationBrief, ConversationTimelineItem } from "../../services/api";
+import { getMemberSummary } from "../../services/memberApi";
 import type { CustomerProfileSummary } from "../../types/operations";
 import type { PlatformUserMemberStatusSnapshot } from "../../services/operations";
 import type { UseMemberStatusReturn } from "../../hooks/useMemberStatus";
+import { MemberIdLink } from "../../components/member/MemberIdLink";
 import { useConversationNotes } from "./hooks/useConversationNotes";
 import { useAppStore } from "../../stores/appStore";
 
@@ -100,6 +101,21 @@ function fmtTs(v: string | null | undefined): string {
   if (!v) return "-";
   const d = new Date(v);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function getConversationTitleLabel(input: {
+  customerId: string;
+  displayName?: string | null;
+  publicUserId?: string | null;
+}): string {
+  return input.displayName ?? input.publicUserId ?? input.customerId;
+}
+
+export function getConversationMemberLabel(input: {
+  customerId: string;
+  publicUserId?: string | null;
+}): string {
+  return input.publicUserId ?? input.customerId;
 }
 
 function fmtFull(v: string): string {
@@ -398,7 +414,7 @@ export function ConversationHeader({
       setMultiIpWarning(null);
       return;
     }
-    getCustomerSummary(customerProfile.id, customerProfile.account_id ?? undefined)
+    getMemberSummary(customerProfile.id, customerProfile.account_id ?? undefined)
       .then((summary) => {
         if (summary.customer.multi_ip && summary.customer.registration_ips.length > 1) {
           setMultiIpWarning(summary.customer.registration_ips);
@@ -422,7 +438,7 @@ export function ConversationHeader({
     if (!customerProfile?.id) return;
     const timer = setInterval(() => {
       // 客户摘要（余额/工单/多IP）
-      getCustomerSummary(customerProfile.id, customerProfile.account_id ?? undefined)
+      getMemberSummary(customerProfile.id, customerProfile.account_id ?? undefined)
         .then((summary) => {
           if (summary.customer.multi_ip && summary.customer.registration_ips.length > 1) {
             setMultiIpWarning(summary.customer.registration_ips);
@@ -509,15 +525,20 @@ export function ConversationHeader({
           </Tooltip>
           <Text strong style={{ fontSize: 13, whiteSpace: "nowrap", cursor: "pointer", userSelect: "text" }}
             title="点击复制"
-            onClick={(e) => { e.stopPropagation(); const v = customerProfile?.display_name ?? conversation.customer_id.slice(0, 12); navigator.clipboard.writeText(v).then(() => message.success("已复制")).catch(() => {}); }}
+            onClick={(e) => { e.stopPropagation(); const v = getConversationTitleLabel({ customerId: conversation.customer_id, displayName: customerProfile?.display_name, publicUserId: customerProfile?.public_user_id }); navigator.clipboard.writeText(v).then(() => message.success("已复制")).catch(() => {}); }}
           >
-            {customerProfile?.display_name ?? conversation.customer_id.slice(0, 12)}
+            {getConversationTitleLabel({ customerId: conversation.customer_id, displayName: customerProfile?.display_name, publicUserId: customerProfile?.public_user_id })}
           </Text>
           <Text type="secondary" style={{ fontSize: 11, whiteSpace: "nowrap", cursor: "pointer", userSelect: "text" }}
             title="点击复制"
-            onClick={(e) => { e.stopPropagation(); const v = customerProfile?.public_user_id ?? conversation.customer_id.slice(0, 16); navigator.clipboard.writeText(v).then(() => message.success("已复制")).catch(() => {}); }}
+            onClick={(e) => { e.stopPropagation(); const v = getConversationMemberLabel({ customerId: conversation.customer_id, publicUserId: customerProfile?.public_user_id }); navigator.clipboard.writeText(v).then(() => message.success("已复制")).catch(() => {}); }}
           >
-            · {customerProfile?.public_user_id ?? conversation.customer_id.slice(0, 16)}
+            · <MemberIdLink
+              accountId={conversation.account_id}
+              userId={customerProfile?.id ?? conversation.customer_id}
+              publicUserId={customerProfile?.public_user_id ?? conversation.customer_id}
+              label={getConversationMemberLabel({ customerId: conversation.customer_id, publicUserId: customerProfile?.public_user_id })}
+            />
           </Text>
           {/* 认证状态圆点 */}
           <Tooltip title={verifLabel(verifStatus)}>
