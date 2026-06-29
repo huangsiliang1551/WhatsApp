@@ -4,10 +4,10 @@ on:
   push:
     branches: [main]
     paths:
-      - 'frontend/**'
-      - 'app/**'
-      - 'Dockerfile'
-      - 'docker-compose.yml'
+      - "frontend/**"
+      - "app/**"
+      - "Dockerfile"
+      - "docker-compose.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,12 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── Frontend: Node.js setup + build ────────────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Frontend Dependencies
@@ -40,11 +39,10 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      # ── Backend: Python setup + test ───────────────────────────────────
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: "3.14"
 
       - name: Install Backend Dependencies
         run: |
@@ -60,9 +58,23 @@ jobs:
       - name: Run Backend Tests
         run: python -m pytest tests tests/api tests/services -x -q --timeout=60
 
-      # ── Deploy to Production Server ────────────────────────────────────
-      - name: Deploy to Production Server
+      - name: Resolve Deploy Mode
         if: github.ref == 'refs/heads/main'
+        id: deploy_mode
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          if [ -z "${SSH_PRIVATE_KEY}" ] || [ -z "${SERVER_HOST}" ] || [ -z "${SERVER_USER}" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Remote deploy secrets are missing; keeping workflow in dry-run mode."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to Production Server
+        if: github.ref == 'refs/heads/main' && steps.deploy_mode.outputs.enabled == 'true'
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -72,13 +84,11 @@ jobs:
         run: |
           set -e
 
-          # ── Prepare SSH key ────────────────────────────────────────────
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/deploy_key"
 
-          # ── Upload frontend build ──────────────────────────────────────
           echo "::group::Upload Frontend Build"
           echo "Uploading to ${SERVER_USER}@${SERVER_HOST}:${SERVER_FRONTEND_PATH}"
           rsync -e "ssh ${SSH_OPTS}" -avz --delete --checksum \
@@ -86,13 +96,11 @@ jobs:
             "${SERVER_USER}@${SERVER_HOST}:${SERVER_FRONTEND_PATH}/"
           echo "::endgroup::"
 
-          # ── Restart backend services ───────────────────────────────────
           echo "::group::Restart Backend Services"
           ssh ${SSH_OPTS} "${SERVER_USER}@${SERVER_HOST}" \
             "cd ${SERVER_APP_DIR} && docker compose pull app worker && docker compose up -d --force-recreate app worker"
           echo "::endgroup::"
 
-          # ── Health check ───────────────────────────────────────────────
           echo "::group::Health Check"
           sleep 15
           ssh ${SSH_OPTS} "${SERVER_USER}@${SERVER_HOST}" \
@@ -100,5 +108,8 @@ jobs:
           echo ""
           echo "::endgroup::"
 
-          echo ""
-          echo "✅ Deployment completed successfully"
+          echo "Deployment completed successfully"
+
+      - name: Skip Remote Deploy Dry Run
+        if: github.ref == 'refs/heads/main' && steps.deploy_mode.outputs.enabled != 'true'
+        run: echo "Remote deploy secrets are missing; skipping production SSH deployment."

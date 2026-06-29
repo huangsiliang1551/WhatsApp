@@ -294,7 +294,7 @@ def upgrade() -> None:
         ("ix_user_whatsapp_service_assignments_wa_id", ["wa_id"]),
         ("ix_user_whatsapp_service_assignments_assigned_waba_id", ["assigned_waba_id"]),
         ("ix_user_whatsapp_service_assignments_assigned_phone_number_id", ["assigned_phone_number_id"]),
-        ("ix_user_whatsapp_service_assignments_last_inbound_phone_number_id", ["last_inbound_phone_number_id"]),
+        ("ix_uwsa_last_inbound_phone_id", ["last_inbound_phone_number_id"]),
     ):
         _create_index_if_missing(inspector, "user_whatsapp_service_assignments", index_name, columns)
     _create_index_if_missing(

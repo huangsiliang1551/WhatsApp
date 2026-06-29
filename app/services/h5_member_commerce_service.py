@@ -122,7 +122,7 @@ class H5MemberCommerceService:
         context: H5MemberContext,
         package_id: str,
     ) -> H5TaskPackagePayload:
-        package = self._require_package(context=context, package_id=package_id)
+        package = self._require_package(context=context, package_id=package_id, for_update=True)
         if self._expire_if_needed(package):
             self._session.add(package)
             self._session.commit()
@@ -817,20 +817,30 @@ class H5MemberCommerceService:
         package_id: str,
         for_update: bool = False,
     ) -> TaskPackageInstance:
-        query = (
-            select(TaskPackageInstance)
-            .options(joinedload(TaskPackageInstance.items))
-            .options(joinedload(TaskPackageInstance.template))
-            .where(
-                TaskPackageInstance.id == package_id,
-                TaskPackageInstance.account_id == context.account_id,
-                TaskPackageInstance.user_id == context.user.id,
-                TaskPackageInstance.site_id == context.site.id,
-            )
-        )
         if for_update:
-            query = query.with_for_update().execution_options(populate_existing=True)
-        package = self._session.execute(query).unique().scalars().first()
+            package = self._session.scalars(
+                select(TaskPackageInstance)
+                .where(
+                    TaskPackageInstance.id == package_id,
+                    TaskPackageInstance.account_id == context.account_id,
+                    TaskPackageInstance.user_id == context.user.id,
+                    TaskPackageInstance.site_id == context.site.id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).first()
+        else:
+            package = self._session.execute(
+                select(TaskPackageInstance)
+                .options(joinedload(TaskPackageInstance.items))
+                .options(joinedload(TaskPackageInstance.template))
+                .where(
+                    TaskPackageInstance.id == package_id,
+                    TaskPackageInstance.account_id == context.account_id,
+                    TaskPackageInstance.user_id == context.user.id,
+                    TaskPackageInstance.site_id == context.site.id,
+                )
+            ).unique().scalars().first()
         if package is None:
             raise LookupError(f"Task package '{package_id}' was not found.")
         return package
@@ -868,11 +878,13 @@ class H5MemberCommerceService:
             currency="USD",
             withdraw_threshold=Decimal("100"),
         )
-        self._session.add(wallet)
+        savepoint = self._session.begin_nested()
         try:
-            self._session.commit()
+            self._session.add(wallet)
+            self._session.flush()
+            savepoint.commit()
         except IntegrityError:
-            self._session.rollback()
+            savepoint.rollback()
             wallet = self._session.scalars(
                 select(WalletAccount).where(
                     WalletAccount.account_id == context.account_id,
@@ -880,7 +892,6 @@ class H5MemberCommerceService:
                 )
             ).first()
             return wallet
-        self._session.refresh(wallet)
         return wallet
 
     def _require_wallet_row_for_update(

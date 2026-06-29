@@ -253,3 +253,11 @@
 2026-06-30 19:26 SGT | W9 | python scripts\run_p0_e2e_smoke.py | PASS | smoke passed | Final acceptance P0 smoke bundle passed.
 2026-06-30 19:27 SGT | W9 | cd frontend && npm run typecheck | PASS | frontend typecheck passed | Final acceptance frontend typecheck passed.
 2026-06-30 19:28 SGT | W9 | cd frontend && npm run build | PASS | vite build passed with existing chunk warnings only | Final acceptance frontend production build passed.
+2026-06-30 02:43 SGT | W9 | docker run --rm --entrypoint promtool -v ${PWD}/monitoring/prometheus/alerts.yml:/alerts.yml:ro prom/prometheus:v2.54.1 check rules /alerts.yml | PASS | 10 rules found | final acceptance repair
+2026-06-30 02:43 SGT | W9 | docker run --rm --entrypoint amtool -v ${PWD}/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro prom/alertmanager:v0.28.1 check-config /etc/alertmanager/alertmanager.yml | PASS | alertmanager config valid | final acceptance repair
+2026-06-30 02:43 SGT | W9 | python -m pytest tests/test_h5_task_packages_wallet_postgres.py -q | PASS | 4 passed, 1 warning | postgres concurrency regression
+2026-06-30 02:43 SGT | W9 | docker compose up -d app + /health probe | PASS | app booted after migrations | docker startup regression
+2026-06-30 02:43 SGT | W9 | python scripts/ci_collect_core_tests.py | PASS | collected_count=183, missing_groups=[] | final acceptance verification
+2026-06-30 02:43 SGT | W9 | python -m pytest tests tests/api tests/services -q --timeout=60 | PASS | 183 passed, 1 warning | final acceptance verification
+2026-06-30 02:43 SGT | W9 | python scripts/run_p0_e2e_smoke.py | PASS | smoke passed | final acceptance verification
+2026-06-30 02:43 SGT | W9 | cd frontend; npm run typecheck; npm run build | PASS | typecheck/build passed | final acceptance verification

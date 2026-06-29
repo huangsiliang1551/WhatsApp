@@ -10,6 +10,7 @@ from app.db.models import (
     H5Site,
     MemberTaskBatch,
     MemberTaskDayQuota,
+    new_id,
     TaskManualAddItemLog,
     TaskPackageInstance,
     TaskPackageInstanceItem,
@@ -159,8 +160,11 @@ class TaskManualAddService:
         added_amount = self._quantize(sum((Decimal(item.price) for item in pool_items), start=Decimal("0.00")))
         before_manual_added_amount = self._quantize(Decimal(package.manual_added_amount))
         before_effective_amount = self._quantize(Decimal(package.effective_amount))
+        log_created_at = utc_now()
+        log_id = new_id()
 
         log = TaskManualAddItemLog(
+            id=log_id,
             account_id=package.account_id,
             site_id=package.site_id,
             user_id=package.user_id,
@@ -178,12 +182,15 @@ class TaskManualAddService:
             before_effective_amount=before_effective_amount,
             after_effective_amount=self._quantize(before_effective_amount + added_amount),
             metadata_json={"pool_item_ids": [item.id for item in pool_items]},
+            created_at=log_created_at,
+            updated_at=log_created_at,
         )
         self._session.add(log)
-        self._session.flush()
 
         for index, pool_item in enumerate(pool_items, start=0):
+            template_item_id = new_id()
             template_item = TaskPackageTemplateItem(
+                id=template_item_id,
                 account_id=package.account_id,
                 template_id=package.template_id,
                 sort_order=next_template_sort_order + index,
@@ -199,7 +206,6 @@ class TaskManualAddService:
                 },
             )
             self._session.add(template_item)
-            self._session.flush()
 
             self._session.add(
                 TaskPackageInstanceItem(
@@ -207,7 +213,7 @@ class TaskManualAddService:
                     batch_id=package.batch_id,
                     quota_id=package.quota_id,
                     package_instance_id=package.id,
-                    template_item_id=template_item.id,
+                    template_item_id=template_item_id,
                     item_origin="manual_added",
                     is_required=True,
                     product_pool_id=pool_id,
@@ -233,7 +239,7 @@ class TaskManualAddService:
         package.effective_amount = self._quantize(Decimal(package.system_generated_amount) + Decimal(package.manual_added_amount))
         package.manual_added_item_count = int(package.manual_added_item_count or 0) + len(pool_items)
         package.required_item_count = int(package.required_item_count or 0) + len(pool_items)
-        package.last_manual_added_at = log.created_at
+        package.last_manual_added_at = log_created_at
         # Product rule: backend manual-add records stay in ops/audit logs only.
         # H5 should not surface a package adjustment notice for this action,
         # even if a legacy caller still submits notify_user/user_notice_text.
@@ -356,14 +362,19 @@ class TaskManualAddService:
         return MemberTaskDayQuotaResponse.model_validate(next_quota, from_attributes=True)
 
     def _require_package(self, *, package_id: str, for_update: bool = False) -> TaskPackageInstance:
-        query = (
-            select(TaskPackageInstance)
-            .options(joinedload(TaskPackageInstance.items))
-            .where(TaskPackageInstance.id == package_id)
-        )
         if for_update:
-            query = query.with_for_update().execution_options(populate_existing=True)
-        package = self._session.scalars(query).first()
+            package = self._session.scalars(
+                select(TaskPackageInstance)
+                .where(TaskPackageInstance.id == package_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).first()
+        else:
+            package = self._session.scalars(
+                select(TaskPackageInstance)
+                .options(joinedload(TaskPackageInstance.items))
+                .where(TaskPackageInstance.id == package_id)
+            ).first()
         if package is None:
             raise LookupError(f"Task package '{package_id}' was not found.")
         return package
