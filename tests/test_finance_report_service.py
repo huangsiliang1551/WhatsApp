@@ -110,8 +110,8 @@ def test_finance_summary_uses_cash_bonus_split_instead_of_legacy_only_records(
             transaction_type="admin_bonus",
             source_type="admin_bonus",
             note="Admin bonus credited",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="finance-summary-bonus",
             fund_type="bonus",
             is_bonus=True,
         )

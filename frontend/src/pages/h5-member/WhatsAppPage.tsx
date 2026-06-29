@@ -42,6 +42,20 @@ function isPendingBindingStatus(status: string | null | undefined): boolean {
     || normalized === "submitted";
 }
 
+function isFailedBindingStatus(status: string | null | undefined): boolean {
+  const normalized = status?.trim().toLowerCase();
+  return normalized === "failed"
+    || normalized === "rejected"
+    || normalized === "error"
+    || normalized === "expired";
+}
+
+function getFailedBindingHint(): string {
+  return getCurrentLocale().toLowerCase().startsWith("zh")
+    ? "上一次绑定申请未完成，请核对号码后重新提交，或重新打开绑定入口继续处理。"
+    : "The previous binding request could not be completed. Check the number and submit again, or reopen the binding entry.";
+}
+
 function formatChatTime(iso: string): string {
   try {
     return new Date(iso).toLocaleTimeString(getCurrentLocale(), {
@@ -86,6 +100,7 @@ function ChatStatusIcon({ status }: { status: H5ChatMessage["status"] }): JSX.El
 export function WhatsAppPage({
   whatsAppBinding,
   actionName,
+  onStartBinding,
   whatsappPhone,
   onWhatsappPhoneChange,
   onStartWhatsAppBindingApi,
@@ -112,12 +127,19 @@ export function WhatsAppPage({
 
   const isBound = whatsAppBinding?.isBound ?? false;
   const isPendingBinding = !isBound && isPendingBindingStatus(whatsAppBinding?.bindingStatus);
+  const isFailedBinding = !isBound && isFailedBindingStatus(whatsAppBinding?.bindingStatus);
   const isApiAction = actionName === "whatsapp-api";
+  const isEntryAction = actionName === "whatsapp";
   const bindingStatusLabel = isBound
     ? t("whatsapp.boundStatus")
     : isPendingBinding
       ? t("whatsapp.pending")
+      : isFailedBinding
+        ? t("common.failed")
       : t("whatsapp.notBound");
+  const lastStatusTimestamp = whatsAppBinding?.requestedAt ?? whatsAppBinding?.lastUpdatedAt ?? null;
+  const shouldShowFallbackStart = !isBound && !isPendingBinding;
+  const failedBindingHint = apiError || getFailedBindingHint();
 
   const scrollToBottom = useCallback((smooth = true) => {
     if (messagesEndRef.current && typeof messagesEndRef.current.scrollIntoView === "function") {
@@ -260,6 +282,15 @@ export function WhatsAppPage({
     },
     [onStartWhatsAppBindingApi, validatePhone, whatsappPhone],
   );
+
+  const handleOpenBindingEntry = useCallback(async (): Promise<void> => {
+    setApiError(null);
+    try {
+      await onStartBinding();
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : t("common.failed"));
+    }
+  }, [onStartBinding]);
 
   const renderMessage = useCallback((message: H5ChatMessage) => {
     const isInbound = message.direction === "inbound";
@@ -404,10 +435,10 @@ export function WhatsAppPage({
             />
             <CompactListRow
               badge={bindingStatusLabel}
-              sideNote={formatTimestamp(whatsAppBinding?.requestedAt ?? whatsAppBinding?.lastUpdatedAt ?? null)}
+              sideNote={formatTimestamp(lastStatusTimestamp)}
               subtitle={t("whatsapp.readinessReviewDesc")}
               title={t("whatsapp.readinessReviewTitle")}
-              tone={isPendingBinding ? "active" : "default"}
+              tone={isPendingBinding ? "active" : isFailedBinding ? "danger" : "default"}
             />
             <CompactListRow
               badge={t("whatsapp.openBinding")}
@@ -417,6 +448,12 @@ export function WhatsAppPage({
               tone="success"
             />
           </div>
+          {isFailedBinding ? (
+            <div className="h5-member-whatsapp-error">
+              <CloseCircleOutlined className="h5-member-whatsapp-error-icon" />
+              {failedBindingHint}
+            </div>
+          ) : null}
         </article>
       ) : null}
 
@@ -431,13 +468,42 @@ export function WhatsAppPage({
               title={t("whatsapp.pendingChecklistTitle")}
               tone="active"
             />
+            <CompactListRow
+              sideNote={formatTimestamp(whatsAppBinding?.lastUpdatedAt ?? null)}
+              subtitle={t("whatsapp.readinessNotifyDesc")}
+              title={t("whatsapp.readinessNotifyTitle")}
+              tone="success"
+            />
+          </div>
+        </article>
+      ) : null}
+
+      {isFailedBinding ? (
+        <article className="h5-card h5-member-whatsapp-bind-card">
+          <SectionHeader meta={t("common.failed")} title={t("whatsapp.openBinding")} />
+          <p className="muted h5-member-whatsapp-bind-copy">{failedBindingHint}</p>
+          <div className="h5-card-stack">
+            <CompactListRow
+              badge={bindingStatusLabel}
+              sideNote={formatTimestamp(whatsAppBinding?.lastUpdatedAt ?? null)}
+              subtitle={t("whatsapp.readinessReviewDesc")}
+              title={t("whatsapp.currentStatus")}
+              tone="danger"
+            />
+            <CompactListRow
+              badge={whatsAppBinding?.phoneNumber || whatsappPhone || t("whatsapp.noPhone")}
+              sideNote={t("whatsapp.bindPhoneLabel")}
+              subtitle={t("whatsapp.readinessPhoneDesc")}
+              title={t("whatsapp.phoneNumber")}
+              tone="default"
+            />
           </div>
         </article>
       ) : null}
 
       {!isBound && !isPendingBinding ? (
         <article className="h5-card h5-member-whatsapp-bind-card">
-          <SectionHeader title={t("whatsapp.bindTitle")} />
+          <SectionHeader title={isFailedBinding ? t("whatsapp.openBinding") : t("whatsapp.bindTitle")} />
           <p className="muted h5-member-whatsapp-bind-copy">{t("whatsapp.bindDesc")}</p>
           <form className="h5-form" onSubmit={(event) => void handleSubmit(event)}>
             <label>
@@ -469,6 +535,16 @@ export function WhatsAppPage({
                   t("whatsapp.bindSubmit")
                 )}
               </button>
+              {shouldShowFallbackStart ? (
+                <button
+                  className="h5-primary-button"
+                  disabled={apiLoading || isApiAction || isEntryAction}
+                  onClick={() => { void handleOpenBindingEntry(); }}
+                  type="button"
+                >
+                  {isEntryAction ? t("whatsapp.processing") : t("whatsapp.openBinding")}
+                </button>
+              ) : null}
             </div>
           </form>
         </article>

@@ -238,12 +238,15 @@ def test_embedded_signup_callback_rejects_verify_token_that_would_conflict_cross
         },
     )
     assert create_session_response.status_code == 200
-    session_id = create_session_response.json()["session_id"]
+    created_session = create_session_response.json()
+    session_id = created_session["session_id"]
+    launch_state = created_session["launch_context"]["state"]
 
     conflicting_response = client.post(
         f"/webhooks/meta/embedded-signup/session/{session_id}",
         json={
             "status": "completed",
+            "state": launch_state,
             "waba_id": "waba-verify-signup-b",
             "meta_business_portfolio_id": "portfolio-verify-signup-b",
             "phone_number_ids": ["pn-verify-signup-b"],

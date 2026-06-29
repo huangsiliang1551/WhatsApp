@@ -40,18 +40,6 @@ function resolveLanguage(): string {
     return savedLanguage;
   }
 
-  const docLang = typeof document !== "undefined" ? document.documentElement.lang : "";
-  const documentLanguage = resolveSupportedMessageLanguage(docLang);
-  if (documentLanguage) {
-    return documentLanguage;
-  }
-
-  const browserLang = typeof navigator !== "undefined" ? navigator.language : "";
-  const browserLanguage = resolveSupportedMessageLanguage(browserLang);
-  if (browserLanguage) {
-    return browserLanguage;
-  }
-
   return "zh-CN";
 }
 

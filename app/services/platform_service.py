@@ -15,6 +15,7 @@ from app.db.models import (
     H5SiteConfig,
     H5Translation,
     InviteCode,
+    MemberWhatsAppBindingRequest,
     SitePermission,
     Ticket,
     UserIdentity,
@@ -41,11 +42,32 @@ from app.schemas.platform import (
     UserTagCreateResponse,
     UserTagResponse,
 )
+from app.services.data_scope_filter_service import DataScopeFilterService
+from app.core.auth import RequestActor
 
 
 class PlatformService:
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    @staticmethod
+    def _build_user_search_clause(search: str) -> object:
+        search_like = f"%{search}%"
+        return or_(
+            AppUser.public_user_id.ilike(search_like),
+            AppUser.display_name.ilike(search_like),
+            AppUser.registration_ip.ilike(search_like),
+            AppUser.id.in_(
+                select(UserIdentity.user_id).where(
+                    UserIdentity.identity_value.ilike(search_like)
+                )
+            ),
+            AppUser.id.in_(
+                select(MemberWhatsAppBindingRequest.user_id).where(
+                    MemberWhatsAppBindingRequest.requested_phone_number.ilike(search_like)
+                )
+            ),
+        )
 
     async def list_sites(self, allowed_account_ids: set[str] | None = None) -> list[H5SiteResponse]:
         query = select(H5Site).order_by(H5Site.brand_name, H5Site.site_key)
@@ -183,7 +205,6 @@ class PlatformService:
 
         self._session.commit()
         self._session.refresh(config)
-        # Return the full config via same serialization as get_site_config
         return H5SiteConfigResponse.model_validate({
             "id": config.id,
             "site_id": config.site_id,
@@ -269,6 +290,7 @@ class PlatformService:
         registration_site_id: str | None = None,
         is_anonymous: bool | None = None,
         allowed_account_ids: set[str] | None = None,
+        scope_actor: RequestActor | None = None,
     ) -> PlatformUserPaginatedResponse | list[PlatformUserResponse]:
         """
         Enhanced user listing with pagination, search, and aggregate fields.
@@ -293,18 +315,10 @@ class PlatformService:
 
         # ── Search ───────────────────────────────────────────────────
         if search:
-            search_like = f"%{search}%"
-            base_query = base_query.where(
-                or_(
-                    AppUser.public_user_id.ilike(search_like),
-                    AppUser.display_name.ilike(search_like),
-                    AppUser.id.in_(
-                        select(UserIdentity.user_id).where(
-                            UserIdentity.identity_value.ilike(search_like)
-                        )
-                    ),
-                )
-            )
+            base_query = base_query.where(self._build_user_search_clause(search))
+
+        if scope_actor is not None:
+            base_query = DataScopeFilterService(self._session).filter_customers(base_query, scope_actor)
 
         # ── Sort ─────────────────────────────────────────────────────
         sort_field = "created_at"
@@ -330,33 +344,7 @@ class PlatformService:
             return [self._serialize_user(user) for user in users]
 
         # Total count — build independent query to avoid whereclause issues
-        count_query = select(func.count(AppUser.id))
-        if registration_site_id is not None:
-            count_query = count_query.where(AppUser.registration_site_id == registration_site_id)
-        if lifecycle_status is not None:
-            count_query = count_query.where(AppUser.lifecycle_status == lifecycle_status)
-        if is_anonymous is not None:
-            count_query = count_query.where(AppUser.is_anonymous == is_anonymous)
-        if allowed_account_ids is not None:
-            count_query = count_query.where(AppUser.account_id.in_(sorted(allowed_account_ids)))
-        if account_id is not None:
-            count_query = count_query.where(AppUser.account_id == account_id)
-        if has_whatsapp is not None:
-            count_query = count_query.where(AppUser.has_whatsapp == has_whatsapp)
-        if search:
-            search_like = f"%{search}%"
-            count_query = count_query.where(
-                or_(
-                    AppUser.public_user_id.ilike(search_like),
-                    AppUser.display_name.ilike(search_like),
-                    AppUser.id.in_(
-                        select(UserIdentity.user_id).where(
-                            UserIdentity.identity_value.ilike(search_like)
-                        )
-                    ),
-                )
-            )
-        total = self._session.scalar(count_query) or 0
+        total = self._session.scalar(select(func.count()).select_from(base_query.subquery())) or 0
 
         # Paginated query
         offset = (page - 1) * size

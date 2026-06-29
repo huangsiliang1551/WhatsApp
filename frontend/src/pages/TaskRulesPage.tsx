@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Col,
   Form,
   Input,
@@ -24,6 +25,13 @@ import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { DangerButton, showError, showSuccess } from "../components/Feedback";
 import { PageShell } from "../components/PageShell";
 import { usePageData } from "../hooks/usePageData";
+import {
+  getTaskSystemConfig,
+  listTaskIssuePlans,
+  patchTaskSystemConfig,
+  type TaskIssuePlan,
+  type TaskSystemConfig,
+} from "../services/api";
 import {
   createTaskRule,
   deleteTaskRule,
@@ -58,6 +66,11 @@ const EXPIRY_OPTIONS = [
   { label: "30 天后过期", value: "30d_expire" },
 ];
 
+const BOOLEAN_OPTIONS = [
+  { label: "启用", value: true },
+  { label: "关闭", value: false },
+];
+
 type TaskRuleFormValues = {
   name: string;
   trigger_type: string;
@@ -66,6 +79,193 @@ type TaskRuleFormValues = {
   expiry_config: string;
   follow_up_chain: Array<{ delay_days: number; package_id: string }>;
 };
+
+type TaskSystemConfigFormValues = {
+  status: string;
+  newbie_task_enabled: boolean;
+  newbie_plan_id?: string;
+  newbie_auto_popup: boolean;
+  official_plan_id?: string;
+  show_task_balance_transfer_prompt: boolean;
+  min_task_balance_transfer_prompt_amount: number;
+  max_active_batches_per_user: number;
+  max_active_packages_per_user: number;
+  whatsapp_binding_reward_enabled: boolean;
+  whatsapp_binding_reward_amount: number;
+  certified_member_enabled: boolean;
+  certified_recharge_threshold: number;
+  auto_certify_on_recharge: boolean;
+};
+
+function BasicSettingsTab({ accountId }: { accountId?: string }): JSX.Element {
+  const [form] = Form.useForm<TaskSystemConfigFormValues>();
+  const [saving, setSaving] = useState(false);
+  const [configSnapshot, setConfigSnapshot] = useState<TaskSystemConfig | null>(null);
+
+  const fetchSettings = useCallback(async () => {
+    if (!accountId) {
+      return {
+        taskSystemConfig: null as TaskSystemConfig | null,
+        issuePlans: [] as TaskIssuePlan[],
+      };
+    }
+    const [taskSystemConfig, issuePlans] = await Promise.all([
+      getTaskSystemConfig({ account_id: accountId }),
+      listTaskIssuePlans({ account_id: accountId }),
+    ]);
+    return { taskSystemConfig, issuePlans };
+  }, [accountId]);
+
+  const { data, loading, error, reload } = usePageData({
+    fetcher: fetchSettings,
+    deps: [accountId],
+  });
+
+  const issuePlans = data?.issuePlans ?? [];
+
+  useEffect(() => {
+    if (!data?.taskSystemConfig) {
+      return;
+    }
+    setConfigSnapshot(data.taskSystemConfig);
+    form.setFieldsValue({
+      status: data.taskSystemConfig.status,
+      newbie_task_enabled: data.taskSystemConfig.newbieTaskEnabled,
+      newbie_plan_id: data.taskSystemConfig.newbiePlanId ?? undefined,
+      newbie_auto_popup: data.taskSystemConfig.newbieAutoPopup,
+      official_plan_id: data.taskSystemConfig.officialPlanId ?? undefined,
+      show_task_balance_transfer_prompt: data.taskSystemConfig.showTaskBalanceTransferPrompt,
+      min_task_balance_transfer_prompt_amount: Number(data.taskSystemConfig.minTaskBalanceTransferPromptAmount),
+      max_active_batches_per_user: data.taskSystemConfig.maxActiveBatchesPerUser,
+      max_active_packages_per_user: data.taskSystemConfig.maxActivePackagesPerUser,
+      whatsapp_binding_reward_enabled: data.taskSystemConfig.whatsappBindingRewardEnabled,
+      whatsapp_binding_reward_amount: Number(data.taskSystemConfig.whatsappBindingRewardAmount),
+      certified_member_enabled: data.taskSystemConfig.certifiedMemberEnabled,
+      certified_recharge_threshold: Number(data.taskSystemConfig.certifiedRechargeThreshold),
+      auto_certify_on_recharge: data.taskSystemConfig.autoCertifyOnRecharge,
+    });
+  }, [data?.taskSystemConfig, form]);
+
+  const handleSave = async (values: TaskSystemConfigFormValues) => {
+    if (!accountId || !configSnapshot) {
+      showError("缺少可保存的任务系统配置范围");
+      return;
+    }
+    setSaving(true);
+    try {
+      const nextConfig = await patchTaskSystemConfig({
+        account_id: accountId,
+        site_id: configSnapshot.siteId ?? undefined,
+        status: values.status,
+        whatsapp_binding_reward_enabled: values.whatsapp_binding_reward_enabled,
+        whatsapp_binding_reward_amount: String(values.whatsapp_binding_reward_amount),
+        whatsapp_binding_reward_wallet_type: configSnapshot.whatsappBindingRewardWalletType,
+        whatsapp_binding_reward_currency: configSnapshot.whatsappBindingRewardCurrency,
+        certified_member_enabled: values.certified_member_enabled,
+        certified_recharge_threshold: String(values.certified_recharge_threshold),
+        certified_recharge_scope: configSnapshot.certifiedRechargeScope,
+        auto_certify_on_recharge: values.auto_certify_on_recharge,
+        newbie_task_enabled: values.newbie_task_enabled,
+        newbie_plan_id: values.newbie_plan_id || undefined,
+        newbie_auto_popup: configSnapshot.newbieAutoPopup,
+        official_plan_id: values.official_plan_id || undefined,
+        show_task_balance_transfer_prompt: configSnapshot.showTaskBalanceTransferPrompt,
+        min_task_balance_transfer_prompt_amount: String(configSnapshot.minTaskBalanceTransferPromptAmount),
+        max_active_batches_per_user: values.max_active_batches_per_user,
+        max_active_packages_per_user: values.max_active_packages_per_user,
+        metadata_json: configSnapshot.metadataJson,
+      });
+      setConfigSnapshot(nextConfig);
+      showSuccess("任务系统基础设置已保存");
+      void reload();
+    } catch {
+      showError("保存任务系统基础设置失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const planOptions = issuePlans.map((plan) => ({
+    label: `${plan.name} (${plan.plan_type})`,
+    value: plan.id,
+  }));
+
+  if (!accountId) {
+    return <Alert type="info" showIcon message="当前账号范围缺失，暂时无法加载任务系统基础设置。" />;
+  }
+
+  return (
+    <div style={{ maxWidth: 880 }}>
+      <Typography.Text type="secondary" style={{ display: "block", marginBottom: 16 }}>
+        收口 v3 任务系统基础配置：新手任务、正式任务、余额转入引导、认证门槛与活跃批次限制。
+      </Typography.Text>
+
+      {error ? (
+        <Typography.Text type="danger" style={{ display: "block", marginBottom: 8 }}>
+          {error}
+        </Typography.Text>
+      ) : null}
+
+      <Form form={form} layout="vertical" onFinish={handleSave}>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} md={12}>
+            <Card size="small" title="新手任务">
+              <Form.Item label="任务状态" name="newbie_task_enabled" valuePropName="checked">
+                <Checkbox>启用新手任务链路</Checkbox>
+              </Form.Item>
+              <Form.Item label="默认新手计划" name="newbie_plan_id">
+                <Select allowClear options={planOptions} placeholder="选择新手计划" loading={loading} />
+              </Form.Item>
+            </Card>
+          </Col>
+
+          <Col xs={24} md={12}>
+            <Card size="small" title="正式任务">
+              <Form.Item label="默认正式计划" name="official_plan_id">
+                <Select allowClear options={planOptions} placeholder="选择正式计划" loading={loading} />
+              </Form.Item>
+              <Form.Item label="活跃批次上限" name="max_active_batches_per_user" rules={[{ required: true, message: "请输入活跃批次上限" }]}>
+                <InputNumber min={1} max={20} style={{ width: "100%" }} />
+              </Form.Item>
+              <Form.Item label="活跃任务包上限" name="max_active_packages_per_user" rules={[{ required: true, message: "请输入活跃任务包上限" }]}>
+                <InputNumber min={1} max={50} style={{ width: "100%" }} />
+              </Form.Item>
+            </Card>
+          </Col>
+
+          <Col xs={24} md={12}>
+            <Card size="small" title="认证与奖励">
+              <Form.Item label="绑定奖励启用" name="whatsapp_binding_reward_enabled">
+                <Select options={BOOLEAN_OPTIONS} placeholder="选择是否启用" />
+              </Form.Item>
+              <Form.Item label="绑定奖励金额" name="whatsapp_binding_reward_amount" rules={[{ required: true, message: "请输入绑定奖励金额" }]}>
+                <InputNumber min={0} step={0.01} style={{ width: "100%" }} />
+              </Form.Item>
+              <Form.Item label="认证开关" name="certified_member_enabled">
+                <Select options={BOOLEAN_OPTIONS} placeholder="选择是否启用认证" />
+              </Form.Item>
+              <Form.Item label="认证充值门槛" name="certified_recharge_threshold" rules={[{ required: true, message: "请输入认证充值门槛" }]}>
+                <InputNumber min={0} step={0.01} style={{ width: "100%" }} />
+              </Form.Item>
+              <Form.Item label="充值后自动认证" name="auto_certify_on_recharge">
+                <Select options={BOOLEAN_OPTIONS} placeholder="选择是否自动认证" />
+              </Form.Item>
+            </Card>
+          </Col>
+        </Row>
+
+        <Space style={{ marginTop: 16 }}>
+          <Button type="primary" onClick={() => form.submit()} loading={saving}>
+            保存基础设置
+          </Button>
+          <Button onClick={() => void reload()} loading={loading}>
+            重新加载
+          </Button>
+        </Space>
+      </Form>
+    </div>
+  );
+}
 
 function PushRulesTab({ packages }: { packages: ProductPackage[] }): JSX.Element {
   const [modalOpen, setModalOpen] = useState(false);
@@ -553,7 +753,7 @@ function StatsTab(): JSX.Element {
 }
 
 export function TaskRulesPage(): JSX.Element {
-  const [activeTab, setActiveTab] = useState("push");
+  const [activeTab, setActiveTab] = useState("basic_settings");
   const [packages, setPackages] = useState<ProductPackage[]>([]);
   const actorAccountIds = useAppStore((state) => state.actorAccountIds);
   const accountId = actorAccountIds.length > 0 ? actorAccountIds[0] : undefined;
@@ -581,12 +781,13 @@ export function TaskRulesPage(): JSX.Element {
   );
 
   return (
-    <PageShell title="任务规则管理" subtitle="管理推送规则、签到配置和任务统计" actions={actions}>
+    <PageShell title="任务规则管理" subtitle="管理 v3 任务系统基础设置、推送规则、签到配置和任务统计" actions={actions}>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         size="small"
         items={[
+          { key: "basic_settings", label: "基础设置", children: <BasicSettingsTab accountId={accountId} /> },
           { key: "push", label: "推送规则", children: <PushRulesTab packages={packages} /> },
           { key: "signin", label: "签到配置", children: <SignInConfigTab /> },
           { key: "stats", label: "统计", children: <StatsTab /> },

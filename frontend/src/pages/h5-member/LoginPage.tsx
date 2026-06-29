@@ -1,22 +1,24 @@
-import { type JSX, type FormEvent, useState } from "react";
+import { type JSX, type FormEvent, useEffect, useRef, useState } from "react";
+import { LoadingOutlined } from "@ant-design/icons";
 
 import { t } from "./i18n";
 
 import { PasswordField } from "./sharedComponents";
-import { h5ScrollableViewportStyle, useRootScrollUnlock } from "./useRootScrollUnlock";
+import { useRootScrollUnlock } from "./useRootScrollUnlock";
 
-function validatePhone(value: string): string {
-  const cleaned = value.replace(/\s/g, "");
-  if (!cleaned) return "";
+function validateUsername(value: string): string {
+  const cleaned = value.trim();
+  if (!cleaned) return t('validation.required');
   // 允许多国格式：纯数字或以 + 开头的国际号码，最少 6 位
-  if (!/^(\+?\d+)$/.test(cleaned)) return t('validation.phoneDigitsOnly');
-  if (cleaned.length < 6) return t('validation.phoneTooShort');
+  if (/^\+?\d{6,32}$/.test(cleaned)) return "";
+  if (!/^[A-Za-z][A-Za-z0-9_.-]{3,31}$/.test(cleaned)) return t('validation.usernameFormat');
   return "";
 }
 
 function validatePassword(value: string): string {
-  if (!value) return "";
-  if (value.length < 6 || value.length > 64) return t('validation.passwordFormat');
+  const cleaned = value.trim();
+  if (!cleaned) return t('validation.required');
+  if (cleaned.length < 6 || cleaned.length > 64) return t('validation.passwordFormat');
   return "";
 }
 
@@ -101,12 +103,8 @@ export function LoginPage({
 }: LoginPageProps): JSX.Element {
   useRootScrollUnlock();
   const isLoginPage = page === "login";
-  const authBenefits = [
-    t("auth.benefits.taskPackage"),
-    t("auth.benefits.wallet"),
-    t("auth.benefits.fragment"),
-    t("auth.benefits.support"),
-  ];
+  const formRef = useRef<HTMLDivElement>(null);
+  const firstErrorRef = useRef<boolean>(false);
 
   const [loginPhoneError, setLoginPhoneError] = useState("");
   const [loginPhoneTouched, setLoginPhoneTouched] = useState(false);
@@ -122,12 +120,12 @@ export function LoginPage({
 
   function handleLoginPhoneChange(value: string): void {
     onLoginPhoneChange(value);
-    setLoginPhoneError(validatePhone(value));
+    setLoginPhoneError(validateUsername(value));
   }
 
   function handleLoginPhoneBlur(): void {
     setLoginPhoneTouched(true);
-    setLoginPhoneError(validatePhone(loginPhone));
+    setLoginPhoneError(validateUsername(loginPhone));
   }
 
   function handleLoginPasswordChange(value: string): void {
@@ -142,12 +140,12 @@ export function LoginPage({
 
   function handleRegisterPhoneChange(value: string): void {
     onRegisterPhoneChange(value);
-    setRegisterPhoneError(validatePhone(value));
+    setRegisterPhoneError(validateUsername(value));
   }
 
   function handleRegisterPhoneBlur(): void {
     setRegisterPhoneTouched(true);
-    setRegisterPhoneError(validatePhone(registerPhone));
+    setRegisterPhoneError(validateUsername(registerPhone));
   }
 
   function handleRegisterPasswordChange(value: string): void {
@@ -181,10 +179,15 @@ export function LoginPage({
 
   function handleLoginSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const submittedUsername = String(formData.get("loginUsername") ?? "");
+    const submittedPassword = String(formData.get("loginPassword") ?? "");
     setLoginPhoneTouched(true);
     setLoginPasswordTouched(true);
-    const phoneErr = validatePhone(loginPhone);
-    const passErr = validatePassword(loginPassword);
+    onLoginPhoneChange(submittedUsername);
+    onLoginPasswordChange(submittedPassword);
+    const phoneErr = validateUsername(submittedUsername);
+    const passErr = validatePassword(submittedPassword);
     setLoginPhoneError(phoneErr);
     setLoginPasswordError(passErr);
     if (phoneErr || passErr) return;
@@ -193,12 +196,19 @@ export function LoginPage({
 
   function handleRegisterSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const submittedUsername = String(formData.get("registerUsername") ?? "");
+    const submittedPassword = String(formData.get("registerPassword") ?? "");
+    const submittedConfirmPassword = String(formData.get("registerConfirmPassword") ?? "");
     setRegisterPhoneTouched(true);
     setRegisterPasswordTouched(true);
     setRegisterConfirmTouched(true);
-    const phoneErr = validatePhone(registerPhone);
-    const passErr = validatePassword(registerPassword);
-    const confirmErr = registerConfirmPassword !== registerPassword ? t('validation.confirmPasswordMismatch') : "";
+    onRegisterPhoneChange(submittedUsername);
+    onRegisterPasswordChange(submittedPassword);
+    onRegisterConfirmPasswordChange(submittedConfirmPassword);
+    const phoneErr = validateUsername(submittedUsername);
+    const passErr = validatePassword(submittedPassword);
+    const confirmErr = submittedConfirmPassword !== submittedPassword ? t('validation.confirmPasswordMismatch') : "";
     setRegisterPhoneError(phoneErr);
     setRegisterPasswordError(passErr);
     setRegisterConfirmError(confirmErr);
@@ -212,29 +222,25 @@ export function LoginPage({
   const registerPassErr = registerPasswordTouched ? registerPasswordError : "";
   const registerConfirmErr = registerConfirmTouched ? registerConfirmError : "";
 
+  useEffect(() => {
+    if (loginError || loginPhoneErr || loginPassErr || registerPhoneErr || registerPassErr || registerConfirmErr) {
+      if (!firstErrorRef.current) {
+        firstErrorRef.current = true;
+        const el = formRef.current?.querySelector(".h5-field-error, .h5-member-auth-error");
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+    } else {
+      firstErrorRef.current = false;
+    }
+  }, [loginError, loginPhoneErr, loginPassErr, registerPhoneErr, registerPassErr, registerConfirmErr]);
+
   return (
-    <main className="h5-shell h5-member-auth-shell" style={h5ScrollableViewportStyle}>
+    <main className="h5-shell h5-member-auth-shell" style={{ height: "var(--h5-visual-viewport-height, 100dvh)", overflowY: "auto" }}>
       <section className="h5-member-auth-panel">
         <div className="h5-member-auth-logo">{siteKey.toUpperCase()}</div>
-        <section className="h5-card h5-member-auth-card">
-          <div className="h5-member-auth-brand-row">
-            <span className="h5-member-auth-brand-pill">{t("shell.brandName")}</span>
-            <span className="h5-member-auth-tip">{isLoginPage ? t("auth.loginByPassword") : t("auth.register")}</span>
-          </div>
-          <div className="h5-member-auth-heading">
-            <strong>{isLoginPage ? t("auth.loginTitle") : t("auth.registerTitle")}</strong>
-            <span>{t("auth.loginSubtitle")}</span>
-          </div>
-          <div className="h5-member-auth-benefits">
-            {authBenefits.map((benefit) => (
-              <span key={benefit}>{benefit}</span>
-            ))}
-          </div>
-        </section>
-        <section className="h5-card h5-member-auth-form-card">
-          <p className="h5-member-auth-tip h5-member-auth-form-tip">
-            {isLoginPage ? t("auth.loginTip") : t("auth.registerTip")}
-          </p>
+        <section className="h5-card h5-member-auth-form-card" ref={formRef}>
           <div className="h5-member-auth-switch">
             <button
               className={`h5-member-auth-tab ${page === "login" ? "h5-member-auth-tab-active" : ""}`}
@@ -255,10 +261,12 @@ export function LoginPage({
           {page === "login" ? (
             <form className="h5-form" onSubmit={(event) => handleLoginSubmit(event)}>
               <label>
-                {t('auth.phoneNumber')}
+                {t('auth.account')}
                 <input
+                  autoComplete="username"
                   className={loginPhoneErr ? "h5-field-input-error" : ""}
-                  placeholder={t('auth.loginPhonePlaceholder')}
+                  name="loginUsername"
+                  placeholder={t('auth.loginAccountPlaceholder')}
                   value={loginPhone}
                   onChange={(event) => handleLoginPhoneChange(event.target.value)}
                   onBlur={handleLoginPhoneBlur}
@@ -269,6 +277,8 @@ export function LoginPage({
               <label>
                 {t('auth.password')}
                   <PasswordField
+                    autoComplete="current-password"
+                    name="loginPassword"
                     placeholder={t('auth.loginPasswordPlaceholder')}
                     value={loginPassword}
                     visible={loginPasswordVisible}
@@ -291,7 +301,7 @@ export function LoginPage({
               {loginError ? <div className="h5-member-auth-error">{loginError}</div> : null}
 
               <button className="seed-button" disabled={actionName === "login"} type="submit">
-                {actionName === "login" ? t('auth.loginSubmitting') : t('auth.login')}
+                {actionName === "login" ? <><LoadingOutlined /> {t('auth.loginSubmitting')}</> : t('auth.login')}
               </button>
 
               <div className="h5-member-auth-link-row">
@@ -307,10 +317,12 @@ export function LoginPage({
           ) : (
             <form className="h5-form" onSubmit={(event) => handleRegisterSubmit(event)}>
               <label>
-                {t('auth.phoneNumber')}
+                {t('auth.account')}
                 <input
+                  autoComplete="username"
                   className={registerPhoneErr ? "h5-field-input-error" : ""}
-                  placeholder={t('auth.registerPhonePlaceholder')}
+                  name="registerUsername"
+                  placeholder={t('auth.registerAccountPlaceholder')}
                   value={registerPhone}
                   onChange={(event) => handleRegisterPhoneChange(event.target.value)}
                   onBlur={handleRegisterPhoneBlur}
@@ -321,6 +333,8 @@ export function LoginPage({
               <label>
                 {t('auth.password')}
                   <PasswordField
+                    autoComplete="new-password"
+                    name="registerPassword"
                     placeholder={t('auth.registerPasswordPlaceholder')}
                     value={registerPassword}
                     visible={registerPasswordVisible}
@@ -343,6 +357,8 @@ export function LoginPage({
               <label>
                 {t('auth.confirmPassword')}
                   <PasswordField
+                    autoComplete="new-password"
+                    name="registerConfirmPassword"
                     placeholder={t('auth.registerConfirmPlaceholder')}
                     value={registerConfirmPassword}
                     visible={registerConfirmPasswordVisible}
@@ -353,41 +369,10 @@ export function LoginPage({
               {registerConfirmErr ? <span className="h5-field-error">{registerConfirmErr}</span> : null}
               </label>
               <button className="seed-button" disabled={actionName === "register"} type="submit">
-                {actionName === "register" ? t('auth.registerSubmitting') : t('auth.register')}
+                {actionName === "register" ? <><LoadingOutlined /> {t('auth.registerSubmitting')}</> : t('auth.register')}
               </button>
             </form>
           )}
-        </section>
-        <section className="h5-card h5-member-auth-support-card">
-          <div className="h5-member-auth-support-head">
-            <div>
-              <strong>{t("auth.demoAccount")}</strong>
-              <span>{t("auth.demoAccountDesc")}</span>
-            </div>
-            <code>{siteKey.toUpperCase()}</code>
-          </div>
-          <div className="h5-member-auth-support-grid">
-            <div className="h5-member-auth-support-item">
-              <strong>{t("auth.forgotPassword")}</strong>
-              <span>{t("auth.forgotPasswordDesc")}</span>
-            </div>
-            <div className="h5-member-auth-support-item">
-              <strong>{isLoginPage ? t("auth.noAccount") : t("auth.hasAccount")}</strong>
-              <span>{isLoginPage ? t("auth.noAccountDesc") : t("auth.hasAccountDesc")}</span>
-            </div>
-          </div>
-          <div className="h5-member-auth-support-actions">
-            <button className="seed-button seed-button-secondary" onClick={() => onNavigate("/h5/tickets/new")} type="button">
-              {t("auth.newTicket")}
-            </button>
-            <button
-              className="seed-button"
-              onClick={() => onNavigate(isLoginPage ? "/h5/register" : "/h5/login")}
-              type="button"
-            >
-              {isLoginPage ? t("auth.goRegister") : t("auth.goLogin")}
-            </button>
-          </div>
         </section>
       </section>
     </main>

@@ -424,7 +424,11 @@ class MemberProfile(Base, TimestampMixin):
     current_owner_staff_user_id: Mapped[str | None] = mapped_column(String(128), index=True)
     current_owner_agency_member_id: Mapped[str | None] = mapped_column(String(128))
     current_owner_assignment_id: Mapped[str | None] = mapped_column(String(36))
+    current_supervisor_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    current_team_id: Mapped[str | None] = mapped_column(String(128), index=True)
     owner_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    owner_assigned_by: Mapped[str | None] = mapped_column(String(128))
+    owner_source: Mapped[str | None] = mapped_column(String(64))
 
     current_ai_agent_id: Mapped[str | None] = mapped_column(String(36), index=True)
     current_ai_assignment_id: Mapped[str | None] = mapped_column(String(36))
@@ -734,12 +738,35 @@ class TaskPackageInstance(Base, TimestampMixin):
     )
     user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), nullable=False, index=True)
     site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    batch_id: Mapped[str | None] = mapped_column(ForeignKey("member_task_batches.id"), index=True)
+    quota_id: Mapped[str | None] = mapped_column(ForeignKey("member_task_day_quotas.id"), index=True)
+    batch_day_no: Mapped[int | None] = mapped_column(Integer, index=True)
+    batch_index: Mapped[int | None] = mapped_column(Integer)
+    batch_total: Mapped[int | None] = mapped_column(Integer)
+    planned_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    system_generated_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    manual_added_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    effective_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending_claim")
     reward_ratio_snapshot: Mapped[Decimal] = mapped_column(
         Numeric(12, 4),
         nullable=False,
         default=Decimal("0"),
     )
+    reward_amount_final: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    reward_ledger_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    current_item_index: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    visible_item_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    required_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_required_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    manual_added_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_manual_added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    has_adjustment_notice: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    adjustment_notice: Mapped[str | None] = mapped_column(Text)
+    claim_gate_snapshot: Mapped[str | None] = mapped_column(String(32))
+    required_recharge_amount_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    locked_reason: Mapped[str | None] = mapped_column(String(64))
+    pause_reason: Mapped[str | None] = mapped_column(String(128))
     dispatched_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, default=utc_now)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
@@ -763,6 +790,8 @@ class TaskPackageInstanceItem(Base, TimestampMixin):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    batch_id: Mapped[str | None] = mapped_column(ForeignKey("member_task_batches.id"), index=True)
+    quota_id: Mapped[str | None] = mapped_column(ForeignKey("member_task_day_quotas.id"), index=True)
     package_instance_id: Mapped[str] = mapped_column(
         ForeignKey("task_package_instances.id"),
         nullable=False,
@@ -774,16 +803,344 @@ class TaskPackageInstanceItem(Base, TimestampMixin):
         index=True,
     )
     order_id: Mapped[str | None] = mapped_column(ForeignKey("member_orders.id"), index=True)
+    item_origin: Mapped[str] = mapped_column(String(32), nullable=False, default="system_generated")
+    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    product_pool_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    pool_item_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    product_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    product_name_snapshot: Mapped[str | None] = mapped_column(String(255))
+    product_image_url_snapshot: Mapped[str | None] = mapped_column(String(512))
+    product_description_snapshot: Mapped[str | None] = mapped_column(Text)
+    price_snapshot: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
     image_url: Mapped[str | None] = mapped_column(String(1024))
     price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0"))
     currency: Mapped[str] = mapped_column(String(16), nullable=False, default="USD")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    visible_to_user: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    debit_ledger_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    manual_add_log_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    selection_seed: Mapped[str | None] = mapped_column(String(128))
+    selection_algorithm: Mapped[str | None] = mapped_column(String(64))
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
     package_instance: Mapped["TaskPackageInstance"] = relationship(back_populates="items")
     template_item: Mapped["TaskPackageTemplateItem"] = relationship()
+
+
+class TaskSystemConfig(Base, TimestampMixin):
+    __tablename__ = "task_system_configs"
+    __table_args__ = (
+        UniqueConstraint("account_id", "site_id", name="uq_task_system_configs_account_site"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    whatsapp_binding_reward_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    whatsapp_binding_reward_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2),
+        nullable=False,
+        default=Decimal("20.00"),
+    )
+    whatsapp_binding_reward_wallet_type: Mapped[str] = mapped_column(String(32), nullable=False, default="task_balance")
+    whatsapp_binding_reward_currency: Mapped[str] = mapped_column(String(16), nullable=False, default="USD")
+    certified_member_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    certified_recharge_threshold: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2),
+        nullable=False,
+        default=Decimal("50.00"),
+    )
+    certified_recharge_scope: Mapped[str] = mapped_column(String(32), nullable=False, default="real_recharge")
+    auto_certify_on_recharge: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    newbie_task_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    newbie_plan_id: Mapped[str | None] = mapped_column(ForeignKey("task_issue_plans.id"), index=True)
+    newbie_auto_popup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    official_plan_id: Mapped[str | None] = mapped_column(ForeignKey("task_issue_plans.id"), index=True)
+    show_task_balance_transfer_prompt: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    min_task_balance_transfer_prompt_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2),
+        nullable=False,
+        default=Decimal("0.01"),
+    )
+    max_active_batches_per_user: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    max_active_packages_per_user: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+Index(
+    "ux_task_system_configs_account_default_scope",
+    TaskSystemConfig.account_id,
+    unique=True,
+    sqlite_where=TaskSystemConfig.site_id.is_(None),
+    postgresql_where=TaskSystemConfig.site_id.is_(None),
+)
+
+
+class TaskIssuePlan(Base, TimestampMixin):
+    __tablename__ = "task_issue_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    plan_type: Mapped[str] = mapped_column(String(32), nullable=False, default="official")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    claim_gate: Mapped[str] = mapped_column(String(32), nullable=False, default="certified_member")
+    issue_anchor: Mapped[str] = mapped_column(String(32), nullable=False, default="certified_at")
+    issue_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="calendar_day")
+    require_previous_batch_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    max_unfinished_batches: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    after_last_rule_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="arithmetic_growth")
+    growth_package_count_step: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    growth_amount_step: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    default_product_pool_id: Mapped[str | None] = mapped_column(ForeignKey("task_product_pools.id"), index=True)
+    default_tolerance_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+    default_reward_ratio: Mapped[Decimal] = mapped_column(
+        Numeric(12, 4),
+        nullable=False,
+        default=Decimal("0.10"),
+    )
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class TaskIssuePlanDayRule(Base, TimestampMixin):
+    __tablename__ = "task_issue_plan_day_rules"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "day_no", name="uq_task_issue_plan_day_rules_plan_day"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("task_issue_plans.id"), nullable=False, index=True)
+    day_no: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    package_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    day_total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    tolerance_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    amount_allocation_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="average")
+    package_amounts_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    product_pool_id: Mapped[str | None] = mapped_column(ForeignKey("task_product_pools.id"), index=True)
+    product_count_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="range")
+    product_count_fixed: Mapped[int | None] = mapped_column(Integer)
+    product_count_min: Mapped[int | None] = mapped_column(Integer)
+    product_count_max: Mapped[int | None] = mapped_column(Integer)
+    reward_ratio: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False, default=Decimal("0.10"))
+    issue_time_of_day: Mapped[str | None] = mapped_column(String(16))
+    elapsed_delay_hours: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class MemberTaskDayQuota(Base, TimestampMixin):
+    __tablename__ = "member_task_day_quotas"
+    __table_args__ = (
+        UniqueConstraint("account_id", "user_id", "plan_id", "day_no", name="uq_member_task_day_quotas_scope"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), nullable=False, index=True)
+    plan_id: Mapped[str | None] = mapped_column(ForeignKey("task_issue_plans.id"), index=True)
+    day_no: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    package_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    day_total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    tolerance_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    amount_allocation_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="average")
+    package_amounts_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    product_pool_id: Mapped[str] = mapped_column(ForeignKey("task_product_pools.id"), nullable=False, index=True)
+    product_count_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="range")
+    product_count_fixed: Mapped[int | None] = mapped_column(Integer)
+    product_count_min: Mapped[int | None] = mapped_column(Integer)
+    product_count_max: Mapped[int | None] = mapped_column(Integer)
+    reward_ratio: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False, default=Decimal("0.10"))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    issued_batch_id: Mapped[str | None] = mapped_column(ForeignKey("member_task_batches.id"), index=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    generated_by: Mapped[str | None] = mapped_column(String(64))
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    created_by: Mapped[str | None] = mapped_column(String(64), index=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class MemberTaskBatch(Base, TimestampMixin):
+    __tablename__ = "member_task_batches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), nullable=False, index=True)
+    quota_id: Mapped[str | None] = mapped_column(ForeignKey("member_task_day_quotas.id"), index=True)
+    plan_id: Mapped[str | None] = mapped_column(ForeignKey("task_issue_plans.id"), index=True)
+    day_no: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    package_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_package_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_package_index: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    planned_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    system_generated_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    manual_added_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    effective_day_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    reward_ratio_snapshot: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False, default=Decimal("0.10"))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending_claim")
+    products_generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    product_generation_run_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class TaskProductPool(Base, TimestampMixin):
+    __tablename__ = "task_product_pools"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str | None] = mapped_column(String(64), index=True)
+    pool_type: Mapped[str] = mapped_column(String(32), nullable=False, default="general")
+    price_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="task_price_snapshot")
+    allow_repeat_in_same_batch: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    allow_repeat_in_same_package: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    currency: Mapped[str] = mapped_column(String(16), nullable=False, default="USD")
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class TaskProductPoolItem(Base, TimestampMixin):
+    __tablename__ = "task_product_pool_items"
+    __table_args__ = (
+        UniqueConstraint("pool_id", "product_id", name="uq_task_product_pool_items_pool_product"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    pool_id: Mapped[str] = mapped_column(ForeignKey("task_product_pools.id"), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    image_url: Mapped[str | None] = mapped_column(String(1024))
+    price: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    currency: Mapped[str] = mapped_column(String(16), nullable=False, default="USD")
+    product_description: Mapped[str | None] = mapped_column(Text)
+    reference_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    min_task_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    max_task_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    weight: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class TaskProductGenerationRun(Base, TimestampMixin):
+    __tablename__ = "task_product_generation_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), nullable=False, index=True)
+    quota_id: Mapped[str] = mapped_column(ForeignKey("member_task_day_quotas.id"), nullable=False, index=True)
+    batch_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    product_pool_id: Mapped[str] = mapped_column(ForeignKey("task_product_pools.id"), nullable=False, index=True)
+    selection_seed: Mapped[str] = mapped_column(String(128), nullable=False)
+    selection_algorithm: Mapped[str] = mapped_column(String(64), nullable=False, default="weighted_random_unique_v1")
+    target_day_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    actual_day_system_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    tolerance_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    generated_package_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    generated_item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="success")
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class TaskManualAddItemLog(Base, TimestampMixin):
+    __tablename__ = "task_manual_add_item_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), nullable=False, index=True)
+    batch_id: Mapped[str | None] = mapped_column(ForeignKey("member_task_batches.id"), index=True)
+    package_instance_id: Mapped[str] = mapped_column(ForeignKey("task_package_instances.id"), nullable=False, index=True)
+    operator_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    reason_text: Mapped[str | None] = mapped_column(Text)
+    notify_user: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    user_notice_text: Mapped[str | None] = mapped_column(Text)
+    user_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    added_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    added_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    before_manual_added_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0.00")
+    )
+    after_manual_added_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0.00")
+    )
+    before_effective_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    after_effective_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class TaskMonitorSavedView(Base, TimestampMixin):
+    __tablename__ = "task_monitor_saved_views"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    owner_staff_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    filter_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    sort_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    columns_json: Mapped[list[str] | None] = mapped_column(JSON)
+    refresh_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    sound_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class TaskAlertRule(Base, TimestampMixin):
+    __tablename__ = "task_alert_rules"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    condition_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    action_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    sound_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    priority: Mapped[str] = mapped_column(String(32), nullable=False, default="normal")
+    created_by: Mapped[str | None] = mapped_column(String(64), index=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class TaskMonitorAlertEvent(Base, TimestampMixin):
+    __tablename__ = "task_monitor_alert_events"
+    __table_args__ = (
+        UniqueConstraint("alert_rule_id", "package_id", name="uq_task_monitor_alert_rule_package"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    alert_rule_id: Mapped[str] = mapped_column(ForeignKey("task_alert_rules.id"), nullable=False, index=True)
+    package_id: Mapped[str] = mapped_column(ForeignKey("task_package_instances.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    current_value: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    threshold_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, default=utc_now)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    acknowledged_by: Mapped[str | None] = mapped_column(String(64), index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    resolved_by: Mapped[str | None] = mapped_column(String(64), index=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
 class PromotionTaskTemplate(Base, TimestampMixin):
@@ -943,6 +1300,11 @@ class WalletLedgerEntry(Base, TimestampMixin):
     display_title: Mapped[str | None] = mapped_column(String(128))
     is_bonus: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_real_recharge: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_staff_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    supervisor_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    team_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    agency_id_snapshot: Mapped[str | None] = mapped_column(String(36), index=True)
+    site_id_snapshot: Mapped[str | None] = mapped_column(String(36), index=True)
     note: Mapped[str | None] = mapped_column(String(1024))
     reference_type: Mapped[str | None] = mapped_column(String(64))
     reference_id: Mapped[str | None] = mapped_column(String(36), index=True)
@@ -1007,6 +1369,11 @@ class WithdrawalRequest(Base, TimestampMixin):
     duplicate_account_count: Mapped[int] = mapped_column(nullable=False, default=0)
     risk_level: Mapped[str | None] = mapped_column(String(32))
     risk_flags: Mapped[list[str] | None] = mapped_column(JSON)
+    owner_staff_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    supervisor_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    team_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    agency_id_snapshot: Mapped[str | None] = mapped_column(String(36), index=True)
+    site_id_snapshot: Mapped[str | None] = mapped_column(String(36), index=True)
     currency: Mapped[str] = mapped_column(String(16), nullable=False, default="USD")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="submitted")
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
@@ -1045,6 +1412,11 @@ class WalletBonusGrantRecord(Base, TimestampMixin):
     reason: Mapped[str] = mapped_column(String(128), nullable=False)
     remark: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    owner_staff_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    supervisor_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    team_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    agency_id_snapshot: Mapped[str | None] = mapped_column(String(36), index=True)
+    site_id_snapshot: Mapped[str | None] = mapped_column(String(36), index=True)
     operator_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     approved_by: Mapped[str | None] = mapped_column(String(64), index=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
@@ -1070,6 +1442,11 @@ class RechargeRepairOrder(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     reason: Mapped[str] = mapped_column(String(256), nullable=False)
     remark: Mapped[str | None] = mapped_column(Text)
+    owner_staff_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    supervisor_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    team_id_snapshot: Mapped[str | None] = mapped_column(String(128), index=True)
+    agency_id_snapshot: Mapped[str | None] = mapped_column(String(36), index=True)
+    site_id_snapshot: Mapped[str | None] = mapped_column(String(36), index=True)
     operator_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     approved_by: Mapped[str | None] = mapped_column(String(64), index=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
@@ -3083,6 +3460,18 @@ class H5SiteConfig(Base, TimestampMixin):
     ssh_key_path: Mapped[str | None] = mapped_column(String(500))
     domain: Mapped[str | None] = mapped_column(String(200))
     ssl_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    gateway_node_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    desired_gateway_config_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    actual_gateway_config_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    certificate_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="certbot_http01")
+    certificate_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    certificate_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    certificate_last_renewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    dns_target_type: Mapped[str] = mapped_column(String(32), nullable=False, default="cname")
+    dns_expected_value: Mapped[str | None] = mapped_column(String(255))
+    dns_current_values_json: Mapped[list[str] | None] = mapped_column(JSON)
+    last_deploy_job_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    last_verify_job_id: Mapped[str | None] = mapped_column(String(36), index=True)
 
 
 class H5Language(Base, TimestampMixin):
@@ -3784,6 +4173,494 @@ class PaymentReconciliation(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=utc_now, nullable=False)
+
+
+class PaymentReconciliationItem(Base, TimestampMixin):
+    __tablename__ = "payment_reconciliation_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    reconciliation_id: Mapped[str] = mapped_column(ForeignKey("payment_reconciliations.id"), nullable=False, index=True)
+    channel_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    item_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    channel_order_no: Mapped[str | None] = mapped_column(String(128), index=True)
+    platform_order_no: Mapped[str | None] = mapped_column(String(128), index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("app_users.id"), index=True)
+    platform_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    channel_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    currency: Mapped[str | None] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    repair_order_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class SiteWhatsAppPhonePool(Base, TimestampMixin):
+    __tablename__ = "site_whatsapp_phone_pools"
+    __table_args__ = (
+        Index("ix_site_whatsapp_phone_pools_site_status", "site_id", "status"),
+        Index(
+            "uq_site_whatsapp_phone_pools_phone_active",
+            "phone_number_id",
+            unique=True,
+            sqlite_where=text("status IN ('active','restricted','cooling_down')"),
+            postgresql_where=text("status IN ('active','restricted','cooling_down')"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("h5_sites.id"), nullable=False, index=True)
+    waba_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    phone_number_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    display_phone_number: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    purpose_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="shared_auth_ai")
+    weight: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    allow_new_users: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    allow_existing_users: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    only_existing_users: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    max_new_bindings_per_day: Mapped[int | None] = mapped_column(Integer)
+    max_auth_sessions_per_hour: Mapped[int | None] = mapped_column(Integer)
+    max_active_conversations: Mapped[int | None] = mapped_column(Integer)
+    today_new_binding_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    today_auth_session_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    active_conversation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ready_for_webhook_delivery: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ready_for_outbound_messages: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    webhook_runtime_status: Mapped[str | None] = mapped_column(String(32))
+    outbound_runtime_status: Mapped[str | None] = mapped_column(String(32))
+    quality_rating_snapshot: Mapped[str | None] = mapped_column(String(32))
+    phone_number_status_snapshot: Mapped[str | None] = mapped_column(String(64))
+    messaging_limit_tier_snapshot: Mapped[str | None] = mapped_column(String(64))
+    low_quality_stop_new_users: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    restricted_stop_allocation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_webhook_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    last_outbound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    last_error_message: Mapped[str | None] = mapped_column(Text)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    released_reason: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class WhatsAppIdentity(Base, TimestampMixin):
+    __tablename__ = "whatsapp_identities"
+    __table_args__ = (
+        UniqueConstraint("wa_id", name="uq_whatsapp_identities_wa_id"),
+        Index(
+            "uq_whatsapp_identities_user_active",
+            "user_id",
+            unique=True,
+            sqlite_where=text("binding_status IN ('bound','locked')"),
+            postgresql_where=text("binding_status IN ('bound','locked')"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    wa_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    phone_number: Mapped[str | None] = mapped_column(String(64), index=True)
+    display_name: Mapped[str | None] = mapped_column(String(128))
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("h5_sites.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), nullable=False, index=True)
+    member_profile_id: Mapped[str | None] = mapped_column(ForeignKey("member_profiles.id"), index=True)
+    binding_status: Mapped[str] = mapped_column(String(32), nullable=False, default="bound")
+    first_bound_phone_number_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    current_assigned_phone_number_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    bound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    unbound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class UserWhatsAppServiceAssignment(Base, TimestampMixin):
+    __tablename__ = "user_whatsapp_service_assignments"
+    __table_args__ = (
+        Index(
+            "uq_user_whatsapp_service_assignments_user_active",
+            "user_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
+        Index(
+            "uq_user_whatsapp_service_assignments_wa_active",
+            "wa_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("h5_sites.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), nullable=False, index=True)
+    wa_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    assigned_waba_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    assigned_phone_number_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    assigned_display_phone_number: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    assignment_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, default=utc_now)
+    migrated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    migrated_from_phone_number_id: Mapped[str | None] = mapped_column(String(128))
+    migration_reason: Mapped[str | None] = mapped_column(Text)
+    last_inbound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    last_inbound_phone_number_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    last_outbound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class WhatsAppAuthSession(Base, TimestampMixin):
+    __tablename__ = "whatsapp_auth_sessions"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_whatsapp_auth_sessions_token_hash"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("h5_sites.id"), nullable=False, index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("app_users.id"), index=True)
+    session_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    token_last4: Mapped[str] = mapped_column(String(8), nullable=False)
+    command_prefix: Mapped[str] = mapped_column(String(32), nullable=False)
+    selected_waba_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    selected_phone_number_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    selected_display_phone_number: Mapped[str] = mapped_column(String(64), nullable=False)
+    wa_link: Mapped[str] = mapped_column(String(1024), nullable=False)
+    command_text: Mapped[str] = mapped_column(String(256), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    wa_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    inbound_message_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    identity_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    browser_session_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    client_nonce_hash: Mapped[str | None] = mapped_column(String(128))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class WhatsAppAutoBindInvite(Base, TimestampMixin):
+    __tablename__ = "whatsapp_auto_bind_invites"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_whatsapp_auto_bind_invites_token_hash"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.account_id"), nullable=False, index=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("h5_sites.id"), nullable=False, index=True)
+    wa_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    inbound_phone_number_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    inbound_waba_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    inbound_message_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    token_last4: Mapped[str] = mapped_column(String(8), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    invite_link: Mapped[str] = mapped_column(String(1024), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("app_users.id"), index=True)
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class PermissionGrant(Base, TimestampMixin):
+    __tablename__ = "permission_grants"
+    __table_args__ = (
+        Index("ix_permission_grants_grantee_status", "grantee_subject_type", "grantee_subject_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    grantor_subject_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    grantor_subject_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    grantee_subject_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    grantee_subject_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    permission_code: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    can_delegate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False, default="inherit")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    revoked_by: Mapped[str | None] = mapped_column(String(64))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class DataScopeGrant(Base, TimestampMixin):
+    __tablename__ = "data_scope_grants"
+    __table_args__ = (
+        Index("ix_data_scope_grants_subject_status", "subject_type", "subject_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    subject_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    granted_by_subject_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    granted_by_subject_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class StaffTeam(Base, TimestampMixin):
+    __tablename__ = "staff_teams"
+    __table_args__ = (
+        Index("ix_staff_teams_agency_supervisor", "agency_id", "supervisor_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agencies.id"), nullable=False, index=True)
+    account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.account_id"), index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    supervisor_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class StaffTeamAssignment(Base, TimestampMixin):
+    __tablename__ = "staff_team_assignments"
+    __table_args__ = (
+        Index(
+            "uq_staff_team_assignments_staff_active",
+            "agency_id",
+            "staff_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agencies.id"), nullable=False, index=True)
+    team_id: Mapped[str] = mapped_column(ForeignKey("staff_teams.id"), nullable=False, index=True)
+    staff_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    supervisor_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    assigned_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, default=utc_now)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    move_reason: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class CustomerOwnershipAssignment(Base, TimestampMixin):
+    __tablename__ = "customer_ownership_assignments"
+    __table_args__ = (
+        Index(
+            "uq_customer_ownership_assignments_customer_active",
+            "customer_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    customer_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), nullable=False, index=True)
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agencies.id"), nullable=False, index=True)
+    account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.account_id"), index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    owner_staff_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    supervisor_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    team_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    assignment_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    assigned_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, default=utc_now)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    reason: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class ConversationAssignment(Base, TimestampMixin):
+    __tablename__ = "conversation_assignments"
+    __table_args__ = (
+        Index(
+            "uq_conversation_assignments_conversation_active",
+            "conversation_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), nullable=False, index=True)
+    customer_id: Mapped[str] = mapped_column(ForeignKey("app_users.id"), nullable=False, index=True)
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agencies.id"), nullable=False, index=True)
+    team_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    supervisor_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    assigned_staff_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    assigned_queue_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    assignment_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    is_temporary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    assigned_by: Mapped[str | None] = mapped_column(String(64))
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False, default=utc_now)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    reason: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class HandoverQueue(Base, TimestampMixin):
+    __tablename__ = "handover_queues"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agencies.id"), nullable=False, index=True)
+    team_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    supervisor_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    strategy: Mapped[str] = mapped_column(String(32), nullable=False, default="round_robin")
+    fallback_queue_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class AIHandoverPolicy(Base, TimestampMixin):
+    __tablename__ = "ai_handover_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agencies.id"), nullable=False, index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("h5_sites.id"), index=True)
+    owner_first: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    require_online_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    team_queue_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    agency_queue_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    max_wait_seconds_before_escalate: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    fallback_action: Mapped[str] = mapped_column(String(32), nullable=False, default="queue")
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class H5GatewayNode(Base, TimestampMixin):
+    __tablename__ = "h5_gateway_nodes"
+    __table_args__ = (
+        UniqueConstraint("node_code", name="uq_h5_gateway_nodes_node_code"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    node_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    public_ip: Mapped[str | None] = mapped_column(String(64))
+    private_ip: Mapped[str | None] = mapped_column(String(64))
+    region: Mapped[str | None] = mapped_column(String(64))
+    ssh_host: Mapped[str | None] = mapped_column(String(255))
+    ssh_port: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
+    ssh_user: Mapped[str | None] = mapped_column(String(64))
+    ssh_credential_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    agent_base_url: Mapped[str | None] = mapped_column(String(512))
+    agent_token_hash: Mapped[str | None] = mapped_column(String(128))
+    agent_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="pull")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    desired_config_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    actual_config_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    desired_frontend_version: Mapped[str | None] = mapped_column(String(64))
+    actual_frontend_version: Mapped[str | None] = mapped_column(String(64))
+    nginx_status: Mapped[str | None] = mapped_column(String(32))
+    agent_status: Mapped[str | None] = mapped_column(String(32))
+    firewall_status: Mapped[str | None] = mapped_column(String(32))
+    certbot_status: Mapped[str | None] = mapped_column(String(32))
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    last_health_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    cpu_usage_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    memory_usage_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    disk_usage_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    load_average: Mapped[str | None] = mapped_column(String(64))
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class H5GatewayCredential(Base, TimestampMixin):
+    __tablename__ = "h5_gateway_credentials"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    credential_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    encrypted_secret: Mapped[str] = mapped_column(Text, nullable=False)
+    secret_last4: Mapped[str | None] = mapped_column(String(8))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class H5GatewayJob(Base, TimestampMixin):
+    __tablename__ = "h5_gateway_jobs"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_h5_gateway_jobs_idempotency_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    node_id: Mapped[str] = mapped_column(ForeignKey("h5_gateway_nodes.id"), nullable=False, index=True)
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    trigger_source: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
+    requested_by: Mapped[str | None] = mapped_column(String(64))
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), unique=True, index=True)
+    input_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    failure_code: Mapped[str | None] = mapped_column(String(128))
+    failure_message: Mapped[str | None] = mapped_column(Text)
+    lock_key: Mapped[str | None] = mapped_column(String(128), index=True)
+
+
+class H5GatewayJobStep(Base, TimestampMixin):
+    __tablename__ = "h5_gateway_job_steps"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    job_id: Mapped[str] = mapped_column(ForeignKey("h5_gateway_jobs.id"), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("h5_gateway_nodes.id"), nullable=False, index=True)
+    step_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    command_name: Mapped[str | None] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    exit_code: Mapped[int | None] = mapped_column(Integer)
+    stdout_tail: Mapped[str | None] = mapped_column(Text)
+    stderr_tail: Mapped[str | None] = mapped_column(Text)
+    result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class H5FrontendRelease(Base, TimestampMixin):
+    __tablename__ = "h5_frontend_releases"
+    __table_args__ = (
+        UniqueConstraint("version", name="uq_h5_frontend_releases_version"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    version: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    artifact_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    artifact_sha256: Mapped[str] = mapped_column(String(128), nullable=False)
+    build_commit: Mapped[str | None] = mapped_column(String(64))
+    build_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class H5GatewayNodeRelease(Base, TimestampMixin):
+    __tablename__ = "h5_gateway_node_releases"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    node_id: Mapped[str] = mapped_column(ForeignKey("h5_gateway_nodes.id"), nullable=False, index=True)
+    release_id: Mapped[str] = mapped_column(ForeignKey("h5_frontend_releases.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="deployed")
+    deployed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    deployed_by: Mapped[str | None] = mapped_column(String(64))
+    previous_release_id: Mapped[str | None] = mapped_column(String(36))
+    rollback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
 # ── 注册归属 / AI 接待 / 入口链接新表到 Base.metadata（spec 5.1-5.10） ──

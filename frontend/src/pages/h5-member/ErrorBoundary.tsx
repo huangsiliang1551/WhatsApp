@@ -32,11 +32,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     try {
       const { api } = await import("../../services/api");
       await api.post("/api/h5/client-errors", {
+        error_type: "javascript",
         message: error.message,
-        stack: error.stack,
-        componentStack: errorInfo.componentStack,
+        stack_trace: error.stack ?? errorInfo.componentStack ?? null,
         url: window.location.href,
-        userAgent: navigator.userAgent,
       });
     } catch {
       // Silently fail

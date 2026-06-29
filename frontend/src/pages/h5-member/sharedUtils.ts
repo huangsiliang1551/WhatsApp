@@ -47,14 +47,6 @@ export function getCurrentLocale(): string {
     return saved;
   }
 
-  if (typeof document !== "undefined" && document.documentElement.lang) {
-    return document.documentElement.lang;
-  }
-
-  if (typeof navigator !== "undefined" && navigator.language) {
-    return navigator.language;
-  }
-
   return "zh-CN";
 }
 
@@ -307,6 +299,14 @@ export function buildH5Path(pathname: string, siteKey: string, extraParams?: Rec
   return `${url.pathname}${url.search}`;
 }
 
+export function buildH5LoginRedirectPath(currentPath: string, siteKey?: string): string {
+  const trimmedPath = currentPath.trim();
+  if (siteKey?.trim()) {
+    return buildH5Path("/h5/login", siteKey, { redirect: trimmedPath });
+  }
+  return `/h5/login?redirect=${encodeURIComponent(trimmedPath)}`;
+}
+
 export function canReplyToTicket(status: SupportTicketStatus): boolean {
   return !["resolved", "rejected", "closed", "cancelled"].includes(status);
 }
@@ -457,14 +457,80 @@ export type HomePrimaryAction = {
   title: string;
   description: string;
   buttonLabel: string;
-  kind: "claim" | "continue" | "recharge" | "withdraw";
+  kind: "claim" | "continue" | "recharge" | "withdraw" | "navigate";
   packageId?: string;
+  path?: string;
 };
 
 export function getHomePrimaryAction(
+  entryState: {
+    state: string;
+    redirectPath: string | null;
+    taskPackageId: string | null;
+  } | null,
   focusTaskPackage: { status: string; id: string; totalItems: number; totalCommission: number; title: string } | null,
   wallet: { canWithdraw: boolean; systemBalance: number; taskBalance: number } | null,
 ): HomePrimaryAction {
+  if (entryState?.state === "need_whatsapp_binding") {
+    return {
+      title: t("home.actionBindWhatsApp"),
+      description: t("home.actionBindWhatsAppDesc"),
+      buttonLabel: t("home.actionGoBindWhatsApp"),
+      kind: "navigate",
+      path: entryState.redirectPath ?? "/h5/whatsapp",
+    };
+  }
+
+  if (entryState?.state === "task_balance_transfer_prompt") {
+    return {
+      title: t("home.actionTransferTaskBalance"),
+      description: t("home.actionTransferTaskBalanceDesc"),
+      buttonLabel: t("home.actionGoTransferTaskBalance"),
+      kind: "navigate",
+      path: entryState.redirectPath ?? "/h5/wallet",
+    };
+  }
+
+  if (entryState?.state === "need_certification") {
+    return {
+      title: t("home.actionNeedCertification"),
+      description: t("home.actionNeedCertificationDesc"),
+      buttonLabel: t("home.actionGoCertification"),
+      kind: "navigate",
+      path: entryState.redirectPath ?? "/h5/wallet/recharge",
+    };
+  }
+
+  if ((entryState?.state === "official_batch_available" || entryState?.state === "newbie_task_available") && entryState.taskPackageId) {
+    return {
+      title: t("home.actionNewPackage"),
+      description: t("home.actionNewPackageDesc"),
+      buttonLabel: t("home.actionClaim"),
+      kind: "claim",
+      packageId: entryState.taskPackageId,
+    };
+  }
+
+  if ((entryState?.state === "official_batch_active" || entryState?.state === "newbie_task_active") && entryState.taskPackageId) {
+    return {
+      title: t("home.actionContinueTask"),
+      description: t("home.actionContinueTaskDesc"),
+      buttonLabel: t("home.actionContinue"),
+      kind: "continue",
+      packageId: entryState.taskPackageId,
+    };
+  }
+
+  if (entryState?.state === "waiting_next_batch" || entryState?.state === "no_task") {
+    return {
+      title: t("home.actionTaskCenter"),
+      description: t("home.actionTaskCenterDesc"),
+      buttonLabel: t("home.actionViewTasks"),
+      kind: "navigate",
+      path: entryState.redirectPath ?? "/h5/tasks",
+    };
+  }
+
   if (focusTaskPackage?.status === "active") {
     return {
       title: t("home.actionContinueTask"),

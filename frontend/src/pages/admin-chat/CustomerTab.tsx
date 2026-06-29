@@ -85,7 +85,7 @@ export function CustomerTab({
             </Descriptions.Item>
           </Descriptions>
           <Button size="small" style={{ marginTop: 6 }} onClick={onOpenCustomerPage}>
-            查看完整资料
+            查看用户资料
           </Button>
         </div>
       ) : (

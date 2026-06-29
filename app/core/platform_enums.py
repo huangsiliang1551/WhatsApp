@@ -14,6 +14,7 @@ class UserLifecycleStatus(StrEnum):
 
 
 class UserIdentityType(StrEnum):
+    USERNAME = "username"
     PHONE = "phone"
     EMAIL = "email"
     WHATSAPP = "whatsapp"

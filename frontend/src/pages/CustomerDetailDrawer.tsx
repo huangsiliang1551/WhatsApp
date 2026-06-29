@@ -1,1103 +1,915 @@
-import { useCallback, useEffect, useState, type JSX } from "react";
-import { Alert, Button, Descriptions, Divider, Drawer, Empty, List, Space, Spin, Statistic, Tag, Tabs, Typography, message } from "antd";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type JSX } from "react";
 import {
-  BlockOutlined,
-  CheckCircleOutlined,
-  ClockCircleOutlined,
-  CloseCircleOutlined,
-  DollarOutlined,
-  ExclamationCircleOutlined,
-  FieldTimeOutlined,
-  LoadingOutlined,
-  MessageOutlined,
-  PhoneOutlined,
-  SafetyOutlined,
-  ShoppingCartOutlined,
+  Alert,
+  Button,
+  Descriptions,
+  Empty,
+  List,
+  Modal,
+  Pagination,
+  Space,
+  Spin,
+  Statistic,
+  Table,
+  Tag,
+  Tabs,
+  Typography,
+  message,
+} from "antd";
+import {
+  CopyOutlined,
+  ReloadOutlined,
   StopOutlined,
+  UnlockOutlined,
   UserOutlined,
-  WhatsAppOutlined,
 } from "@ant-design/icons";
+
 import {
-  getCustomerTimeline,
   batchUpdateCustomerLifecycle,
-  listCustomerConversations,
   getCustomerProfile,
+  getCustomerTimeline,
+  listCustomerConversations,
+  listWalletLedgers,
 } from "../services/api";
-import { getMemberSummary } from "../services/memberApi";
-import { showSuccess, showError } from "../components/Feedback";
-import { usePermissions } from "../hooks/usePermissions";
 import { MemberIdLink } from "../components/member/MemberIdLink";
+import { showError, showSuccess } from "../components/Feedback";
+import { usePermissions } from "../hooks/usePermissions";
+import { getMemberSummary } from "../services/memberApi";
+import { useAppStore } from "../stores/appStore";
 import type {
-  TimelineEvent,
-  PlatformUser,
   CustomerConversationBrief,
   CustomerProfile,
+  FinanceWalletLedger,
+  PlatformUser,
+  TimelineEvent,
 } from "../services/api";
 import type { CustomerSummaryResponse } from "../types/member";
 
-// ── Constants ──
+const { Text, Title } = Typography;
 
-const TAB_KEYS = [
-  "overview",
-  "attribution",
-  "conversations",
-  "tickets",
-  "finance",
-  "timeline",
-  "profile",
-] as const;
-type TabKey = (typeof TAB_KEYS)[number];
+type TabKey =
+  | "overview"
+  | "attribution"
+  | "conversations"
+  | "tickets"
+  | "finance"
+  | "timeline"
+  | "profile";
 
-const TAB_LABELS: Record<TabKey, string> = {
-  overview: "概览",
-  attribution: "归属",
-  conversations: "会话列表",
-  tickets: "工单列表",
-  finance: "财务",
-  timeline: "时间线",
-  profile: "客户画像",
-};
+const TAB_ITEMS: Array<{ key: TabKey; label: string }> = [
+  { key: "overview", label: "概览" },
+  { key: "attribution", label: "归属" },
+  { key: "conversations", label: "会话" },
+  { key: "tickets", label: "工单" },
+  { key: "finance", label: "财务" },
+  { key: "timeline", label: "时间线" },
+  { key: "profile", label: "画像" },
+];
 
-const LC_COLORS: Record<string, string> = {
-  active: "#52c41a",
-  frozen: "#1677ff",
-  blacklisted: "#ff4d4f",
-  dormant: "#faad14",
-  new: "#1677ff",
-  churned: "#999",
-  inactive: "#d9d9d9",
-};
-const LC_LABELS: Record<string, string> = {
-  active: "活跃",
-  frozen: "冻结",
-  blacklisted: "黑名单",
-  dormant: "休眠",
-  new: "新用户",
-  churned: "流失",
-  inactive: "不活跃",
+const FIXED_CARD_HEIGHT = 96;
+const CONTENT_HEIGHT = 520;
+const CONVERSATION_PAGE_SIZE = 5;
+const TICKET_PAGE_SIZE = 5;
+const TIMELINE_PAGE_SIZE = 7;
+const LEDGER_PAGE_SIZE = 8;
+const OVERVIEW_TIMELINE_LIMIT = 5;
+
+const statCardStyle: CSSProperties = {
+  background: "#fff",
+  border: "1px solid #efe7db",
+  borderRadius: 14,
+  minHeight: FIXED_CARD_HEIGHT,
+  padding: 12,
+  alignContent: "center",
 };
 
-const VERIFY_LABELS: Record<string, string> = {
-  pending: "待审核",
-  approved: "已通过",
-  rejected: "已拒绝",
-  not_submitted: "未提交",
-};
-const VERIFY_COLORS: Record<string, string> = {
-  pending: "orange",
-  approved: "green",
-  rejected: "red",
-  not_submitted: "default",
+const sectionCardStyle: CSSProperties = {
+  background: "#fff",
+  border: "1px solid #efe7db",
+  borderRadius: 16,
+  padding: 16,
 };
 
-const BINDING_LABELS: Record<string, string> = {
-  pending: "待绑定",
-  bound: "已绑定",
-  unbound: "未绑定",
-  rejected: "已拒绝",
-};
-const BINDING_COLORS: Record<string, string> = {
-  pending: "orange",
-  bound: "green",
-  unbound: "default",
-  rejected: "red",
+const compactDescriptionContentStyle: CSSProperties = {
+  whiteSpace: "normal",
+  overflowWrap: "anywhere",
+  wordBreak: "break-word",
 };
 
-const TIMELINE_ICONS: Record<string, React.ReactNode> = {
-  conversation: <MessageOutlined style={{ color: "#1677ff" }} />,
-  message: <MessageOutlined style={{ color: "#52c41a" }} />,
-  ticket: <ShoppingCartOutlined style={{ color: "#faad14" }} />,
-  verification: <SafetyOutlined style={{ color: "#722ed1" }} />,
-  whatsapp_binding: <WhatsAppOutlined style={{ color: "#25D366" }} />,
-  wallet: <DollarOutlined style={{ color: "#52c41a" }} />,
-  withdrawal: <DollarOutlined style={{ color: "#ff4d4f" }} />,
+const profileIdWrapStyle: CSSProperties = {
+  display: "inline-block",
+  maxWidth: "100%",
+  overflowWrap: "anywhere",
+  wordBreak: "break-word",
 };
 
-const MANAGEMENT_LABELS: Record<string, string> = {
-  ai_managed: "AI 托管",
-  human_managed: "人工接管",
-  paused: "暂停",
+const scrollPaneStyle: CSSProperties = {
+  overflowY: "auto",
+  paddingRight: 4,
 };
 
-// ── Props ──
+const LIFECYCLE_META: Record<string, { color: string; label: string }> = {
+  active: { color: "success", label: "活跃" },
+  frozen: { color: "processing", label: "冻结" },
+  blacklisted: { color: "error", label: "黑名单" },
+  dormant: { color: "warning", label: "休眠" },
+  new: { color: "processing", label: "新用户" },
+  churned: { color: "default", label: "流失" },
+  inactive: { color: "default", label: "不活跃" },
+};
+
+const VERIFICATION_META: Record<string, { color: string; label: string }> = {
+  pending: { color: "warning", label: "待审核" },
+  approved: { color: "success", label: "已通过" },
+  rejected: { color: "error", label: "已拒绝" },
+  not_submitted: { color: "default", label: "未提交" },
+};
+
+const BINDING_META: Record<string, { color: string; label: string }> = {
+  pending: { color: "warning", label: "待绑定" },
+  bound: { color: "success", label: "已绑定" },
+  approved: { color: "success", label: "已绑定" },
+  unbound: { color: "default", label: "未绑定" },
+  rejected: { color: "error", label: "已拒绝" },
+};
+
+const MANAGEMENT_MODE_META: Record<string, { color: string; label: string }> = {
+  ai_managed: { color: "success", label: "AI 托管" },
+  human_managed: { color: "processing", label: "人工接管" },
+  paused: { color: "warning", label: "暂停" },
+};
+
+const TICKET_STATUS_META: Record<string, { color: string; label: string }> = {
+  open: { color: "error", label: "待处理" },
+  in_progress: { color: "processing", label: "处理中" },
+  pending_user: { color: "warning", label: "待补充" },
+  resolved: { color: "success", label: "已解决" },
+  closed: { color: "default", label: "已关闭" },
+  rejected: { color: "default", label: "已拒绝" },
+};
+
+const LEDGER_TYPE_LABELS: Record<string, string> = {
+  system_credit: "系统入账",
+  system_debit: "系统扣减",
+  recharge: "充值",
+  reward: "奖励",
+  task: "任务",
+  withdrawal: "提现",
+  sign_in_completion: "签到奖励",
+  admin_bonus: "后台赠金",
+  manual_real_recharge: "人工补单",
+};
+
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  admin_bonus: "后台赠金",
+  invite_bonus: "邀请奖励",
+  activity_bonus: "活动奖励",
+  recharge: "充值",
+  task_reward: "任务奖励",
+  withdraw: "提现",
+};
 
 export interface CustomerDetailDrawerProps {
   open: boolean;
   customerId: string | null;
-  accountId?: string;
+  accountId?: string | null;
+  initialTab?: TabKey;
   onClose: () => void;
   onViewConversations: (user: PlatformUser) => void;
 }
 
-// ── Component ──
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("zh-CN");
+}
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "-";
+  return new Date(value).toLocaleDateString("zh-CN");
+}
+
+function formatMoney(value: number): string {
+  return `¥${value.toFixed(2)}`;
+}
+
+function renderStatusTag(meta: { color: string; label: string } | undefined, fallback: string): JSX.Element {
+  return <Tag color={meta?.color ?? "default"}>{meta?.label ?? fallback}</Tag>;
+}
+
+async function copyText(value: string, successText: string): Promise<void> {
+  if (!value) return;
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    message.success(successText);
+    return;
+  }
+  message.info("当前环境不支持复制");
+}
+
+function getLedgerTitle(row: FinanceWalletLedger): string {
+  if (row.display_title) return row.display_title;
+  if (row.source_type && SOURCE_TYPE_LABELS[row.source_type]) return SOURCE_TYPE_LABELS[row.source_type];
+  if (row.ledger_type && LEDGER_TYPE_LABELS[row.ledger_type]) return LEDGER_TYPE_LABELS[row.ledger_type];
+  return row.ledger_type || "钱包流水";
+}
+
+function renderMemberIdBlock(
+  accountId: string | null | undefined,
+  userId: string,
+  publicUserId: string,
+): JSX.Element {
+  return (
+    <span style={profileIdWrapStyle}>
+      <MemberIdLink
+        accountId={accountId ?? undefined}
+        userId={userId}
+        publicUserId={publicUserId}
+        label={publicUserId}
+      />
+    </span>
+  );
+}
+
+function InlineTimelineList({ events }: { events: TimelineEvent[] }): JSX.Element {
+  return (
+    <List
+      size="small"
+      dataSource={events}
+      renderItem={(event) => (
+        <List.Item>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, width: "100%", alignItems: "center" }}>
+            <Text ellipsis>{event.summary}</Text>
+            <Text type="secondary">{formatDateTime(event.time)}</Text>
+          </div>
+        </List.Item>
+      )}
+    />
+  );
+}
+
+function getRegistrationLocationLabel(ip: string | null | undefined): string {
+  if (!ip) return "-";
+  if (ip === "127.0.0.1" || ip === "::1" || ip.toLowerCase() === "localhost") {
+    return "本机";
+  }
+  return "-";
+}
+
+function getSameIpUserLabel(count: number | null | undefined): string {
+  const normalized = typeof count === "number" && count > 0 ? count : 1;
+  return `同IP ${normalized}个用户`;
+}
 
 export function CustomerDetailDrawer({
   open,
   customerId,
   accountId,
+  initialTab,
   onClose,
   onViewConversations,
 }: CustomerDetailDrawerProps): JSX.Element {
   const { can } = usePermissions();
+  const openCustomersPage = useAppStore((state) => state.openCustomersPage);
   const canViewFinance = can("customers.finance");
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab ?? "overview");
   const [summary, setSummary] = useState<CustomerSummaryResponse | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
-  const [timelineLoading, setTimelineLoading] = useState(false);
-  const [timelineLimit, setTimelineLimit] = useState(20);
   const [conversations, setConversations] = useState<CustomerConversationBrief[]>([]);
-  const [convLoading, setConvLoading] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
-
-  // IV-FE-004: 客户画像
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
+  const [ledgerRows, setLedgerRows] = useState<FinanceWalletLedger[]>([]);
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [conversationPage, setConversationPage] = useState(1);
+  const [ticketPage, setTicketPage] = useState(1);
+  const [timelinePage, setTimelinePage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [conversationsLoading, setConversationsLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // ── Data loaders ──
-
-  const loadSummary = useCallback(async (id: string, accId?: string) => {
-    setSummaryLoading(true);
-    setSummaryError(null);
+  const loadSummary = useCallback(async (id: string, currentAccountId?: string | null) => {
+    setLoading(true);
+    setError(null);
     try {
-      const data = await getMemberSummary(id, accId);
-      setSummary(data);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "加载客户详情失败";
-      setSummaryError(msg);
+      setSummary(await getMemberSummary(id, currentAccountId ?? undefined));
+    } catch (loadError: unknown) {
+      setError(loadError instanceof Error ? loadError.message : "加载客户详情失败");
+      setSummary(null);
     } finally {
-      setSummaryLoading(false);
+      setLoading(false);
     }
   }, []);
 
-  const loadTimeline = useCallback(
-    async (id: string, accId?: string, limit?: number) => {
-      setTimelineLoading(true);
-      try {
-        const data = await getCustomerTimeline(id, {
-          account_id: accId,
-          limit: limit ?? timelineLimit,
-        });
-        setTimeline(data.events);
-      } catch {
-        // silently ignore
-      } finally {
-        setTimelineLoading(false);
-      }
-    },
-    [timelineLimit],
-  );
-
-  const loadProfile = useCallback(async (id: string, accId?: string) => {
-    setProfileLoading(true);
+  const loadTimeline = useCallback(async (id: string, currentAccountId?: string | null) => {
+    setTimelineLoading(true);
     try {
-      const data = await getCustomerProfile(id, accId);
-      setProfile(data);
-    } catch { /* ignore */ }
-    finally { setProfileLoading(false); }
+      const data = await getCustomerTimeline(id, { account_id: currentAccountId ?? undefined, limit: 120 });
+      setTimeline(data.events);
+    } catch {
+      setTimeline([]);
+    } finally {
+      setTimelineLoading(false);
+    }
   }, []);
 
-  const loadConversations = useCallback(
-    async (id: string, accId: string) => {
-      setConvLoading(true);
-      try {
-        const data = await listCustomerConversations(accId, id, undefined, 50);
-        setConversations(data);
-      } catch {
-        // silently ignore
-      } finally {
-        setConvLoading(false);
-      }
-    },
-    [],
-  );
+  const loadConversations = useCallback(async (id: string, currentAccountId?: string | null) => {
+    if (!currentAccountId) {
+      setConversations([]);
+      return;
+    }
+    setConversationsLoading(true);
+    try {
+      const data = await listCustomerConversations(currentAccountId, id, undefined, 50);
+      setConversations(data);
+    } catch {
+      setConversations([]);
+    } finally {
+      setConversationsLoading(false);
+    }
+  }, []);
 
-  // ── Effects ──
+  const loadProfile = useCallback(async (id: string, currentAccountId?: string | null) => {
+    setProfileLoading(true);
+    try {
+      setProfile(await getCustomerProfile(id, currentAccountId ?? undefined));
+    } catch {
+      setProfile(null);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
+
+  const loadLedgers = useCallback(async (id: string) => {
+    if (!canViewFinance) {
+      setLedgerRows([]);
+      return;
+    }
+    setLedgerLoading(true);
+    try {
+      setLedgerRows(await listWalletLedgers({ userId: id }));
+    } catch {
+      setLedgerRows([]);
+    } finally {
+      setLedgerLoading(false);
+    }
+  }, [canViewFinance]);
+
+  const reloadAll = useCallback(async () => {
+    if (!open || !customerId) return;
+    await Promise.all([
+      loadSummary(customerId, accountId),
+      loadTimeline(customerId, accountId),
+      loadConversations(customerId, accountId),
+      loadProfile(customerId, accountId),
+      loadLedgers(customerId),
+    ]);
+  }, [accountId, customerId, loadConversations, loadLedgers, loadProfile, loadSummary, loadTimeline, open]);
 
   useEffect(() => {
-    if (open && customerId) {
-      setActiveTab("overview");
-      void loadSummary(customerId, accountId);
-      void loadTimeline(customerId, accountId);
-      void loadProfile(customerId, accountId);
-      if (accountId) {
-        void loadConversations(customerId, accountId);
-      }
-    } else {
+    if (!open || !customerId) {
       setSummary(null);
       setTimeline([]);
       setConversations([]);
       setProfile(null);
-      setTimelineLimit(20);
+      setLedgerRows([]);
+      setError(null);
+      setActiveTab(initialTab ?? "overview");
+      setLedgerPage(1);
+      setConversationPage(1);
+      setTicketPage(1);
+      setTimelinePage(1);
+      return;
     }
-  }, [open, customerId, accountId, loadSummary, loadTimeline, loadConversations]);
+    setActiveTab(initialTab ?? "overview");
+    void reloadAll();
+  }, [customerId, initialTab, open, reloadAll]);
 
-  // ── Handlers ──
-
-  const handleBlock = async () => {
+  const runLifecycleUpdate = useCallback(async (nextStatus: "active" | "blacklisted") => {
     if (!customerId) return;
     setActionLoading(true);
     try {
       await batchUpdateCustomerLifecycle({
         customer_ids: [customerId],
-        lifecycle_status: "blacklisted",
-        account_id: accountId,
+        lifecycle_status: nextStatus,
+        account_id: accountId ?? undefined,
       });
-      showSuccess("已拉黑该客户");
-      void loadSummary(customerId, accountId);
+      showSuccess(nextStatus === "blacklisted" ? "已拉黑该客户" : "已解除黑名单");
+      await loadSummary(customerId, accountId);
     } catch {
-      showError("拉黑失败");
+      showError(nextStatus === "blacklisted" ? "拉黑失败" : "解封失败");
     } finally {
       setActionLoading(false);
     }
-  };
+  }, [accountId, customerId, loadSummary]);
 
-  const handleUnblock = async () => {
-    if (!customerId) return;
-    setActionLoading(true);
-    try {
-      await batchUpdateCustomerLifecycle({
-        customer_ids: [customerId],
-        lifecycle_status: "active",
-        account_id: accountId,
-      });
-      showSuccess("已解封该客户");
-      void loadSummary(customerId, accountId);
-    } catch {
-      showError("解封失败");
-    } finally {
-      setActionLoading(false);
-    }
-  };
+  const handleToggleBlacklist = useCallback(() => {
+    if (!summary) return;
+    const isBlacklisted = summary.customer.lifecycle_status === "blacklisted";
+    Modal.confirm({
+      title: isBlacklisted ? "解除黑名单" : "拉黑客户",
+      content: isBlacklisted ? "解除后客户会恢复正常状态。" : "拉黑后客户将被标记为黑名单。",
+      okText: isBlacklisted ? "确认解封" : "确认拉黑",
+      cancelText: "取消",
+      okButtonProps: isBlacklisted ? undefined : { danger: true },
+      onOk: () => runLifecycleUpdate(isBlacklisted ? "active" : "blacklisted"),
+    });
+  }, [runLifecycleUpdate, summary]);
 
-  const handleViewConversations = () => {
+  const handleViewConversations = useCallback(() => {
     if (!summary) return;
     onViewConversations({
       public_user_id: summary.customer.public_user_id,
       account_id: accountId ?? null,
     } as PlatformUser);
-  };
+  }, [accountId, onViewConversations, summary]);
 
-  // ── Tab renderers ──
+  const pagedLedgers = useMemo(() => {
+    const start = (ledgerPage - 1) * LEDGER_PAGE_SIZE;
+    return ledgerRows.slice(start, start + LEDGER_PAGE_SIZE);
+  }, [ledgerPage, ledgerRows]);
 
-  const renderOverview = () => {
+  const pagedConversations = useMemo(() => {
+    const start = (conversationPage - 1) * CONVERSATION_PAGE_SIZE;
+    return conversations.slice(start, start + CONVERSATION_PAGE_SIZE);
+  }, [conversationPage, conversations]);
+
+  const pagedTickets = useMemo(() => {
+    const items = summary?.tickets.items ?? [];
+    const start = (ticketPage - 1) * TICKET_PAGE_SIZE;
+    return items.slice(start, start + TICKET_PAGE_SIZE);
+  }, [summary?.tickets.items, ticketPage]);
+
+  const pagedTimeline = useMemo(() => {
+    const start = (timelinePage - 1) * TIMELINE_PAGE_SIZE;
+    return timeline.slice(start, start + TIMELINE_PAGE_SIZE);
+  }, [timeline, timelinePage]);
+
+  const renderOverview = (): JSX.Element | null => {
     if (!summary) return null;
-    const { customer, member_status, wallet, conversations: convs, tickets: tcks, tags } = summary;
+    const { customer, wallet, member_status, conversations: conversationStats, tickets, tags } = summary;
+    const registrationLocation = customer.registration_location || getRegistrationLocationLabel(customer.registration_ip);
+    const sameIpUserCount = customer.same_ip_user_count ?? 0;
 
     return (
-      <div style={{ padding: "0 4px" }}>
-        {/* Basic info */}
-        <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-          <UserOutlined style={{ marginRight: 4 }} />基本信息
-        </Typography.Text>
-        <Descriptions size="small" column={1} style={{ marginBottom: 12 }}>
-          <Descriptions.Item label="用户ID">
-            <MemberIdLink
-              accountId={accountId}
-              userId={customer.id}
-              publicUserId={customer.public_user_id}
-              label={customer.public_user_id}
-            />
-          </Descriptions.Item>
-          <Descriptions.Item label="名称">{customer.display_name || "-"}</Descriptions.Item>
-          <Descriptions.Item label="语言">{customer.language || "-"}</Descriptions.Item>
-          <Descriptions.Item label="注册时间">
-            {customer.created_at
-              ? new Date(customer.created_at).toLocaleString("zh-CN")
-              : "-"}
-          </Descriptions.Item>
-          <Descriptions.Item label="注册IP">
-            {customer.registration_ip || "-"}
-            {customer.multi_ip && (
-              <Tag color="warning" style={{ marginLeft: 6, fontSize: 10 }}>
-                ⚠️ {customer.registration_ips?.length ?? 2}个不同IP
-              </Tag>
-            )}
-          </Descriptions.Item>
-          <Descriptions.Item label="标签">
-            {tags.length > 0
-              ? tags.map((t) => <Tag key={t} style={{ fontSize: 10 }}>{t}</Tag>)
-              : "-"}
-          </Descriptions.Item>
-        </Descriptions>
-
-        <Divider style={{ margin: "8px 0" }} />
-
-        {/* Verification status */}
-        <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-          <SafetyOutlined style={{ marginRight: 4 }} />认证状态
-        </Typography.Text>
-        <Descriptions size="small" column={1} style={{ marginBottom: 12 }}>
-          <Descriptions.Item label="实名认证">
-            <Tag
-              color={VERIFY_COLORS[member_status.verification.status] ?? "default"}
-              style={{ fontSize: 10 }}
-            >
-              {member_status.verification.request_type ?? ""}{" "}
-              {VERIFY_LABELS[member_status.verification.status] ?? member_status.verification.status}
-            </Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label="更新时间">
-            {member_status.verification.updated_at
-              ? new Date(member_status.verification.updated_at).toLocaleDateString("zh-CN")
-              : "-"}
-          </Descriptions.Item>
-        </Descriptions>
-
-        <Divider style={{ margin: "8px 0" }} />
-
-        {/* WhatsApp binding */}
-        <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-          <WhatsAppOutlined style={{ marginRight: 4 }} />WhatsApp 绑定
-        </Typography.Text>
-        <Descriptions size="small" column={1} style={{ marginBottom: 12 }}>
-          <Descriptions.Item label="绑定状态">
-            <Tag
-              color={BINDING_COLORS[member_status.whatsapp_binding.status] ?? "default"}
-              style={{ fontSize: 10 }}
-            >
-              {BINDING_LABELS[member_status.whatsapp_binding.status] ??
-                member_status.whatsapp_binding.status}
-            </Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label="手机号">
-            {member_status.whatsapp_binding.phone_number || "-"}
-          </Descriptions.Item>
-          <Descriptions.Item label="更新时间">
-            {member_status.whatsapp_binding.updated_at
-              ? new Date(member_status.whatsapp_binding.updated_at).toLocaleDateString("zh-CN")
-              : "-"}
-          </Descriptions.Item>
-        </Descriptions>
-
-        <Divider style={{ margin: "8px 0" }} />
-
-        {/* Stats summary */}
-        <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-          <FieldTimeOutlined style={{ marginRight: 4 }} />统计摘要
-        </Typography.Text>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
-            gap: 8,
-            marginBottom: 12,
-          }}
-        >
-          <Statistic
-            title="总会话"
-            value={convs.total}
-            prefix={<MessageOutlined />}
-            valueStyle={{ fontSize: 18 }}
-          />
-          <Statistic
-            title="进行中"
-            value={convs.open}
-            prefix={<LoadingOutlined />}
-            valueStyle={{ fontSize: 18, color: "#1677ff" }}
-          />
-          <Statistic
-            title="工单"
-            value={tcks.total}
-            prefix={<ShoppingCartOutlined />}
-            valueStyle={{ fontSize: 18 }}
-          />
-          <Statistic
-            title="余额"
-            value={canViewFinance ? wallet.balance : "需财务权限"}
-            prefix="¥"
-            precision={canViewFinance ? 2 : undefined}
-            valueStyle={{ fontSize: 18, color: canViewFinance && wallet.balance > 0 ? "#52c41a" : "#999" }}
-          />
-          <Statistic
-            title="累计充值"
-            value={canViewFinance ? wallet.total_recharged : "需财务权限"}
-            prefix="¥"
-            precision={canViewFinance ? 2 : undefined}
-            valueStyle={{ fontSize: 18, color: "#52c41a" }}
-          />
-          <Statistic
-            title="累计提现"
-            value={canViewFinance ? wallet.total_withdrawn : "需财务权限"}
-            prefix="¥"
-            precision={canViewFinance ? 2 : undefined}
-            valueStyle={{ fontSize: 18, color: "#ff4d4f" }}
-          />
-        </div>
-
-        <Divider style={{ margin: "8px 0" }} />
-
-        {/* Action buttons */}
-        <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-          <BlockOutlined style={{ marginRight: 4 }} />操作区
-        </Typography.Text>
-        <Space wrap>
-          {customer.lifecycle_status === "blacklisted" ? (
-            <Button
-              size="small"
-              icon={<CheckCircleOutlined />}
-              onClick={() => void handleUnblock()}
-              loading={actionLoading}
-            >
-              解封
-            </Button>
-          ) : (
-            <Button
-              size="small"
-              danger
-              icon={<StopOutlined />}
-              onClick={() => void handleBlock()}
-              loading={actionLoading}
-            >
-              拉黑
-            </Button>
-          )}
-          <Button
-            size="small"
-            icon={<MessageOutlined />}
-            onClick={handleViewConversations}
-          >
-            查看会话
-          </Button>
-          <Button
-            size="small"
-            icon={<PhoneOutlined />}
-            onClick={() => {
-              void message.info("发消息功能即将上线");
-            }}
-          >
-            发消息
-          </Button>
-        </Space>
-
-      {/* ── 任务概览 ── */}
-      <Divider style={{ margin: "8px 0" }} />
-      <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-        <ShoppingCartOutlined style={{ marginRight: 4 }} />任务概览
-      </Typography.Text>
-      <div style={{ display: "flex", gap: 16, marginBottom: 8 }}>
-        <Typography.Text style={{ fontSize: 12 }}>进行中: <span style={{ color: "#1677ff", fontWeight: 600 }}>2</span> 个</Typography.Text>
-        <Typography.Text style={{ fontSize: 12 }}>已完成: <span style={{ color: "#52c41a", fontWeight: 600 }}>15</span> 个</Typography.Text>
-        <Typography.Text style={{ fontSize: 12 }}>失败: <span style={{ color: "#ff4d4f", fontWeight: 600 }}>3</span> 个</Typography.Text>
-      </div>
-      <div style={{ fontSize: 12, lineHeight: 2 }}>
-        <div>📦 新人大礼包  进度 3/5  started 6/15</div>
-        <div>📦 充值奖励包  进度 1/3  started 6/14</div>
-      </div>
-      <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 4 }}>最近完成</Typography.Text>
-      <div style={{ fontSize: 12, color: "#52c41a" }}>✅ 每日精选包  6/12 完成</div>
-
-      {/* ── 签到信息 ── */}
-      <Divider style={{ margin: "8px 0" }} />
-      <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-        <FieldTimeOutlined style={{ marginRight: 4 }} />签到信息
-      </Typography.Text>
-      <div style={{ fontSize: 12, lineHeight: 2 }}>
-        <div>今日: ✅ 已签到</div>
-        <div>连续天数: 5 天</div>
-        <div>累计签到: 30 天</div>
-        <div>签到任务: 进行中 (目标 7 天)</div>
-      </div>
-
-      {/* ── 邀请信息 ── */}
-      <Divider style={{ margin: "8px 0" }} />
-      <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-        <UserOutlined style={{ marginRight: 4 }} />邀请信息
-      </Typography.Text>
-      <div style={{ fontSize: 12, lineHeight: 2 }}>
-        <div>成功邀请: 8 人</div>
-        <div>邀请链接: https://h5.example.com/register?ref=ABC123</div>
-      </div>
-      <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 4 }}>邀请明细</Typography.Text>
-      <div style={{ fontSize: 12, lineHeight: 2 }}>
-        <div>U12345 注册 6/10 +¥2.00</div>
-        <div>U12346 注册+充值 6/8 +¥5.00</div>
-      </div>
-
-      {/* ── 商品包记录 ── */}
-      <Divider style={{ margin: "8px 0" }} />
-      <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-        <ShoppingCartOutlined style={{ marginRight: 4 }} />商品包记录
-      </Typography.Text>
-      <div style={{ fontSize: 12, lineHeight: 2 }}>
-        <div>📦 新人大礼包  进度 3/5  <Tag color="blue" style={{ fontSize: 10 }}>进行中</Tag></div>
-        <div>📦 每日精选    5/5  <Tag color="green" style={{ fontSize: 10 }}>已完成</Tag></div>
-        <div>📦 充值奖励    0/3  <Tag color="red" style={{ fontSize: 10 }}>已过期</Tag></div>
-      </div>
-      </div>
-    );
-  };
-
-  const renderAttribution = () => {
-    // summary 来自 /api/customers/{id}/summary，含 member_profile 字段（spec 5.7）。
-    const member = summary?.member_profile ?? null;
-    const ownerId = member?.current_owner_staff_user_id ?? null;
-    const ownerAgencyId = member?.current_owner_agency_id ?? null;
-    const ownerAssignmentId = member?.current_owner_assignment_id ?? null;
-    const aiId = member?.current_ai_agent_id ?? null;
-    const aiAssignmentId = member?.current_ai_assignment_id ?? null;
-    const entryLinkId = member?.registration_entry_link_id ?? null;
-    const registrationAiId = member?.registration_ai_agent_id ?? null;
-    const registrationStaffId = member?.registration_staff_user_id ?? null;
-    const channel = member?.registration_channel ?? null;
-    const sourceType = member?.registration_source_type ?? null;
-    const status = member?.attribution_status ?? null;
-    const ownerAssignedAt = member?.owner_assigned_at ?? null;
-    const aiAssignedAt = member?.ai_assigned_at ?? null;
-    const memberNo = member?.member_no ?? null;
-    const memberProfileId = member?.member_profile_id ?? null;
-    if (!member || !memberProfileId) {
-      return (
-        <Empty
-          description="该客户尚未生成 MemberProfile（未走 H5 注册流 / 未绑定 AI / 未分配客服）"
-          style={{ marginTop: 48 }}
-        />
-      );
-    }
-    return (
-      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-        <Descriptions
-          size="small"
-          column={1}
-          title="当前人力归属"
-          bordered
-          items={[
-            { key: "member_no", label: "会员号", children: memberNo ?? "—" },
-            {
-              key: "owner",
-              label: "客服",
-              children: ownerId ? <Tag color="geekblue">{ownerId}</Tag> : <Tag>未归属</Tag>,
-            },
-            { key: "owner_agency", label: "代理商", children: ownerAgencyId ?? "—" },
-            {
-              key: "owner_assignment",
-              label: "Assignment ID",
-              children: ownerAssignmentId ?? "—",
-            },
-            {
-              key: "owner_assigned_at",
-              label: "开始时间",
-              children: ownerAssignedAt ?? "—",
-            },
-            {
-              key: "status",
-              label: "归属状态",
-              children: status ? <Tag color="blue">{status}</Tag> : "—",
-            },
-          ]}
-        />
-        <Descriptions
-          size="small"
-          column={1}
-          title="当前 AI 归属"
-          bordered
-          items={[
-            { key: "ai", label: "AI Agent", children: aiId ?? "未绑定" },
-            { key: "ai_asg", label: "AI Assignment", children: aiAssignmentId ?? "—" },
-            { key: "ai_assigned_at", label: "绑定时间", children: aiAssignedAt ?? "—" },
-          ]}
-        />
-        <Descriptions
-          size="small"
-          column={1}
-          title="注册入口（首单归因）"
-          bordered
-          items={[
-            { key: "entry_link", label: "EntryLink", children: entryLinkId ?? "无入口" },
-            { key: "reg_ai", label: "注册时 AI", children: registrationAiId ?? "—" },
-            { key: "reg_staff", label: "注册时 Staff", children: registrationStaffId ?? "—" },
-            { key: "channel", label: "渠道", children: channel ?? "—" },
-            { key: "source_type", label: "来源类型", children: sourceType ?? "—" },
-          ]}
-        />
-        <Alert
-          type="info"
-          showIcon
-          message="归属说明"
-          description={
-            <ul style={{ marginBottom: 0, paddingLeft: 18 }}>
-              <li>当前列表看 current_*（实时状态）。</li>
-              <li>历史消息和报表看 *_snapshot（划转不会回填历史）。</li>
-              <li>未归属 / 未绑定 AI / 无入口 都不阻塞主消息链路，但部分 AI 自动能力受限。</li>
-            </ul>
-          }
-        />
-      </Space>
-    );
-  };
-
-  const renderConversations = () => {
-    if (convLoading) return <Spin style={{ display: "block", margin: "48px auto" }} />;
-    if (conversations.length === 0) {
-      return <Empty description="暂无会话记录" />;
-    }
-    return (
-      <List
-        size="small"
-        dataSource={conversations}
-        renderItem={(item) => (
-          <List.Item
-            actions={[
-              <Button
-                key="view"
-                size="small"
-                type="link"
-                onClick={() =>
-                  onViewConversations({
-                    public_user_id: customerId ?? "",
-                    account_id: item.account_id ?? null,
-                  } as PlatformUser)
-                }
-              >
-                跳转到工作台 →
-              </Button>,
-            ]}
-          >
-            <List.Item.Meta
-              title={
-                <Space size={4}>
-                  <Typography.Text copyable style={{ fontSize: 12 }}>
-                    {item.conversation_id.slice(0, 12)}...
-                  </Typography.Text>
-                  <Tag
-                    color={
-                      item.management_mode === "human_managed"
-                        ? "blue"
-                        : item.management_mode === "paused"
-                          ? "orange"
-                          : "green"
-                    }
-                    style={{ fontSize: 10, margin: 0 }}
-                  >
-                    {MANAGEMENT_LABELS[item.management_mode] ?? item.management_mode}
-                  </Tag>
-                  <Tag color={item.status === "active" ? "green" : "default"} style={{ fontSize: 10, margin: 0 }}>
-                    {item.status === "active" ? "进行中" : "已关闭"}
-                  </Tag>
-                </Space>
-              }
-              description={
-                <div style={{ fontSize: 12, color: "#999" }}>
-                  {item.last_message_preview
-                    ? item.last_message_preview.slice(0, 60)
-                    : "暂无消息"}
-                  {item.last_message_at && (
-                    <span style={{ marginLeft: 8 }}>
-                      {new Date(item.last_message_at).toLocaleDateString("zh-CN")}
-                    </span>
-                  )}
+      <div style={{ height: CONTENT_HEIGHT, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 360px", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateRows: "auto auto", gap: 16, minWidth: 0 }}>
+          <section style={{ ...sectionCardStyle, background: "#faf7f0", borderColor: "#efe3cd" }}>
+            <Title level={5} style={{ marginTop: 0, marginBottom: 10 }}>基础资料</Title>
+            <Descriptions size="small" column={2}>
+              <Descriptions.Item label="客户 ID" span={2}>
+                <div style={compactDescriptionContentStyle}>
+                  {renderMemberIdBlock(accountId, customer.id, customer.public_user_id)}
                 </div>
-              }
-            />
-          </List.Item>
-        )}
-      />
-    );
-  };
+              </Descriptions.Item>
+              <Descriptions.Item label="语言">{customer.language || "-"}</Descriptions.Item>
+              <Descriptions.Item label="验证类型">{member_status.verification.request_type || "-"}</Descriptions.Item>
+              <Descriptions.Item label="注册 IP" span={2}>
+                <Space wrap size={[8, 8]}>
+                  <Text>{customer.registration_ip || "-"}</Text>
+                  <Text type="secondary">{registrationLocation}</Text>
+                  {customer.registration_ip ? (
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ paddingInline: 0 }}
+                      onClick={() =>
+                        openCustomersPage({
+                          account_id: accountId ?? undefined,
+                          query: customer.registration_ip ?? undefined,
+                          selected_profile_id: customer.id,
+                        })
+                      }
+                    >
+                      {getSameIpUserLabel(sameIpUserCount)}
+                    </Button>
+                  ) : null}
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="标签" span={2}>
+                <Space wrap>{tags.length > 0 ? tags.map((tag) => <Tag key={tag}>{tag}</Tag>) : <span>-</span>}</Space>
+              </Descriptions.Item>
+            </Descriptions>
+          </section>
 
-  const renderTickets = () => {
-    if (!summary) return null;
-    const tickets = summary.tickets.items;
-    if (tickets.length === 0) {
-      return (
-        <div style={{ padding: 24, textAlign: "center", color: "#999" }}>
-          <ShoppingCartOutlined style={{ fontSize: 32, display: "block", marginBottom: 8 }} />
-          <Typography.Text type="secondary">暂无工单记录</Typography.Text>
-        </div>
-      );
-    }
-    return (
-      <List
-        size="small"
-        dataSource={tickets}
-        renderItem={(item: Record<string, unknown>) => {
-          const status = (item.status as string) ?? "";
-          const subject = (item.subject as string) ?? "工单";
-          const updatedAt = (item.updated_at as string) ?? "";
-          const statusColor: Record<string, string> = {
-            open: "#ff4d4f",
-            in_progress: "#1677ff",
-            pending_user: "#faad14",
-            resolved: "#52c41a",
-            closed: "#d9d9d9",
-            rejected: "#999",
-          };
-          const statusLabel: Record<string, string> = {
-            open: "待处理",
-            in_progress: "处理中",
-            pending_user: "待补充",
-            resolved: "已解决",
-            closed: "已关闭",
-            rejected: "已拒绝",
-          };
-          return (
-            <List.Item>
-              <List.Item.Meta
-                title={
-                  <Space size={4}>
-                    <Typography.Text style={{ fontSize: 13 }}>{subject}</Typography.Text>
-                    <Tag color={statusColor[status] ?? "default"} style={{ fontSize: 10, margin: 0 }}>
-                      {statusLabel[status] ?? status}
-                    </Tag>
-                  </Space>
-                }
-                description={
-                  <Typography.Text style={{ fontSize: 12, color: "#999" }}>
-                    {updatedAt ? new Date(updatedAt).toLocaleDateString("zh-CN") : ""}
-                    {item.category ? ` · ${item.category as string}` : ""}
-                  </Typography.Text>
-                }
-              />
-            </List.Item>
-          );
-        }}
-      />
-    );
-  };
-
-  const renderFinance = () => {
-    if (!summary) return null;
-    const { wallet } = summary;
-    if (!canViewFinance) {
-      return (
-        <Alert
-          type="info"
-          showIcon
-          message="需财务权限"
-          description="当前账号没有查看客户财务信息的权限。"
-        />
-      );
-    }
-    return (
-      <div style={{ padding: "0 4px" }}>
-        {/* Balance */}
-        <div
-          style={{
-            textAlign: "center",
-            padding: "24px 0",
-            background: "#f5f5f5",
-            borderRadius: 8,
-            marginBottom: 16,
-          }}
-        >
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            当前余额
-          </Typography.Text>
-          <div style={{ fontSize: 36, fontWeight: 700, color: wallet.balance > 0 ? "#52c41a" : "#333" }}>
-            ¥{wallet.balance.toFixed(2)}
+          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+            <div style={statCardStyle}>
+              <Statistic title="总会话" value={conversationStats.total} />
+            </div>
+            <div style={statCardStyle}>
+              <Statistic title="进行中会话" value={conversationStats.open} />
+            </div>
+            <div style={statCardStyle}>
+              <Statistic title="工单总数" value={tickets.total} />
+            </div>
+            <div style={statCardStyle}>
+              <Statistic title="总余额" value={canViewFinance ? wallet.balance : "需财务权限"} precision={canViewFinance ? 2 : undefined} prefix={canViewFinance ? "¥" : undefined} />
+            </div>
+            <div style={statCardStyle}>
+              <Statistic title="累计充值" value={canViewFinance ? wallet.total_recharged : "需财务权限"} precision={canViewFinance ? 2 : undefined} prefix={canViewFinance ? "¥" : undefined} />
+            </div>
+            <div style={statCardStyle}>
+              <Statistic title="累计提现" value={canViewFinance ? wallet.total_withdrawn : "需财务权限"} precision={canViewFinance ? 2 : undefined} prefix={canViewFinance ? "¥" : undefined} />
+            </div>
           </div>
         </div>
 
-        {/* Summary */}
-        <Descriptions size="small" column={2} style={{ marginBottom: 12 }}>
-          <Descriptions.Item label="累计充值">
-            <Typography.Text style={{ color: "#52c41a" }}>
-              +¥{wallet.total_recharged.toFixed(2)}
-            </Typography.Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="累计提现">
-            <Typography.Text style={{ color: "#ff4d4f" }}>
-              -¥{wallet.total_withdrawn.toFixed(2)}
-            </Typography.Text>
-          </Descriptions.Item>
-        </Descriptions>
+        <section style={sectionCardStyle}>
+          <Title level={5} style={{ marginTop: 0, marginBottom: 12 }}>最近动态</Title>
+          {timeline.length > 0 ? (
+            <div style={{ ...scrollPaneStyle, height: CONTENT_HEIGHT - 60 }}>
+              <InlineTimelineList events={timeline.slice(0, OVERVIEW_TIMELINE_LIMIT)} />
+            </div>
+          ) : (
+            <Empty description="暂无时间线事件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          )}
+        </section>
+      </div>
+    );
+  };
 
-        <Divider style={{ margin: "8px 0" }} />
+  const renderAttribution = (): JSX.Element | null => {
+    if (!summary) return null;
+    const member = summary.member_profile;
+    if (!member) {
+      return <Empty description="暂无归属信息" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+    }
+    return (
+      <div style={{ height: CONTENT_HEIGHT, overflowY: "auto", display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", alignItems: "start" }}>
+        <section style={sectionCardStyle}>
+          <Title level={5} style={{ marginTop: 0, marginBottom: 12 }}>当前归属</Title>
+          <Descriptions size="small" column={1}>
+            <Descriptions.Item label="代理商">{member.current_owner_agency_id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="员工">{member.current_owner_staff_user_id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="归属记录">{member.current_owner_assignment_id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="归属时间">{formatDateTime(member.owner_assigned_at)}</Descriptions.Item>
+            <Descriptions.Item label="归属状态">{member.attribution_status || "-"}</Descriptions.Item>
+          </Descriptions>
+        </section>
+        <section style={sectionCardStyle}>
+          <Title level={5} style={{ marginTop: 0, marginBottom: 12 }}>AI 归属</Title>
+          <Descriptions size="small" column={1}>
+            <Descriptions.Item label="AI Agent">{member.current_ai_agent_id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="AI 分配记录">{member.current_ai_assignment_id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="分配时间">{formatDateTime(member.ai_assigned_at)}</Descriptions.Item>
+          </Descriptions>
+        </section>
+        <section style={sectionCardStyle}>
+          <Title level={5} style={{ marginTop: 0, marginBottom: 12 }}>注册来源</Title>
+          <Descriptions size="small" column={1}>
+            <Descriptions.Item label="入口链接">{member.registration_entry_link_id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="注册时 AI">{member.registration_ai_agent_id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="注册时员工">{member.registration_staff_user_id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="渠道">{member.registration_channel || "-"}</Descriptions.Item>
+            <Descriptions.Item label="来源类型">{member.registration_source_type || "-"}</Descriptions.Item>
+          </Descriptions>
+        </section>
+      </div>
+    );
+  };
 
-        {/* Recent transactions */}
-        <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-          <ClockCircleOutlined style={{ marginRight: 4 }} />最近交易
-        </Typography.Text>
-        {wallet.recent_transactions.length === 0 ? (
-          <Empty description="暂无交易记录" />
-        ) : (
+  const renderConversations = (): JSX.Element => {
+    if (conversationsLoading) return <Spin style={{ display: "block", margin: "48px auto" }} />;
+    if (conversations.length === 0) {
+      return <Empty description="暂无会话记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+    }
+    return (
+      <div style={{ height: CONTENT_HEIGHT, display: "grid", gridTemplateRows: "1fr auto", gap: 12 }}>
+        <div style={{ ...scrollPaneStyle, height: CONTENT_HEIGHT - 44 }}>
           <List
             size="small"
-            dataSource={wallet.recent_transactions}
-            renderItem={(tx) => (
-              <List.Item>
+            dataSource={pagedConversations}
+            renderItem={(item) => (
+              <List.Item
+                actions={[
+                  <Button
+                    key="view"
+                    type="link"
+                    size="small"
+                    onClick={() => onViewConversations({
+                      public_user_id: summary?.customer.public_user_id ?? "",
+                      account_id: item.account_id ?? null,
+                    } as PlatformUser)}
+                  >
+                    打开工作台
+                  </Button>,
+                ]}
+              >
                 <List.Item.Meta
-                  title={
-                    <Space size={4}>
-                      <Typography.Text
-                        style={{
-                          color: tx.direction === "in" ? "#52c41a" : "#ff4d4f",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {tx.direction === "in" ? "+" : "-"}¥{Math.abs(tx.amount).toFixed(2)}
-                      </Typography.Text>
-                      <Tag style={{ fontSize: 10, margin: 0 }}>{tx.type}</Tag>
+                  title={(
+                    <Space wrap>
+                      <Text code>{item.conversation_id.slice(0, 12)}...</Text>
+                      {renderStatusTag(MANAGEMENT_MODE_META[item.management_mode], item.management_mode)}
+                      <Tag color={item.status === "active" ? "success" : "default"}>
+                        {item.status === "active" ? "进行中" : "已关闭"}
+                      </Tag>
                     </Space>
-                  }
-                  description={
-                    <Typography.Text style={{ fontSize: 11, color: "#999" }}>
-                      {tx.created_at
-                        ? new Date(tx.created_at).toLocaleDateString("zh-CN")
-                        : ""}
-                    </Typography.Text>
-                  }
+                  )}
+                  description={(
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12 }}>
+                      <Text type="secondary" ellipsis>{item.last_message_preview || "暂无消息"}</Text>
+                      <Text type="secondary">{formatDateTime(item.last_message_at)}</Text>
+                    </div>
+                  )}
                 />
               </List.Item>
             )}
           />
-        )}
+        </div>
+        <Pagination align="end" current={conversationPage} pageSize={CONVERSATION_PAGE_SIZE} total={conversations.length} onChange={(page) => setConversationPage(page)} showSizeChanger={false} />
       </div>
     );
   };
 
-  const renderTimeline = () => {
-    if (timelineLoading && timeline.length === 0) {
-      return <Spin style={{ display: "block", margin: "48px auto" }} />;
-    }
-    if (timeline.length === 0) {
-      return (
-        <div style={{ padding: 24, textAlign: "center", color: "#999" }}>
-          <FieldTimeOutlined style={{ fontSize: 32, display: "block", marginBottom: 8 }} />
-          <Typography.Text type="secondary">暂无时间线事件</Typography.Text>
-        </div>
-      );
+  const renderTickets = (): JSX.Element | null => {
+    if (!summary) return null;
+    if (summary.tickets.items.length === 0) {
+      return <Empty description="暂无工单记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
     }
     return (
-      <div>
-        <List
-          size="small"
-          dataSource={timeline}
-          renderItem={(event) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={
-                  <div style={{ fontSize: 18, lineHeight: "36px" }}>
-                    {TIMELINE_ICONS[event.type] ?? (
-                      <ExclamationCircleOutlined style={{ color: "#999" }} />
+      <div style={{ height: CONTENT_HEIGHT, display: "grid", gridTemplateRows: "1fr auto", gap: 12 }}>
+        <div style={{ ...scrollPaneStyle, height: CONTENT_HEIGHT - 44 }}>
+          <List
+            size="small"
+            dataSource={pagedTickets}
+            renderItem={(item: Record<string, unknown>) => {
+              const status = (item.status as string) || "";
+              return (
+                <List.Item>
+                  <List.Item.Meta
+                    title={(
+                      <Space wrap>
+                        <Text>{(item.subject as string) || (item.title as string) || "工单"}</Text>
+                        {renderStatusTag(TICKET_STATUS_META[status], status)}
+                      </Space>
                     )}
-                  </div>
-                }
-                title={
-                  <Space size={4}>
-                    <Typography.Text style={{ fontSize: 12 }}>{event.summary}</Typography.Text>
-                  </Space>
-                }
-                description={
-                  <Typography.Text style={{ fontSize: 11, color: "#999" }}>
-                    {event.time ? new Date(event.time).toLocaleString("zh-CN") : ""}
-                  </Typography.Text>
-                }
-              />
-            </List.Item>
-          )}
-        />
-        {timeline.length >= timelineLimit && (
-          <div style={{ textAlign: "center", padding: 12 }}>
-            <Button
-              size="small"
-              type="link"
-              loading={timelineLoading}
-              onClick={() => {
-                const newLimit = timelineLimit + 20;
-                setTimelineLimit(newLimit);
-                if (customerId) {
-                  void loadTimeline(customerId, accountId, newLimit);
-                }
-              }}
-            >
-              加载更多...
-            </Button>
-          </div>
-        )}
+                    description={<Text type="secondary">{formatDate((item.updated_at as string | null) ?? (item.created_at as string | null))}{item.category ? ` / ${item.category as string}` : ""}</Text>}
+                  />
+                </List.Item>
+              );
+            }}
+          />
+        </div>
+        <Pagination align="end" current={ticketPage} pageSize={TICKET_PAGE_SIZE} total={summary.tickets.items.length} onChange={(page) => setTicketPage(page)} showSizeChanger={false} />
       </div>
     );
   };
 
-  // IV-FE-004: 客户画像 Tab
-  const renderProfile = () => {
-    if (profileLoading && !profile) {
-      return <Spin style={{ display: "block", margin: "48px auto" }} />;
-    }
-    if (!profile) {
-      return (
-        <div style={{ padding: 24, textAlign: "center", color: "#999" }}>
-          <UserOutlined style={{ fontSize: 32, display: "block", marginBottom: 8 }} />
-          <Typography.Text type="secondary">暂无画像数据</Typography.Text>
-        </div>
-      );
-    }
+  const renderFinance = (): JSX.Element | null => {
+    if (!summary) return null;
     if (!canViewFinance) {
-      return (
-        <div style={{ padding: "0 4px" }}>
-          <Alert
-            type="info"
-            showIcon
-            message="需财务权限"
-            description="客户画像中的充值与提现统计已按权限隐藏。"
-            style={{ marginBottom: 12 }}
-          />
-          <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-            馃搳 琛屼负鏁版嵁
-          </Typography.Text>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-            <Statistic title="绛惧埌娆℃暟" value={profile.behavior.sign_in_count} valueStyle={{ fontSize: 18 }} />
-            <Statistic title="杩炵画绛惧埌" value={profile.behavior.sign_in_streak} suffix="澶?" valueStyle={{ fontSize: 18 }} />
-            <Statistic title="鍏呭€兼鏁?" value={profile.behavior.recharge_count} valueStyle={{ fontSize: 18 }} />
-            <Statistic title="浼氳瘽娆℃暟" value={profile.behavior.conversation_count} valueStyle={{ fontSize: 18 }} />
+      return <Alert type="info" showIcon message="需财务权限" description="当前账号没有查看客户财务信息的权限。" />;
+    }
+
+    return (
+      <div style={{ height: CONTENT_HEIGHT, display: "grid", gridTemplateColumns: "320px minmax(0, 1fr)", gap: 16 }}>
+        <div style={{ display: "grid", gap: 12, alignContent: "start", gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+          <div style={statCardStyle}>
+            <Statistic title="总余额" value={summary.wallet.balance} prefix="¥" precision={2} />
           </div>
+          <div style={statCardStyle}>
+            <Statistic title="系统余额" value={summary.wallet.system_balance} prefix="¥" precision={2} />
+          </div>
+          <div style={statCardStyle}>
+            <Statistic title="任务余额" value={summary.wallet.task_balance} prefix="¥" precision={2} />
+          </div>
+          <div style={statCardStyle}>
+            <Statistic title="累计充值" value={summary.wallet.total_recharged} prefix="¥" precision={2} />
+          </div>
+          <div style={statCardStyle}>
+            <Statistic title="累计提现" value={summary.wallet.total_withdrawn} prefix="¥" precision={2} />
+          </div>
+        </div>
+
+        <section style={sectionCardStyle}>
+          <Title level={5} style={{ marginTop: 0, marginBottom: 12 }}>流水记录</Title>
+          {ledgerLoading ? (
+            <Spin style={{ display: "block", margin: "40px auto" }} />
+          ) : ledgerRows.length > 0 ? (
+            <div style={{ height: CONTENT_HEIGHT - 60, display: "grid", gridTemplateRows: "1fr auto", gap: 12 }}>
+              <div style={{ ...scrollPaneStyle, height: CONTENT_HEIGHT - 116 }}>
+                <List
+                  size="small"
+                  dataSource={pagedLedgers}
+                  renderItem={(row) => (
+                    <List.Item>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 12, width: "100%", alignItems: "center" }}>
+                        <Space wrap size={[8, 8]}>
+                          <Text ellipsis>{getLedgerTitle(row)}</Text>
+                          <Tag>{row.transaction_type === "credit" ? "入账" : row.transaction_type === "debit" ? "扣减" : row.transaction_type}</Tag>
+                        </Space>
+                        <Text type="secondary">{row.direction === "in" ? "+" : "-"}{formatMoney(Math.abs(row.amount))}</Text>
+                        <Text type="secondary">{formatDateTime(row.created_at)}</Text>
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              </div>
+              <Pagination align="end" current={ledgerPage} pageSize={LEDGER_PAGE_SIZE} total={ledgerRows.length} onChange={(page) => setLedgerPage(page)} showSizeChanger={false} />
+            </div>
+          ) : (
+            <Empty description="暂无交易记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          )}
+        </section>
+      </div>
+    );
+  };
+
+  const renderTimeline = (): JSX.Element => {
+    if (timelineLoading) return <Spin style={{ display: "block", margin: "48px auto" }} />;
+    if (timeline.length === 0) {
+      return <Empty description="暂无时间线事件" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+    }
+    return (
+      <div style={{ height: CONTENT_HEIGHT, display: "grid", gridTemplateRows: "1fr auto", gap: 12 }}>
+        <div style={{ ...scrollPaneStyle, height: CONTENT_HEIGHT - 44 }}>
+          <Table
+            size="small"
+            rowKey={(row) => `${row.type}-${row.time}-${row.summary}`}
+            pagination={false}
+            dataSource={pagedTimeline}
+            columns={[
+              {
+                title: "类型",
+                dataIndex: "type",
+                key: "type",
+                width: 120,
+                render: (value: string) => value || "-",
+              },
+              {
+                title: "内容",
+                dataIndex: "summary",
+                key: "summary",
+                render: (value: string) => <Text>{value}</Text>,
+              },
+              {
+                title: "时间",
+                dataIndex: "time",
+                key: "time",
+                width: 220,
+                render: (value: string) => <Text type="secondary">{formatDateTime(value)}</Text>,
+              },
+            ]}
+          />
+        </div>
+        <Pagination align="end" current={timelinePage} pageSize={TIMELINE_PAGE_SIZE} total={timeline.length} onChange={(page) => setTimelinePage(page)} showSizeChanger={false} />
+      </div>
+    );
+  };
+
+  const renderProfile = (): JSX.Element => {
+    if (profileLoading && !profile) return <Spin style={{ display: "block", margin: "48px auto" }} />;
+    if (!profile) return <Empty description="暂无画像数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+    return (
+      <div style={{ height: CONTENT_HEIGHT, overflowY: "auto", display: "grid", gap: 16 }}>
+        {!canViewFinance ? (
+          <Alert type="info" showIcon message="需财务权限" description="画像中的充值和提现金额已按权限隐藏。" />
+        ) : null}
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+          <div style={statCardStyle}>
+            <Statistic title="签到次数" value={profile.behavior.sign_in_count} />
+          </div>
+          <div style={statCardStyle}>
+            <Statistic title="连续签到" value={profile.behavior.sign_in_streak} suffix="天" />
+          </div>
+          <div style={statCardStyle}>
+            <Statistic title="充值次数" value={profile.behavior.recharge_count} />
+          </div>
+          <div style={statCardStyle}>
+            <Statistic title="会话次数" value={profile.behavior.conversation_count} />
+          </div>
+          {canViewFinance ? (
+            <>
+              <div style={statCardStyle}>
+                <Statistic title="累计充值" value={profile.behavior.recharge_total} prefix="¥" precision={2} />
+              </div>
+              <div style={statCardStyle}>
+                <Statistic title="累计提现" value={profile.behavior.withdraw_total} prefix="¥" precision={2} />
+              </div>
+            </>
+          ) : null}
+        </div>
+        <Descriptions size="small" column={1}>
+          <Descriptions.Item label="最后活跃时间">{formatDateTime(profile.behavior.last_active_at)}</Descriptions.Item>
+          <Descriptions.Item label="自动标签">
+            <Space wrap>{profile.auto_tags.length > 0 ? profile.auto_tags.map((tag) => <Tag key={tag} color="blue">{tag}</Tag>) : <span>-</span>}</Space>
+          </Descriptions.Item>
+          <Descriptions.Item label="手动标签">
+            <Space wrap>{profile.manual_tags.length > 0 ? profile.manual_tags.map((tag) => <Tag key={tag}>{tag}</Tag>) : <span>-</span>}</Space>
+          </Descriptions.Item>
+        </Descriptions>
+      </div>
+    );
+  };
+
+  const renderBody = (): JSX.Element => {
+    if (loading && !summary) {
+      return <Spin style={{ display: "block", margin: "80px auto" }} />;
+    }
+    if (error && !summary) {
+      return (
+        <div style={{ padding: 32 }}>
+          <Alert type="error" showIcon message="加载失败" description={error} action={<Button size="small" onClick={() => void reloadAll()}>重试</Button>} />
         </div>
       );
     }
     return (
-      <div style={{ padding: "0 4px" }}>
-        {/* 行为数据 */}
-        <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-          📊 行为数据
-        </Typography.Text>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-          <Statistic title="签到次数" value={profile.behavior.sign_in_count} valueStyle={{ fontSize: 18 }} />
-          <Statistic title="连续签到" value={profile.behavior.sign_in_streak} suffix="天" valueStyle={{ fontSize: 18 }} />
-          <Statistic title="累计充值" value={profile.behavior.recharge_total} prefix="¥" precision={2} valueStyle={{ fontSize: 18, color: "#52c41a" }} />
-          <Statistic title="充值次数" value={profile.behavior.recharge_count} valueStyle={{ fontSize: 18 }} />
-          <Statistic title="累计提现" value={profile.behavior.withdraw_total} prefix="¥" precision={2} valueStyle={{ fontSize: 18, color: "#ff4d4f" }} />
-          <Statistic title="会话次数" value={profile.behavior.conversation_count} valueStyle={{ fontSize: 18 }} />
-        </div>
-        <div style={{ marginBottom: 16 }}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>最后活跃：</Typography.Text>
-          <Typography.Text style={{ fontSize: 12 }}>
-            {profile.behavior.last_active_at
-              ? new Date(profile.behavior.last_active_at).toLocaleString("zh-CN")
-              : "-"}
-          </Typography.Text>
-        </div>
-
-        <Divider style={{ margin: "8px 0" }} />
-
-        {/* 标签区域 */}
-        <Typography.Text strong style={{ fontSize: 13, display: "block", marginBottom: 8 }}>
-          🏷️ 标签
-        </Typography.Text>
-        <div style={{ marginBottom: 12 }}>
-          {profile.auto_tags.length > 0 && (
-            <div style={{ marginBottom: 8 }}>
-              <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>自动标签</Typography.Text>
-              <Space wrap>
-                {profile.auto_tags.map((t) => (
-                  <Tag key={t} color="blue" style={{ fontSize: 11 }}>{t}</Tag>
-                ))}
+      <div style={{ display: "grid", gap: 20, gridTemplateColumns: "320px minmax(0, 1fr)", minHeight: CONTENT_HEIGHT, maxHeight: CONTENT_HEIGHT, overflow: "hidden" }}>
+        <aside style={{ display: "grid", gap: 16, alignContent: "start" }}>
+          <section style={{ background: "#fff", border: "1px solid #e8e1d4", borderRadius: 18, padding: 18 }}>
+            <Title level={4} style={{ marginTop: 0, marginBottom: 8 }}>
+              {summary?.customer.display_name || summary?.customer.public_user_id || "客户详情"}
+            </Title>
+            {summary ? (
+              <Space wrap size={[8, 8]} style={{ marginBottom: 12 }}>
+                {renderStatusTag(LIFECYCLE_META[summary.customer.lifecycle_status], summary.customer.lifecycle_status)}
+                {renderStatusTag(VERIFICATION_META[summary.member_status.verification.status], summary.member_status.verification.status)}
+                {renderStatusTag(BINDING_META[summary.member_status.whatsapp_binding.status], summary.member_status.whatsapp_binding.status)}
               </Space>
-            </div>
-          )}
-          {profile.manual_tags.length > 0 && (
-            <div>
-              <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>手动标签</Typography.Text>
-              <Space wrap>
-                {profile.manual_tags.map((t) => (
-                  <Tag key={t} style={{ fontSize: 11 }}>{t}</Tag>
-                ))}
-              </Space>
-            </div>
-          )}
-          {profile.auto_tags.length === 0 && profile.manual_tags.length === 0 && (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>暂无标签</Typography.Text>
-          )}
-        </div>
+            ) : null}
+            <Descriptions size="small" column={1}>
+              <Descriptions.Item label="公开用户 ID">
+                {summary ? renderMemberIdBlock(accountId, summary.customer.id, summary.customer.public_user_id) : "-"}
+              </Descriptions.Item>
+              <Descriptions.Item label="账号">{accountId || "-"}</Descriptions.Item>
+              <Descriptions.Item label="注册时间">{formatDateTime(summary?.customer.created_at)}</Descriptions.Item>
+            </Descriptions>
+          </section>
+
+          <section style={{ background: "#fff", border: "1px solid #e8e1d4", borderRadius: 18, padding: 18 }}>
+            <Title level={5} style={{ marginTop: 0, marginBottom: 12 }}>快捷操作</Title>
+            <Space direction="vertical" style={{ width: "100%" }}>
+              <Button block type="primary" onClick={handleViewConversations}>查看会话</Button>
+              <Button block icon={<ReloadOutlined />} loading={loading || timelineLoading || profileLoading || ledgerLoading} onClick={() => void reloadAll()}>刷新资料</Button>
+              <Button block icon={<CopyOutlined />} onClick={() => void copyText(summary?.customer.id ?? "", "已复制客户ID")}>复制客户 ID</Button>
+              <Button block icon={<CopyOutlined />} onClick={() => void copyText(summary?.customer.public_user_id ?? "", "已复制公开用户ID")}>复制公开用户 ID</Button>
+              <Button
+                block
+                danger={summary?.customer.lifecycle_status !== "blacklisted"}
+                icon={summary?.customer.lifecycle_status === "blacklisted" ? <UnlockOutlined /> : <StopOutlined />}
+                loading={actionLoading}
+                onClick={handleToggleBlacklist}
+              >
+                {summary?.customer.lifecycle_status === "blacklisted" ? "解除黑名单" : "拉黑客户"}
+              </Button>
+            </Space>
+          </section>
+        </aside>
+
+        <section style={{ minWidth: 0, overflow: "hidden" }}>
+          <Tabs
+            activeKey={activeTab}
+            onChange={(key) => setActiveTab(key as TabKey)}
+            items={TAB_ITEMS.map((item) => ({
+              key: item.key,
+              label: item.label,
+              children:
+                item.key === "overview"
+                  ? renderOverview()
+                  : item.key === "attribution"
+                    ? renderAttribution()
+                    : item.key === "conversations"
+                      ? renderConversations()
+                      : item.key === "tickets"
+                        ? renderTickets()
+                        : item.key === "finance"
+                          ? renderFinance()
+                          : item.key === "timeline"
+                            ? renderTimeline()
+                            : renderProfile(),
+            }))}
+          />
+        </section>
       </div>
     );
-  };
-
-  // ── Main render ──
-
-  const renderTabContent = (tabKey: TabKey) => {
-    if (summaryLoading && !summary) {
-      return <Spin style={{ display: "block", margin: "64px auto" }} />;
-    }
-    if (summaryError && !summary) {
-      return (
-        <div style={{ padding: 24, textAlign: "center" }}>
-          <CloseCircleOutlined style={{ fontSize: 32, color: "#ff4d4f", display: "block", marginBottom: 8 }} />
-          <Typography.Text type="danger">{summaryError}</Typography.Text>
-          <div style={{ marginTop: 8 }}>
-            <Button size="small" onClick={() => customerId && void loadSummary(customerId, accountId)}>
-              重试
-            </Button>
-          </div>
-        </div>
-      );
-    }
-
-    switch (tabKey) {
-      case "overview":
-        return renderOverview();
-      case "attribution":
-        return renderAttribution();
-      case "conversations":
-        return renderConversations();
-      case "tickets":
-        return renderTickets();
-      case "finance":
-        return renderFinance();
-      case "timeline":
-        return renderTimeline();
-      case "profile":
-        return renderProfile();
-      default:
-        return null;
-    }
   };
 
   return (
-    <Drawer
-      title={
-        summary ? (
-          <Space>
-            <MemberIdLink
-              accountId={accountId}
-              userId={summary.customer.id}
-              publicUserId={summary.customer.public_user_id}
-              label={summary.customer.public_user_id}
-            />
-            {summary.customer.display_name ? (
-              <Typography.Text>{summary.customer.display_name}</Typography.Text>
-            ) : null}
-            <Tag color={LC_COLORS[summary.customer.lifecycle_status] ?? "default"} style={{ fontSize: 10 }}>
-              {LC_LABELS[summary.customer.lifecycle_status] ?? summary.customer.lifecycle_status}
-            </Tag>
-            {summary.customer.created_at && (
-              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                注册: {new Date(summary.customer.created_at).toLocaleDateString("zh-CN")}
-              </Typography.Text>
-            )}
-          </Space>
-        ) : (
-          "客户详情"
-        )
-      }
+    <Modal
+      title={(
+        <Space size={12}>
+          <UserOutlined />
+          <span>客户详情</span>
+        </Space>
+      )}
       open={open}
-      onClose={onClose}
-      width={480}
-      styles={{ body: { padding: 12, overflow: "auto" } }}
+      onCancel={onClose}
+      footer={null}
+      width={1120}
+      centered
+      destroyOnClose={false}
+      styles={{
+        body: {
+          background: "linear-gradient(180deg, #fcfaf6 0%, #f7f1e7 100%)",
+          maxHeight: "calc(100dvh - 120px)",
+          overflow: "auto",
+          padding: 20,
+        },
+      }}
     >
-      <Tabs
-        activeKey={activeTab}
-        onChange={(key) => {
-          setActiveTab(key as TabKey);
-          // Load additional data on tab switch if summary is available
-          if (customerId && summary) {
-            if (key === "conversations" && accountId && conversations.length === 0) {
-              void loadConversations(customerId, accountId);
-            }
-            if (key === "timeline" && timeline.length === 0) {
-              void loadTimeline(customerId, accountId);
-            }
-          }
-        }}
-        items={TAB_KEYS.map((key) => ({
-          key,
-          label: TAB_LABELS[key],
-          children: renderTabContent(key),
-        }))}
-        size="small"
-        style={{ minHeight: 300 }}
-      />
-    </Drawer>
+      {renderBody()}
+    </Modal>
   );
 }
 

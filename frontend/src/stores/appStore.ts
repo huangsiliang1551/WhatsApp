@@ -67,6 +67,9 @@ export type AppPageId =
   | "rate_limits"
   | "ai_chat_config"
   | "profile"
+  | "platform_whatsapp_bindings"
+  | "h5_gateway_nodes"
+  | "permission_center"
   // 归属 / 入口链接管理
   | "entry_links"
   // Finance & Billing pages
@@ -165,6 +168,7 @@ export type CustomersPagePrefill = {
   account_id?: string;
   query?: string;
   selected_profile_id?: string;
+  detail_tab?: "overview" | "attribution" | "conversations" | "tickets" | "finance" | "timeline" | "profile";
 };
 
 export type NotificationsPagePrefill = {

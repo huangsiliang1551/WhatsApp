@@ -19,7 +19,7 @@ type PackageDetailPageProps = {
   onRetryProduct: (productId: string) => Promise<void>;
   onNavigate: (path: string) => void;
   onRefresh: () => Promise<void>;
-  onOpenClaimDialog?: (packageId: string) => void;
+  onOpenClaimDialog?: (pkg: { id: string; title: string }) => void;
 };
 
 export function PackageDetailPage({
@@ -46,15 +46,32 @@ export function PackageDetailPage({
   const totalCommission = instance.totalCommission ?? instance.rewardAmount;
   const countdownSeconds = instance.countdownSeconds ?? 0;
   const progressPercent = instance.totalCount > 0 ? (instance.completedCount / instance.totalCount) * 100 : 0;
-  const nextActionableProduct = instance.products.find((product) => product.status === "available" || product.status === "failed");
+  const visibleCurrentProduct = instance.currentProduct ?? null;
+  const batchProgressLabel = instance.batchIndex && instance.batchTotal ? `${instance.batchIndex}/${instance.batchTotal}` : null;
+  const focusStatusClass =
+    instance.status === "pending_claim"
+      ? "active"
+      : instance.status === "completed"
+        ? "completed"
+        : instance.status === "expired"
+          ? "expired"
+          : "active";
+  const focusStatusLabel =
+    instance.status === "pending_claim"
+      ? t("tasks.groupAvailable")
+      : instance.status === "completed"
+        ? t("tasks.completed")
+        : instance.status === "expired"
+          ? t("tasks.expired")
+          : t("tasks.groupInProgress");
   const nextStepLabel =
     instance.status === "pending_claim"
       ? t("tasks.detailFocusClaim")
-      : nextActionableProduct?.status === "failed"
+      : visibleCurrentProduct?.status === "failed"
         ? t("tasks.retry")
-        : nextActionableProduct
+        : visibleCurrentProduct
           ? t("tasks.detailFocusReady")
-          : t("tasks.productRunning");
+          : t("tasks.detailWaitingNextTask");
   const progressSteps = [
     { key: "ordering", label: t("tasks.progressOrdering") },
     {
@@ -303,6 +320,12 @@ export function PackageDetailPage({
 
   function renderSummaryCard(): JSX.Element {
     const claimOnly = instance.status === "pending_claim";
+    const amountBreakdown = [
+      { label: t("tasks.plannedAmount"), value: formatMoney(instance.plannedAmount ?? 0) },
+      { label: t("tasks.systemAmount"), value: formatMoney(instance.systemGeneratedAmount ?? 0) },
+      { label: t("tasks.manualAddAmount"), value: formatMoney(instance.manualAddedAmount ?? 0) },
+      { label: t("tasks.effectiveAmount"), value: formatMoney(instance.effectiveAmount ?? 0) },
+    ];
 
     return (
       <article className="h5-card">
@@ -319,6 +342,7 @@ export function PackageDetailPage({
             { label: t("tasks.countdown"), value: formatCountdown(countdownSeconds) },
           ]}
         />
+        <DetailGrid items={amountBreakdown} />
         <div className="h5-member-progress h5-package-summary-progress">
           <div className="h5-member-progress-fill" style={{ width: `${progressPercent}%` }} />
         </div>
@@ -333,7 +357,7 @@ export function PackageDetailPage({
         </div>
         {claimOnly ? (
           <div className="h5-member-card-actions h5-package-inline-actions">
-            <button className="seed-button" onClick={() => onOpenClaimDialog?.(instance.id)} type="button">
+            <button className="seed-button" onClick={() => onOpenClaimDialog?.({ id: instance.id, title: instance.title })} type="button">
               {t("shell.confirmClaimBtn")}
             </button>
           </div>
@@ -347,7 +371,7 @@ export function PackageDetailPage({
 
     function handleFocusAction(): void {
       if (claimOnly) {
-        onOpenClaimDialog?.(instance.id);
+        onOpenClaimDialog?.({ id: instance.id, title: instance.title });
         return;
       }
       stepsCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -360,9 +384,10 @@ export function PackageDetailPage({
           <div className="h5-task-focus-copy">
             <strong>{instance.title}</strong>
             <p className="muted">{t("tasks.detailRemainingLabel", { done: instance.completedCount, total: instance.totalCount })}</p>
+            {batchProgressLabel ? <p className="muted">{batchProgressLabel}</p> : null}
           </div>
-          <span className={`h5-task-instance-status-badge ${claimOnly ? "active" : "completed"}`}>
-            {claimOnly ? t("tasks.groupAvailable") : t("tasks.groupInProgress")}
+          <span className={`h5-task-instance-status-badge ${focusStatusClass}`}>
+            {focusStatusLabel}
           </span>
         </div>
 
@@ -408,13 +433,16 @@ export function PackageDetailPage({
     }
 
     return (
-      <article className="h5-card" ref={stepsCardRef}>
+        <article className="h5-card" ref={stepsCardRef}>
         <SectionHeader
           title={t("tasks.detailCompletionSteps")}
           meta={t("tasks.items", { count: instance.totalCount })}
         />
         <p className="h5-package-note-copy">{t("tasks.detailStepHint")}</p>
-        {instance.products.map((product) => {
+        {!visibleCurrentProduct ? (
+          <p className="h5-package-note-copy">{t("tasks.detailWaitingNextTask")}</p>
+        ) : null}
+        {(visibleCurrentProduct ? [visibleCurrentProduct] : []).map((product) => {
           const isDisabled = isProductDisabled(product.status);
           const isCurrentAction = actionName === `start:${product.id}` || actionName === `retry:${product.id}`;
           return (

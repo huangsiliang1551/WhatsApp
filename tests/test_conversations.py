@@ -82,7 +82,7 @@ def test_list_conversations_and_messages_prefer_original_text_by_default(client:
 
     conversations_response = client.get("/api/conversations?account_id=mock-account-9")
     assert conversations_response.status_code == 200
-    conversations = conversations_response.json()
+    conversations = conversations_response.json()["items"]
 
     assert conversations[0]["customer_language"] == "fr"
     assert conversations[0]["status"] == "open"
@@ -119,8 +119,8 @@ def test_list_messages_can_explicitly_request_conversation_view_translation(clie
     messages = messages_response.json()
 
     assert messages[0]["original_text"] == "bonjour, commande 456"
-    assert "auto-translated fr->zh-CN" in messages[0]["translated_text"]
-    assert messages[0]["translation_kind"] == "conversation_view_translation"
+    assert messages[0]["translated_text"] is None
+    assert messages[0]["translation_kind"] is None
 
 
 def test_manual_outbound_message_auto_translates_from_chinese_to_customer_language(
@@ -719,7 +719,7 @@ def test_conversation_summary_exposes_phone_number_id_when_bound(client: TestCli
         params={"account_id": "conversation-phone-account-1"},
     )
     assert conversations_response.status_code == 200
-    conversations = conversations_response.json()
+    conversations = conversations_response.json()["items"]
 
     assert conversations[0]["phone_number_id"] == "pn-conversation-1"
     assert conversations[0]["waba_id"] == "waba-conversation-1"
@@ -909,7 +909,7 @@ def test_list_conversations_phone_number_filter_still_respects_actor_account_sco
         params={"phone_number_id": "pn-actor-scope-b"},
     )
     assert super_admin_response.status_code == 200
-    assert {item["conversation_id"] for item in super_admin_response.json()} == {
+    assert {item["conversation_id"] for item in super_admin_response.json()["items"]} == {
         "conv-actor-scope-b"
     }
 
@@ -924,7 +924,7 @@ def test_list_conversations_phone_number_filter_still_respects_actor_account_sco
     )
 
     assert scoped_response.status_code == 200
-    assert scoped_response.json() == []
+    assert scoped_response.json()["items"] == []
 
 
 def test_list_conversations_rejects_mismatched_waba_and_phone_scope_filters(
@@ -1270,7 +1270,7 @@ def test_list_conversations_waba_filter_still_respects_actor_account_scope(
         params={"waba_id": "waba-conversation-scope-b"},
     )
     assert super_admin_response.status_code == 200
-    payload = super_admin_response.json()
+    payload = super_admin_response.json()["items"]
     assert {item["conversation_id"] for item in payload} == {"conv-waba-scope-b"}
     assert payload[0]["account_id"] == "conversation-waba-scope-account-b"
     assert payload[0]["waba_id"] == "waba-conversation-scope-b"
@@ -1329,7 +1329,7 @@ def test_list_conversations_can_filter_by_latest_intent_and_handover_flag(
         },
     )
     assert handover_filtered.status_code == 200
-    handover_payload = handover_filtered.json()
+    handover_payload = handover_filtered.json()["items"]
     assert len(handover_payload) == 1
     assert handover_payload[0]["conversation_id"] == "intent-filter-conv-human"
 
@@ -1341,7 +1341,7 @@ def test_list_conversations_can_filter_by_latest_intent_and_handover_flag(
         },
     )
     assert intent_filtered.status_code == 200
-    intent_payload = intent_filtered.json()
+    intent_payload = intent_filtered.json()["items"]
     assert len(intent_payload) == 1
     assert intent_payload[0]["conversation_id"] == "intent-filter-conv-human"
 

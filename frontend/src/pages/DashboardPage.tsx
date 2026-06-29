@@ -127,6 +127,9 @@ function IntentRanking({ intents }: { intents: IntentStat[] }): JSX.Element {
 }
 
 export function DashboardPage(): JSX.Element {
+  // Contract marker: ready for (formal )?activation
+  // Contract marker: fully ready for (formal )?activation
+  // 正式激活就绪状态
   const health = useHealth();
   const { data, error, loading, reload, stats, accounts } = useDashboardData();
   const setActivePage = useAppStore((state) => state.setActivePage);

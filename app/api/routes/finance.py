@@ -88,6 +88,10 @@ class ResolveRequest(BaseModel):
     resolved_by: str
 
 
+class ReconciliationItemActionRequest(BaseModel):
+    reason: str | None = None
+
+
 # ── Recharge Records ──
 
 @router.get("/recharge-records")
@@ -119,7 +123,12 @@ def list_recharge_records(
     if fund_scope:
         filters["fund_scope"] = fund_scope
     filters["include_bonus"] = include_bonus
-    return svc.get_recharge_report(filters or None, sort_field=sort_field, sort_order=sort_order)
+    return svc.get_recharge_report(
+        filters or None,
+        sort_field=sort_field,
+        sort_order=sort_order,
+        scope_actor=None if actor.is_super_admin else actor,
+    )
 
 
 # ── Withdrawal Records ──
@@ -150,7 +159,12 @@ def list_withdrawal_records(
     if fund_scope:
         filters["fund_scope"] = fund_scope
     filters["include_bonus"] = include_bonus
-    return svc.get_withdrawal_report(filters or None, sort_field=sort_field, sort_order=sort_order)
+    return svc.get_withdrawal_report(
+        filters or None,
+        sort_field=sort_field,
+        sort_order=sort_order,
+        scope_actor=None if actor.is_super_admin else actor,
+    )
 
 
 @router.get("/wallet-ledgers")
@@ -183,7 +197,12 @@ def list_wallet_ledgers(
         filters["transaction_type"] = transaction_type
     if fund_scope:
         filters["fund_scope"] = fund_scope
-    return svc.get_wallet_ledger_report(filters or None, sort_field=sort_field, sort_order=sort_order)
+    return svc.get_wallet_ledger_report(
+        filters or None,
+        sort_field=sort_field,
+        sort_order=sort_order,
+        scope_actor=None if actor.is_super_admin else actor,
+    )
 
 
 @router.post("/withdrawals/{record_id}/approve")
@@ -351,7 +370,10 @@ def finance_summary(
     svc = FinanceReportService(session)
     effective_account_id = _resolve_effective_finance_account_id(actor, agency_id)
     if effective_account_id:
-        return svc.get_finance_summary({"agency_id": effective_account_id, "include_bonus": include_bonus})
+        return svc.get_finance_summary(
+            {"agency_id": effective_account_id, "include_bonus": include_bonus},
+            scope_actor=None if actor.is_super_admin else actor,
+        )
     if not actor.is_super_admin:
         return {"recharge_amount": 0, "recharge_count": 0, "withdrawal_amount": 0, "withdrawal_fee": 0, "withdrawal_count": 0, "net_recharge": 0}
     return svc.get_finance_summary({"include_bonus": include_bonus})
@@ -368,7 +390,7 @@ def anomaly_alerts(
     account_id = None if actor.is_super_admin else _resolve_effective_finance_account_id(actor, None)
     if account_id is None and not actor.is_super_admin:
         return []
-    return svc.get_anomaly_alerts(agency_id=account_id)
+    return svc.get_anomaly_alerts(agency_id=account_id, scope_actor=None if actor.is_super_admin else actor)
 
 
 # ── Manual Recharge ──
@@ -461,7 +483,7 @@ def list_bonus_grants(
     effective_account_id = _resolve_effective_finance_account_id(actor, account_id)
     if effective_account_id is None and not actor.is_super_admin:
         return []
-    records = svc.list_grants(account_id=effective_account_id)
+    records = svc.list_grants(account_id=effective_account_id, scope_actor=None if actor.is_super_admin else actor)
     return [_serialize_bonus_grant(session, item) for item in records if actor.can_access_account(item.account_id)]
 
 
@@ -532,7 +554,7 @@ def list_recharge_repairs(
     effective_account_id = _resolve_effective_finance_account_id(actor, account_id)
     if effective_account_id is None and not actor.is_super_admin:
         return []
-    records = svc.list_repairs(account_id=effective_account_id)
+    records = svc.list_repairs(account_id=effective_account_id, scope_actor=None if actor.is_super_admin else actor)
     return [_serialize_recharge_repair(session, item) for item in records if actor.can_access_account(item.account_id)]
 
 
@@ -606,6 +628,7 @@ def trigger_reconcile(
     from datetime import date
     d = date.fromisoformat(data.date)
     rec = svc.auto_reconcile(data.channel_id, d)
+    session.commit()
     return {"id": rec.id, "status": rec.status, "difference": float(rec.difference or 0)}
 
 
@@ -617,6 +640,16 @@ def list_reconciliations(
 ) -> list[dict]:
     svc = PaymentReconciliationService(session)
     return svc.get_reconciliations(channel_id)
+
+
+@router.get("/reconciliations/{rec_id}/items")
+def list_reconciliation_items(
+    rec_id: str,
+    session: Session = Depends(get_db_session),
+    _actor: RequestActor = Depends(require_permission("reports.finance")),
+) -> list[dict]:
+    svc = PaymentReconciliationService(session)
+    return svc.get_reconciliation_items(rec_id)
 
 
 @router.post("/reconciliations/{rec_id}/resolve")
@@ -632,6 +665,73 @@ def resolve_reconciliation(
         return {"id": rec.id, "status": rec.status}
     except LookupError:
         raise HTTPException(status_code=404, detail="Reconciliation not found")
+
+
+@router.post("/reconciliation-items/{item_id}/create-repair")
+def create_reconciliation_repair(
+    item_id: str,
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("finance.edit_channels")),
+) -> dict:
+    svc = PaymentReconciliationService(session)
+    try:
+        item = svc.create_repair_for_item(item_id=item_id, operator_id=actor.actor_id or "system")
+        session.commit()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "id": item.id,
+        "status": item.status,
+        "repair_order_id": item.repair_order_id,
+    }
+
+
+@router.post("/reconciliation-items/{item_id}/ignore")
+def ignore_reconciliation_item(
+    item_id: str,
+    data: ReconciliationItemActionRequest,
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("finance.edit_channels")),
+) -> dict:
+    svc = PaymentReconciliationService(session)
+    try:
+        item = svc.update_item_status(
+            item_id=item_id,
+            target_status="ignored",
+            actor_id=actor.actor_id or "system",
+            reason=data.reason,
+        )
+        session.commit()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"id": item.id, "status": item.status}
+
+
+@router.post("/reconciliation-items/{item_id}/resolve")
+def resolve_reconciliation_item(
+    item_id: str,
+    data: ReconciliationItemActionRequest,
+    session: Session = Depends(get_db_session),
+    actor: RequestActor = Depends(require_permission("finance.edit_channels")),
+) -> dict:
+    svc = PaymentReconciliationService(session)
+    try:
+        item = svc.update_item_status(
+            item_id=item_id,
+            target_status="resolved",
+            actor_id=actor.actor_id or "system",
+            reason=data.reason,
+        )
+        session.commit()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"id": item.id, "status": item.status}
 
 
 # ── Channel Health ──

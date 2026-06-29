@@ -11,16 +11,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
+    AuditLog,
     AppUser,
     InviteCode,
     MemberNotification,
     MemberOrder,
     MemberProfile,
+    MemberTaskBatch,
+    MemberTaskDayQuota,
+    MemberVerificationRequest,
     PromotionTaskInstance,
     PromotionTaskTemplate,
     TaskPackageInstance,
     TaskPackageInstanceItem,
     TaskPackageTemplate,
+    TaskSystemConfig,
     UserReferral,
     WalletAccount,
     WalletLedgerEntry,
@@ -45,6 +50,7 @@ from app.schemas.h5_member_commerce import (
 )
 from app.services.h5_member_auth_service import H5MemberContext
 from app.services.h5_member_fragment_service import H5MemberFragmentService
+from app.services.member_auto_certification_service import MemberAutoCertificationService
 from app.services.wallet_ledger_service import WalletLedgerService
 
 
@@ -64,7 +70,12 @@ class H5MemberCommerceService:
         self._cache: dict[str, _CacheEntry] = {}
         self._wallet_ledger_service = WalletLedgerService(session=session)
 
-    async def list_task_packages(self, *, context: H5MemberContext) -> list[H5TaskPackagePayload]:
+    async def list_task_packages(
+        self,
+        *,
+        context: H5MemberContext,
+        status: str | None = None,
+    ) -> list[H5TaskPackagePayload]:
         packages = self._session.execute(
             select(TaskPackageInstance)
             .options(joinedload(TaskPackageInstance.items))
@@ -73,6 +84,7 @@ class H5MemberCommerceService:
                 TaskPackageInstance.account_id == context.account_id,
                 TaskPackageInstance.user_id == context.user.id,
                 TaskPackageInstance.site_id == context.site.id,
+                TaskPackageInstance.status == status if status is not None else True,
             )
             .order_by(TaskPackageInstance.created_at.desc(), TaskPackageInstance.id.desc())
         ).unique().scalars().all()
@@ -125,7 +137,9 @@ class H5MemberCommerceService:
         if package.status == "pending_claim" and package.template.package_type == "promotion":
             self._ensure_promotion_claim_ready(payload.promotion)
         if package.status == "pending_claim":
+            self._ensure_claim_gate_allows_claim(context=context, package=package)
             now = utc_now()
+            batch = self._validate_batch_claim(package=package)
             package.claimed_at = now
             if package.template.package_type == "promotion":
                 wallet = self._require_wallet(context=context, create_if_missing=True)
@@ -148,9 +162,29 @@ class H5MemberCommerceService:
                     promotion_instance.rewarded_at = now
                     promotion_instance.status = "completed"
                     self._session.add(promotion_instance)
+                self._advance_batch_after_package_completion(package=package, completed_at=now, batch=batch)
             else:
                 package.status = "active"
                 package.expires_at = now + timedelta(hours=package.completion_window_hours_snapshot)
+                self._mark_batch_claimed(batch=batch, claimed_at=now)
+            self._session.add(
+                AuditLog(
+                    account_id=context.account_id,
+                    actor_type="member",
+                    actor_id=context.user.id,
+                    action="h5_task_package_claimed",
+                    target_type="task_package_instance",
+                    target_id=package.id,
+                    payload={
+                        "user_id": context.user.id,
+                        "site_id": context.site.id,
+                        "claimed_status": package.status,
+                        "package_type": package.template.package_type,
+                        "generated_item_count": len(package.items),
+                        "visible_item_id": package.visible_item_id,
+                    },
+                )
+            )
             self._session.add(package)
             try:
                 self._session.commit()
@@ -161,6 +195,77 @@ class H5MemberCommerceService:
             self._session.refresh(package)
         return self._serialize_task_package_with_refresh(package=package, context=context)
 
+    def _ensure_claim_gate_allows_claim(
+        self,
+        *,
+        context: H5MemberContext,
+        package: TaskPackageInstance,
+    ) -> None:
+        if context.user.restrict_task_claim:
+            raise ValueError("Task claiming is restricted for this member.")
+
+        claim_gate = (package.claim_gate_snapshot or "").strip().lower()
+        if not claim_gate:
+            return
+        if claim_gate == "whatsapp_bound" and not context.user.has_whatsapp:
+            raise ValueError("This task package requires a bound WhatsApp account before claiming.")
+        if claim_gate == "certified_member" and not self._is_certified_member(context=context):
+            raise ValueError("This task package requires certification before claiming.")
+
+    def _is_certified_member(self, *, context: H5MemberContext) -> bool:
+        config = self._resolve_task_system_config(context=context)
+        if not config.certified_member_enabled:
+            return True
+
+        latest_request = self._session.scalar(
+            select(MemberVerificationRequest)
+            .where(
+                MemberVerificationRequest.account_id == context.account_id,
+                MemberVerificationRequest.member_profile_id == context.member_profile.id,
+            )
+            .order_by(MemberVerificationRequest.created_at.desc(), MemberVerificationRequest.id.desc())
+            .limit(1)
+        )
+        if latest_request is not None and latest_request.status == "approved":
+            return True
+
+        real_recharge_amount = self._session.scalar(
+            select(func.coalesce(func.sum(WalletLedgerEntry.amount), 0))
+            .where(
+                WalletLedgerEntry.account_id == context.account_id,
+                WalletLedgerEntry.user_id == context.user.id,
+                WalletLedgerEntry.direction == "credit",
+                WalletLedgerEntry.status == "paid",
+                WalletLedgerEntry.is_real_recharge.is_(True),
+            )
+        )
+        return Decimal(real_recharge_amount or 0) >= Decimal(config.certified_recharge_threshold)
+
+    def _resolve_task_system_config(self, *, context: H5MemberContext) -> TaskSystemConfig:
+        site_config = self._session.scalar(
+            select(TaskSystemConfig)
+            .where(
+                TaskSystemConfig.account_id == context.account_id,
+                TaskSystemConfig.site_id == context.site.id,
+            )
+            .order_by(TaskSystemConfig.created_at.desc(), TaskSystemConfig.id.desc())
+        )
+        if site_config is not None:
+            return site_config
+
+        account_config = self._session.scalar(
+            select(TaskSystemConfig)
+            .where(
+                TaskSystemConfig.account_id == context.account_id,
+                TaskSystemConfig.site_id.is_(None),
+            )
+            .order_by(TaskSystemConfig.created_at.desc(), TaskSystemConfig.id.desc())
+        )
+        if account_config is not None:
+            return account_config
+
+        return TaskSystemConfig(account_id=context.account_id, site_id=context.site.id)
+
     async def purchase_task_package_item(
         self,
         *,
@@ -168,7 +273,7 @@ class H5MemberCommerceService:
         package_id: str,
         item_id: str,
     ) -> H5TaskPackagePurchaseResponse:
-        package = self._require_package(context=context, package_id=package_id)
+        package = self._require_package(context=context, package_id=package_id, for_update=True)
         item = self._require_package_item(package=package, item_id=item_id)
         wallet = self._require_wallet(context=context, create_if_missing=True)
 
@@ -196,6 +301,15 @@ class H5MemberCommerceService:
                 task_package=self._serialize_task_package(package=package, context=context)[0],
                 wallet=self._serialize_wallet_summary(wallet),
                 reason="Task package is not available for purchase.",
+            )
+
+        current_item = self._get_current_package_item(package=package)
+        if current_item is None or current_item.id != item.id:
+            return H5TaskPackagePurchaseResponse(
+                success=False,
+                task_package=self._serialize_task_package(package=package, context=context)[0],
+                wallet=self._serialize_wallet_summary(wallet),
+                reason="Only the current product can be completed.",
             )
 
         if item.completed_at is not None:
@@ -234,21 +348,31 @@ class H5MemberCommerceService:
         self._session.flush()
 
         item.order_id = order.id
+        if item.started_at is None:
+            item.started_at = now
+        if item.available_at is None:
+            item.available_at = now
         item.completed_at = now
         self._session.add(item)
         self._invalidate_cache(f"orders:{context.account_id}:{context.user.id}")
-        self._wallet_ledger_service.debit_system_balance(
+        purchase_source_type = self._build_task_item_purchase_source_type(item=item)
+        _, debit_entry = self._wallet_ledger_service.debit_system_balance(
             wallet=wallet,
             account_id=context.account_id,
             user_id=context.user.id,
             amount=item_price,
             currency=item.currency,
             transaction_type="purchase",
-            source_type="purchase",
+            source_type=purchase_source_type,
             note=f"{package.template.title} / {item.product_name}",
             reference_type="member_order",
             reference_id=order.id,
         )
+        self._session.flush()
+        item.debit_ledger_id = debit_entry.id
+        self._session.add(item)
+        self._session.flush()
+        self._session.expire(package, ["items"])
 
         if all(entry.completed_at is not None for entry in package.items):
             package.status = "completed"
@@ -266,6 +390,7 @@ class H5MemberCommerceService:
                 source_id=package.id,
                 auto_commit=False,
             )
+            self._advance_batch_after_package_completion(package=package, completed_at=now)
 
         self._session.commit()
         refreshed_package = self._require_package(context=context, package_id=package.id)
@@ -282,6 +407,33 @@ class H5MemberCommerceService:
             wallet=self._serialize_wallet_summary(refreshed_wallet),
             fragment_drop=fragment_drop,
         )
+
+    async def start_current_task_package_item(
+        self,
+        *,
+        context: H5MemberContext,
+        package_id: str,
+    ) -> H5TaskPackagePayload:
+        package = self._require_package(context=context, package_id=package_id)
+        if self._expire_if_needed(package):
+            self._session.add(package)
+            self._session.commit()
+        self._session.refresh(package)
+
+        current_item = self._get_current_package_item(package=package)
+        if (
+            package.status == "active"
+            and current_item is not None
+            and current_item.started_at is None
+        ):
+            now = utc_now()
+            current_item.started_at = now
+            if current_item.available_at is None:
+                current_item.available_at = now
+            self._session.add(current_item)
+            self._session.commit()
+            self._session.refresh(package)
+        return self._serialize_task_package_with_refresh(package=package, context=context)
 
     async def list_orders(self, *, context: H5MemberContext) -> list[H5MemberOrderResponse]:
         cache_key = f"orders:{context.account_id}:{context.user.id}"
@@ -362,6 +514,14 @@ class H5MemberCommerceService:
             reference_id=recharge.id,
             fund_type="cash",
             is_real_recharge=True,
+        )
+        self._session.flush()
+        MemberAutoCertificationService(session=self._session).auto_certify_after_real_recharge(
+            account_id=context.account_id,
+            site_id=context.site.id,
+            member_profile_id=context.member_profile.id,
+            user_id=context.user.id,
+            trigger_source="h5_recharge",
         )
         self._create_member_notification(
             context=context,
@@ -448,6 +608,7 @@ class H5MemberCommerceService:
         # (status in {"submitted", "reviewing", "approved"}) for the same user / account.
         wallet = self._require_wallet(context=context, create_if_missing=True)
         wallet = self._require_wallet_row_for_update(wallet_id=wallet.id)
+        self._assert_no_active_withdrawal_request(context=context)
         sanitized_amount = self._quantize(amount)
         if sanitized_amount <= Decimal("0"):
             raise ValueError("Withdrawal amount must be greater than zero.")
@@ -517,6 +678,23 @@ class H5MemberCommerceService:
         )
         self._session.commit()
         return self._serialize_withdrawal(withdrawal, history=[audit_log])
+
+    def _assert_no_active_withdrawal_request(
+        self,
+        *,
+        context: H5MemberContext,
+    ) -> None:
+        active_request_id = self._session.scalar(
+            select(WithdrawalRequest.id)
+            .where(
+                WithdrawalRequest.account_id == context.account_id,
+                WithdrawalRequest.user_id == context.user.id,
+                WithdrawalRequest.status.in_(("submitted", "reviewing", "approved")),
+            )
+            .limit(1)
+        )
+        if active_request_id is not None:
+            raise ValueError("An active withdrawal request already exists.")
 
     async def list_withdrawals(
         self,
@@ -632,8 +810,14 @@ class H5MemberCommerceService:
     def _invalidate_cache(self, key: str) -> None:
         self._cache.pop(key, None)
 
-    def _require_package(self, *, context: H5MemberContext, package_id: str) -> TaskPackageInstance:
-        package = self._session.execute(
+    def _require_package(
+        self,
+        *,
+        context: H5MemberContext,
+        package_id: str,
+        for_update: bool = False,
+    ) -> TaskPackageInstance:
+        query = (
             select(TaskPackageInstance)
             .options(joinedload(TaskPackageInstance.items))
             .options(joinedload(TaskPackageInstance.template))
@@ -643,7 +827,10 @@ class H5MemberCommerceService:
                 TaskPackageInstance.user_id == context.user.id,
                 TaskPackageInstance.site_id == context.site.id,
             )
-        ).unique().scalars().first()
+        )
+        if for_update:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        package = self._session.execute(query).unique().scalars().first()
         if package is None:
             raise LookupError(f"Task package '{package_id}' was not found.")
         return package
@@ -726,26 +913,36 @@ class H5MemberCommerceService:
         package: TaskPackageInstance,
         context: H5MemberContext,
     ) -> tuple[H5TaskPackagePayload, bool]:
+        progress_changed = self._sync_runtime_item_progress(package)
         total_amount = sum((Decimal(item.price) for item in package.items), start=Decimal("0"))
         completed_amount = sum(
             (Decimal(item.price) for item in package.items if item.completed_at is not None),
             start=Decimal("0"),
         )
         completed_items = sum(1 for item in package.items if item.completed_at is not None)
-        total_items = len(package.items)
+        ordered_items = sorted(package.items, key=lambda entry: entry.sort_order)
+        total_items = len(ordered_items)
         total_commission = self._quantize(total_amount * Decimal(package.reward_ratio_snapshot))
         current_commission = self._quantize(completed_amount * Decimal(package.reward_ratio_snapshot))
         countdown_seconds = self._build_countdown_seconds(package=package)
         promotion_payload = None
-        changed = False
+        changed = progress_changed
         if package.template.promotion_metric is not None:
-            promotion_payload, changed = self._build_promotion_payload(package=package, context=context)
+            promotion_payload, promotion_changed = self._build_promotion_payload(package=package, context=context)
+            changed = promotion_changed or changed
+        current_item = self._resolve_current_item_payload(package=package)
         return H5TaskPackagePayload(
             id=package.id,
             title=package.template.title,
             description=package.template.description,
             type=package.template.package_type,
             status=package.status,
+            batch_index=package.batch_index or 1,
+            batch_total=package.batch_total or 1,
+            planned_amount=float(package.planned_amount),
+            system_generated_amount=float(package.system_generated_amount),
+            manual_added_amount=float(package.manual_added_amount),
+            effective_amount=float(package.effective_amount),
             reward_ratio=float(package.reward_ratio_snapshot),
             claimed_at=package.claimed_at,
             expires_at=package.expires_at,
@@ -753,18 +950,14 @@ class H5MemberCommerceService:
             dispatched_at=package.dispatched_at,
             completion_window_hours=package.completion_window_hours_snapshot,
             items=[
-                H5TaskPackageItemPayload(
-                    id=item.id,
-                    product_name=item.product_name,
-                    image_url=item.image_url,
-                    price=float(item.price),
-                    currency=item.currency,
-                    completed_at=item.completed_at,
-                    order_id=item.order_id,
-                )
-                for item in sorted(package.items, key=lambda entry: entry.sort_order)
+                self._serialize_task_package_item(item)
+                for item in ordered_items
             ],
+            current_item=current_item,
+            current_item_index=package.current_item_index if current_item is not None else None,
             promotion=promotion_payload,
+            has_adjustment_notice=package.has_adjustment_notice,
+            adjustment_notice=package.adjustment_notice,
             task_balance_awarded_at=package.task_balance_awarded_at,
             total_commission=float(total_commission),
             current_commission=float(current_commission),
@@ -772,6 +965,176 @@ class H5MemberCommerceService:
             total_items=total_items,
             countdown_seconds=countdown_seconds,
         ), changed
+
+    @staticmethod
+    def _serialize_task_package_item(item: TaskPackageInstanceItem) -> H5TaskPackageItemPayload:
+        return H5TaskPackageItemPayload(
+            id=item.id,
+            product_name=item.product_name,
+            image_url=item.image_url,
+            price=float(item.price),
+            currency=item.currency,
+            origin=item.item_origin,
+            status=item.status,
+            completed_at=item.completed_at,
+            order_id=item.order_id,
+        )
+
+    @staticmethod
+    def _build_task_item_purchase_source_type(*, item: TaskPackageInstanceItem) -> str:
+        origin = (item.item_origin or "system_generated").strip().lower()
+        return f"task_item_purchase_{origin}"
+
+    def _resolve_current_item_payload(self, *, package: TaskPackageInstance) -> H5TaskPackageItemPayload | None:
+        if package.status == "pending_claim":
+            return None
+        current_item = self._get_current_package_item(package=package)
+        if current_item is None:
+            return None
+        return self._serialize_task_package_item(current_item)
+
+    @staticmethod
+    def _get_current_package_item(*, package: TaskPackageInstance) -> TaskPackageInstanceItem | None:
+        ordered_items = sorted(package.items, key=lambda entry: entry.sort_order)
+        return next((item for item in ordered_items if item.completed_at is None), None)
+
+    @staticmethod
+    def _sync_runtime_item_progress(package: TaskPackageInstance) -> bool:
+        changed = False
+        ordered_items = sorted(package.items, key=lambda entry: entry.sort_order)
+        if not ordered_items:
+            if package.current_item_index != 0:
+                package.current_item_index = 0
+                changed = True
+            if package.visible_item_id is not None:
+                package.visible_item_id = None
+                changed = True
+            return changed
+
+        next_incomplete = next((item for item in ordered_items if item.completed_at is None), None)
+        next_index = ordered_items.index(next_incomplete) + 1 if next_incomplete is not None else 0
+        next_visible_item_id = None if package.status == "pending_claim" or next_incomplete is None else next_incomplete.id
+
+        if package.current_item_index != next_index:
+            package.current_item_index = next_index
+            changed = True
+        if package.visible_item_id != next_visible_item_id:
+            package.visible_item_id = next_visible_item_id
+            changed = True
+        if package.required_item_count != len(ordered_items):
+            package.required_item_count = len(ordered_items)
+            changed = True
+        completed_required_count = sum(1 for item in ordered_items if item.completed_at is not None)
+        if package.completed_required_item_count != completed_required_count:
+            package.completed_required_item_count = completed_required_count
+            changed = True
+
+        for item in ordered_items:
+            expected_visible = next_visible_item_id == item.id
+            expected_status = (
+                "completed"
+                if item.completed_at is not None
+                else "available"
+                if expected_visible
+                else "pending"
+            )
+            if item.visible_to_user != expected_visible:
+                item.visible_to_user = expected_visible
+                changed = True
+            if item.status != expected_status:
+                item.status = expected_status
+                changed = True
+        return changed
+
+    def _validate_batch_claim(self, *, package: TaskPackageInstance) -> MemberTaskBatch | None:
+        batch = self._get_batch_for_package(package=package)
+        if batch is None or package.batch_index is None:
+            return batch
+
+        if batch.current_package_index != package.batch_index:
+            raise ValueError("Current batch package is not claimable yet.")
+
+        blocking_package = self._session.scalars(
+            select(TaskPackageInstance)
+            .where(
+                TaskPackageInstance.account_id == package.account_id,
+                TaskPackageInstance.batch_id == package.batch_id,
+                TaskPackageInstance.id != package.id,
+                TaskPackageInstance.batch_index.is_not(None),
+                TaskPackageInstance.batch_index < package.batch_index,
+                TaskPackageInstance.status != "completed",
+            )
+            .order_by(TaskPackageInstance.batch_index.asc(), TaskPackageInstance.id.asc())
+        ).first()
+        if blocking_package is not None:
+            raise ValueError("Current batch package is not claimable yet.")
+        return batch
+
+    def _get_batch_for_package(self, *, package: TaskPackageInstance) -> MemberTaskBatch | None:
+        if package.batch_id is None:
+            return None
+        return self._session.scalars(
+            select(MemberTaskBatch).where(
+                MemberTaskBatch.id == package.batch_id,
+                MemberTaskBatch.account_id == package.account_id,
+            )
+        ).first()
+
+    def _mark_batch_claimed(self, *, batch: MemberTaskBatch | None, claimed_at: datetime) -> None:
+        if batch is None:
+            return
+        if batch.claimed_at is None:
+            batch.claimed_at = claimed_at
+        if batch.status == "pending_claim":
+            batch.status = "active"
+        self._session.add(batch)
+
+    def _advance_batch_after_package_completion(
+        self,
+        *,
+        package: TaskPackageInstance,
+        completed_at: datetime,
+        batch: MemberTaskBatch | None = None,
+    ) -> None:
+        resolved_batch = batch or self._get_batch_for_package(package=package)
+        if resolved_batch is None:
+            return
+
+        batch_packages = self._session.scalars(
+            select(TaskPackageInstance)
+            .where(
+                TaskPackageInstance.account_id == package.account_id,
+                TaskPackageInstance.batch_id == resolved_batch.id,
+            )
+            .order_by(TaskPackageInstance.batch_index.asc(), TaskPackageInstance.created_at.asc())
+        ).all()
+        completed_count = sum(1 for entry in batch_packages if entry.status == "completed")
+        next_package = next((entry for entry in batch_packages if entry.status != "completed"), None)
+
+        resolved_batch.completed_package_count = completed_count
+        if resolved_batch.claimed_at is None and package.claimed_at is not None:
+            resolved_batch.claimed_at = package.claimed_at
+
+        if next_package is None:
+            resolved_batch.current_package_index = max(resolved_batch.package_count, completed_count)
+            resolved_batch.status = "completed"
+            resolved_batch.completed_at = completed_at
+            if resolved_batch.quota_id is not None:
+                quota = self._session.scalars(
+                    select(MemberTaskDayQuota).where(
+                        MemberTaskDayQuota.id == resolved_batch.quota_id,
+                        MemberTaskDayQuota.account_id == resolved_batch.account_id,
+                    )
+                ).first()
+                if quota is not None:
+                    quota.status = "completed"
+                    self._session.add(quota)
+        else:
+            resolved_batch.current_package_index = next_package.batch_index or (completed_count + 1)
+            resolved_batch.status = "active"
+            resolved_batch.completed_at = None
+
+        self._session.add(resolved_batch)
 
     def _build_promotion_payload(
         self,
@@ -1309,15 +1672,18 @@ class H5MemberCommerceService:
         rewarded_at: datetime,
     ) -> None:
         reward_amount = self._calculate_task_package_reward(package=package)
+        package.reward_amount_final = reward_amount
         existing_entry = self._find_task_reward_entry(
             context=context,
             package=package,
             wallet=wallet,
         )
         if existing_entry is not None:
+            if package.reward_ledger_id != existing_entry.id:
+                package.reward_ledger_id = existing_entry.id
             if package.task_balance_awarded_at is None:
                 package.task_balance_awarded_at = rewarded_at
-                self._session.add(package)
+            self._session.add(package)
             return
         if package.task_balance_awarded_at is not None:
             return
@@ -1325,22 +1691,37 @@ class H5MemberCommerceService:
         self._session.add(package)
         if reward_amount <= Decimal("0"):
             return
-        wallet.task_balance = self._quantize(Decimal(wallet.task_balance) + reward_amount)
-        self._session.add(wallet)
+        ledger_entry = self._wallet_ledger_service.credit_task_balance(
+            wallet=wallet,
+            account_id=context.account_id,
+            user_id=context.user.id,
+            amount=reward_amount,
+            currency=wallet.currency,
+            transaction_type="task_reward",
+            source_type="task_reward",
+            note=f"{package.template.title} completed",
+            reference_type="task_package_instance",
+            reference_id=package.id,
+        )
+        self._session.flush()
+        package.reward_ledger_id = ledger_entry.id
+        self._session.add(package)
         self._session.add(
-            WalletLedgerEntry(
+            AuditLog(
                 account_id=context.account_id,
-                wallet_account_id=wallet.id,
-                user_id=context.user.id,
-                ledger_type="task",
-                transaction_type="task_reward",
-                direction="credit",
-                amount=reward_amount,
-                currency=wallet.currency,
-                status="paid",
-                note=f"{package.template.title} completed",
-                reference_type="task_package_instance",
-                reference_id=package.id,
+                actor_type="member",
+                actor_id=context.user.id,
+                action="h5_task_reward_credited",
+                target_type="task_package_instance",
+                target_id=package.id,
+                payload={
+                    "user_id": context.user.id,
+                    "site_id": context.site.id,
+                    "amount": float(reward_amount),
+                    "currency": wallet.currency,
+                    "transaction_type": "task_reward",
+                    "reward_ledger_id": ledger_entry.id,
+                },
             )
         )
         self._create_member_notification(

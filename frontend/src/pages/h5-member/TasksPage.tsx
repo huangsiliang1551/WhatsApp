@@ -5,7 +5,6 @@ import type { H5SignInStatus, H5TaskInstance } from "../../services/h5Member";
 import {
   formatCountdown,
   formatMoney,
-  formatPercentage,
   getTaskPackageTypeLabel,
 } from "./sharedUtils";
 import { DetailGrid, EmptyStateCard, PullToRefresh, SectionHeader } from "./sharedComponents";
@@ -21,7 +20,7 @@ type TasksPageProps = {
   onSignIn: () => Promise<void>;
   onNavigate: (path: string) => void;
   onRefresh: () => Promise<void>;
-  onOpenClaimDialog?: (packageId: string) => void;
+  onOpenClaimDialog?: (pkg: { id: string; title: string }) => void;
 };
 
 export function TasksPage({
@@ -97,10 +96,12 @@ export function TasksPage({
   }
 
   function renderTaskCard(instance: H5TaskInstance): JSX.Element {
-    const progress = instance.totalCount > 0 ? (instance.completedCount / instance.totalCount) * 100 : 0;
     const totalCommission = instance.totalCommission ?? instance.rewardAmount;
-    const countdownSeconds = instance.countdownSeconds ?? 0;
     const isAvailable = instance.status === "pending_claim";
+    const batchProgressLabel = t("tasks.todayTask", {
+      current: String(instance.batchIndex ?? 1),
+      total: String(instance.batchTotal ?? 1),
+    });
     const statusClass =
       instance.status === "completed"
         ? "completed"
@@ -123,7 +124,7 @@ export function TasksPage({
     function handlePrimaryAction(event: MouseEvent<HTMLButtonElement>): void {
       event.stopPropagation();
       if (isAvailable && onOpenClaimDialog) {
-        onOpenClaimDialog(instance.id);
+        onOpenClaimDialog({ id: instance.id, title: instance.title });
         return;
       }
       handleCardClick();
@@ -144,35 +145,14 @@ export function TasksPage({
       >
         <div className="h5-member-task-summary">
           <div>
+            <p className="muted">{batchProgressLabel}</p>
             <strong>{instance.title}</strong>
-            <p className="muted">
-              {isAvailable
-                ? t("tasks.startsOnClaim")
-                : t("tasks.remaining", { time: formatCountdown(countdownSeconds) })}
-            </p>
           </div>
           <span className={`h5-task-instance-status-badge ${statusClass}`}>{statusLabel}</span>
         </div>
 
-        <div className="h5-task-instance-meta h5-member-task-chip-row">
-          <span className="h5-member-inline-pill">{getTaskPackageTypeLabel(instance.type)}</span>
-          <span className="h5-member-inline-pill">{t("tasks.items", { count: instance.totalCount })}</span>
-          <span className="h5-member-inline-pill">{`${t("tasks.rewardRatio")} ${formatPercentage(instance.rewardRatio)}`}</span>
-        </div>
-
-        <DetailGrid
-          items={[
-            { label: t("tasks.remainingTime"), value: formatCountdown(countdownSeconds) },
-            {
-              label: t("tasks.progress", { done: instance.completedCount, total: instance.totalCount }),
-              value: `${Math.round(progress)}%`,
-            },
-            { label: t("tasks.totalCommission"), value: formatMoney(totalCommission) },
-          ]}
-        />
-
-        <div className="h5-member-progress h5-task-card-progress">
-          <div className="h5-member-progress-fill" style={{ width: `${progress}%` }} />
+        <div className="h5-member-task-chip-row">
+          <span className="h5-member-inline-pill">{t("tasks.estimatedReward", { amount: formatMoney(totalCommission) })}</span>
         </div>
 
         <div className="h5-member-card-actions h5-task-card-actions">
@@ -196,7 +176,7 @@ export function TasksPage({
 
     function handleFocusAction(): void {
       if (isAvailable && onOpenClaimDialog) {
-        onOpenClaimDialog(focusTask.id);
+        onOpenClaimDialog({ id: focusTask.id, title: focusTask.title });
         return;
       }
       onNavigate(`/h5/tasks/package/${focusTask.id}`);
@@ -219,7 +199,6 @@ export function TasksPage({
 
         <div className="h5-member-task-chip-row">
           <span className="h5-member-inline-pill">{getTaskPackageTypeLabel(focusTask.type)}</span>
-          <span className="h5-member-inline-pill">{t("tasks.items", { count: focusTask.totalCount })}</span>
           <span className="h5-member-inline-pill">{t("tasks.focusReward", { amount: formatMoney(totalCommission) })}</span>
         </div>
 

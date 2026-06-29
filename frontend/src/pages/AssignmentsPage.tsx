@@ -1,14 +1,23 @@
-import { Button, Card, Col, Row, Space, Tag, Typography, message } from "antd";
-import { useCallback, type JSX } from "react";
+import { Button, Card, Col, Input, Row, Space, Tag, Typography, message } from "antd";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 
 import { MemberIdLink } from "../components/member/MemberIdLink";
-import { PageShell, EmptyGuide } from "../components/PageShell";
+import { EmptyGuide, PageShell } from "../components/PageShell";
+import { useMemberStatus } from "../hooks/useMemberStatus";
 import { usePageData } from "../hooks/usePageData";
-import { api, listConversations, listRuntimeAgents, type ConversationSummary } from "../services/api";
+import {
+  api,
+  listConversations,
+  listRuntimeAgents,
+  type ConversationSummary,
+} from "../services/api";
+import { resolveCustomerProfileSummaryByConversation } from "../services/operations";
 import { useAppStore } from "../stores/appStore";
 
+type HandoverRecommendationFilter = "all" | "recommended" | "normal";
+
 const MODE_LABELS: Record<string, string> = {
-  recommended: "待处理",
+  recommended: "建议转人工",
   human_managed: "人工接管",
   ai_managed: "AI 托管",
   paused: "暂停",
@@ -16,12 +25,21 @@ const MODE_LABELS: Record<string, string> = {
 };
 
 const MODE_COLORS: Record<string, string> = {
-  recommended: "#ff4d4f",
-  human_managed: "#faad14",
-  ai_managed: "#52c41a",
-  paused: "#d9d9d9",
-  closed: "#bfbfbf",
+  recommended: "volcano",
+  human_managed: "gold",
+  ai_managed: "green",
+  paused: "default",
+  closed: "default",
 };
+
+const HANDOVER_FILTER_OPTIONS: Array<{
+  value: HandoverRecommendationFilter;
+  label: string;
+}> = [
+  { value: "all", label: "全部接管建议" },
+  { value: "recommended", label: "仅推荐转人工" },
+  { value: "normal", label: "仅普通会话" },
+];
 
 function formatRelativeTime(value: string | null | undefined): string {
   if (!value) return "-";
@@ -36,91 +54,49 @@ function formatRelativeTime(value: string | null | undefined): string {
 }
 
 function getConversationPublicUserId(conversation: ConversationSummary): string {
-  return (conversation as ConversationSummary & { customer_public_user_id?: string | null }).customer_public_user_id ?? conversation.customer_id;
+  return (
+    (
+      conversation as ConversationSummary & {
+        customer_public_user_id?: string | null;
+      }
+    ).customer_public_user_id ?? conversation.customer_id
+  );
 }
 
-type QueueSectionProps = {
-  conversations: ConversationSummary[];
-  onClaim: (conversation: ConversationSummary) => Promise<void>;
-  onOpen: (conversation: ConversationSummary) => void;
-  title: string;
-  tone: "priority" | "normal";
-};
+function getConversationModeLabel(conversation: ConversationSummary): string {
+  if (conversation.latest_handover_recommended && conversation.management_mode !== "human_managed") {
+    return MODE_LABELS.recommended;
+  }
+  return MODE_LABELS[conversation.management_mode] ?? conversation.management_mode;
+}
 
-function QueueSection({ conversations, onClaim, onOpen, title, tone }: QueueSectionProps): JSX.Element | null {
-  if (!conversations.length) return null;
-
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <Typography.Title level={5} style={{ margin: "0 0 8px" }}>
-        {title}
-      </Typography.Title>
-      <Row gutter={[12, 12]}>
-        {conversations.map((conversation) => {
-          const key = `${conversation.account_id}:${conversation.conversation_id}`;
-          const borderColor =
-            tone === "priority"
-              ? "#ff4d4f"
-              : MODE_COLORS[conversation.management_mode] ?? "#d9d9d9";
-
-          return (
-            <Col key={key} lg={8} sm={12} xs={24}>
-              <Card size="small" style={{ borderLeft: `3px solid ${borderColor}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <Typography.Text strong>
-                      <MemberIdLink
-                        accountId={conversation.account_id}
-                        userId={conversation.customer_id}
-                        publicUserId={getConversationPublicUserId(conversation)}
-                        label={getConversationPublicUserId(conversation)}
-                      />
-                    </Typography.Text>
-                    <div style={{ marginTop: 4 }}>
-                      <Tag color={MODE_COLORS[conversation.management_mode] ?? "default"} style={{ fontSize: 10 }}>
-                        {MODE_LABELS[conversation.management_mode] ?? conversation.management_mode}
-                      </Tag>
-                      {conversation.customer_language ? (
-                        <Typography.Text style={{ color: "#999", fontSize: 11, marginLeft: 4 }}>
-                          {conversation.customer_language}
-                        </Typography.Text>
-                      ) : null}
-                    </div>
-                    <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ color: "#666", fontSize: 12, margin: "6px 0 0" }}>
-                      {conversation.last_message_preview || "暂无消息"}
-                    </Typography.Paragraph>
-                    <Typography.Text style={{ color: "#999", fontSize: 11 }}>
-                      {formatRelativeTime(conversation.last_message_at)}
-                    </Typography.Text>
-                    {conversation.latest_handover_reason ? (
-                      <Typography.Paragraph style={{ color: "#8c8c8c", fontSize: 11, margin: "6px 0 0" }}>
-                        {conversation.latest_handover_reason}
-                      </Typography.Paragraph>
-                    ) : null}
-                  </div>
-                </div>
-
-                <Space size={6} style={{ marginTop: 10 }} wrap>
-                  <Button onClick={() => onOpen(conversation)} size="small" type="primary">
-                    处理
-                  </Button>
-                  {conversation.management_mode !== "human_managed" ? (
-                    <Button onClick={() => void onClaim(conversation)} size="small">
-                      认领
-                    </Button>
-                  ) : null}
-                </Space>
-              </Card>
-            </Col>
-          );
-        })}
-      </Row>
-    </div>
-  );
+function matchesSearch(conversation: ConversationSummary, search: string): boolean {
+  const normalized = search.trim().toLowerCase();
+  if (!normalized) return true;
+  return [
+    conversation.customer_id,
+    getConversationPublicUserId(conversation),
+    conversation.assigned_agent_name ?? "",
+    conversation.last_message_preview ?? "",
+    conversation.customer_language ?? "",
+  ].some((value) => value.toLowerCase().includes(normalized));
 }
 
 export function AssignmentsPage(): JSX.Element {
   const openWorkspacePage = useAppStore((state) => state.openWorkspacePage);
+  const {
+    memberStatus,
+    memberStatusLoading,
+    memberStatusError,
+    latestVerification,
+    latestBinding,
+    loadMemberStatus,
+    resetMemberStatus,
+  } = useMemberStatus();
+
+  const [handoverMode, setHandoverMode] = useState<HandoverRecommendationFilter>("all");
+  const [search, setSearch] = useState("");
+  const [selectedConversationKey, setSelectedConversationKey] = useState<string>("");
 
   const fetchData = useCallback(async () => {
     const [conversations, agents] = await Promise.all([listConversations(), listRuntimeAgents()]);
@@ -131,6 +107,79 @@ export function AssignmentsPage(): JSX.Element {
   const conversations = data?.conversations ?? [];
   const agents = data?.agents ?? [];
 
+  const filteredConversations = useMemo(() => {
+    return conversations.filter((conversation) => {
+      const queueContext = {
+        latest_handover_recommended: conversation.latest_handover_recommended,
+      };
+      if (!matchesSearch(conversation, search)) {
+        return false;
+      }
+      if (handoverMode === "recommended") {
+        return queueContext.latest_handover_recommended;
+      }
+      if (handoverMode === "normal") {
+        return !queueContext.latest_handover_recommended;
+      }
+      return true;
+    });
+  }, [conversations, handoverMode, search]);
+
+  useEffect(() => {
+    if (!filteredConversations.length) {
+      setSelectedConversationKey("");
+      return;
+    }
+    if (!filteredConversations.some((item) => `${item.account_id}:${item.conversation_id}` === selectedConversationKey)) {
+      setSelectedConversationKey(
+        `${filteredConversations[0].account_id}:${filteredConversations[0].conversation_id}`
+      );
+    }
+  }, [filteredConversations, selectedConversationKey]);
+
+  const selectedConversation = useMemo(
+    () =>
+      filteredConversations.find(
+        (item) => `${item.account_id}:${item.conversation_id}` === selectedConversationKey
+      ) ?? null,
+    [filteredConversations, selectedConversationKey]
+  );
+
+  useEffect(() => {
+    if (!selectedConversation?.account_id || !selectedConversation.customer_id) {
+      resetMemberStatus();
+      return;
+    }
+    if (typeof useAppStore.getState !== "function") {
+      resetMemberStatus();
+      return;
+    }
+    let active = true;
+    void resolveCustomerProfileSummaryByConversation({
+      account_id: selectedConversation.account_id,
+      customer_id: selectedConversation.customer_id,
+    }).then((profile) => {
+      if (!active) return;
+      if (!profile) {
+        resetMemberStatus();
+        return;
+      }
+      void loadMemberStatus({
+        id: profile.id,
+        account_id: profile.account_id,
+        public_user_id: profile.public_user_id,
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [
+    loadMemberStatus,
+    resetMemberStatus,
+    selectedConversation?.account_id,
+    selectedConversation?.customer_id,
+  ]);
+
   const handleClaim = useCallback(
     async (conversation: ConversationSummary) => {
       try {
@@ -138,126 +187,226 @@ export function AssignmentsPage(): JSX.Element {
           `/api/conversations/${conversation.account_id}/${conversation.conversation_id}/handover`,
           { management_mode: "human_managed" }
         );
-        message.success("认领成功");
+        message.success("已切换为人工接管");
         await reload();
-      } catch {
-        message.error("认领失败");
+      } catch (claimError) {
+        message.error(claimError instanceof Error ? claimError.message : "接管失败");
       }
     },
     [reload]
   );
 
-  const handleBatchClaim = useCallback(async () => {
-    const pending = conversations.filter((item) => item.latest_handover_recommended);
-    for (const conversation of pending) {
-      try {
-        await api.post(
-          `/api/conversations/${conversation.account_id}/${conversation.conversation_id}/handover`,
-          { management_mode: "human_managed" }
-        );
-      } catch {
-        // Ignore individual failures and continue claiming the rest.
-      }
-    }
-
-    message.success(`已批量认领 ${pending.length} 个会话`);
-    await reload();
-  }, [conversations, reload]);
-
-  const openConversation = useCallback(
+  const handleOpenWorkspace = useCallback(
     (conversation: ConversationSummary) => {
       openWorkspacePage({
         accountId: conversation.account_id,
         conversationKey: `${conversation.account_id}:${conversation.conversation_id}`,
+        handoverMode: handoverMode,
+        search: search,
       });
     },
-    [openWorkspacePage]
+    [handoverMode, openWorkspacePage, search]
   );
 
   const pendingCount = conversations.filter((item) => item.latest_handover_recommended).length;
   const humanCount = conversations.filter((item) => item.management_mode === "human_managed").length;
   const aiCount = conversations.filter((item) => item.management_mode === "ai_managed").length;
-  const pausedCount = conversations.filter((item) => item.management_mode === "paused").length;
   const onlineAgentCount = agents.filter((item) => item.status === "online").length;
 
-  const topPriority = conversations.filter(
-    (item) => item.latest_handover_recommended && item.management_mode !== "human_managed"
-  );
-  const otherOpen = conversations.filter(
-    (item) => !item.latest_handover_recommended || item.management_mode === "human_managed"
-  );
-
   const stats = (
-    <Space size="middle" style={{ fontSize: 13 }} wrap>
-      <span>
-        待处理 <Typography.Text strong style={{ color: "#ff4d4f" }}>{pendingCount}</Typography.Text>
-      </span>
-      <span>
-        人工接管 <Typography.Text strong style={{ color: "#faad14" }}>{humanCount}</Typography.Text>
-      </span>
-      <span>
-        AI 托管 <Typography.Text strong style={{ color: "#52c41a" }}>{aiCount}</Typography.Text>
-      </span>
-      <span>
-        暂停 <Typography.Text strong>{pausedCount}</Typography.Text>
-      </span>
-      <span>
-        在线坐席 <Typography.Text strong>{onlineAgentCount}</Typography.Text>
-      </span>
+    <Space size="middle" wrap>
+      <Typography.Text>建议转人工 {pendingCount}</Typography.Text>
+      <Typography.Text>人工接管 {humanCount}</Typography.Text>
+      <Typography.Text>AI 托管 {aiCount}</Typography.Text>
+      <Typography.Text>在线坐席 {onlineAgentCount}</Typography.Text>
     </Space>
   );
 
   const actions = (
     <Space wrap>
-      {pendingCount > 0 ? (
-        <Button onClick={() => void handleBatchClaim()} type="primary">
-          批量认领 ({pendingCount})
+      {HANDOVER_FILTER_OPTIONS.map((option) => (
+        <Button
+          key={option.value}
+          onClick={() => setHandoverMode(option.value)}
+          type={handoverMode === option.value ? "primary" : "default"}
+        >
+          {option.label}
         </Button>
-      ) : null}
+      ))}
+      <Input.Search
+        allowClear
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder="搜索会话 / 会员 / 语言"
+        style={{ width: 240 }}
+        value={search}
+      />
       <Button loading={loading} onClick={() => void reload()}>
         刷新
       </Button>
     </Space>
   );
 
-  if (!conversations.length && !loading) {
+  if (!filteredConversations.length && !loading) {
     return (
-      <PageShell actions={actions} stats={stats} subtitle="待处理会话与人工接管队列" title="我的队列">
-        <EmptyGuide description="当前没有需要人工处理的会话。" icon="📭" title="暂无待处理会话" />
+      <PageShell
+        actions={actions}
+        stats={stats}
+        subtitle="按接管建议聚焦需要人工处理的会话"
+        title="我的接管队列"
+      >
+        <EmptyGuide
+          description="当前筛选条件下没有待处理会话。"
+          icon="📭"
+          title="暂无会话"
+        />
       </PageShell>
     );
   }
 
   return (
-    <PageShell actions={actions} stats={stats} subtitle="待处理会话与人工接管队列" title="我的队列">
+    <PageShell
+      actions={actions}
+      stats={stats}
+      subtitle="按接管建议聚焦需要人工处理的会话"
+      title="我的接管队列"
+    >
       {error ? (
         <Typography.Text style={{ display: "block", marginBottom: 12 }} type="danger">
           {error}
         </Typography.Text>
       ) : null}
 
-      <div style={{ overflowY: "auto", height: "100%" }}>
-        <QueueSection
-          conversations={topPriority}
-          onClaim={handleClaim}
-          onOpen={openConversation}
-          title="优先处理"
-          tone="priority"
-        />
-        <QueueSection
-          conversations={otherOpen}
-          onClaim={handleClaim}
-          onOpen={openConversation}
-          title="其他会话"
-          tone="normal"
-        />
+      <Row gutter={[16, 16]} style={{ height: "100%" }}>
+        <Col lg={15} xs={24}>
+          <div style={{ display: "grid", gap: 12 }}>
+            {filteredConversations.map((conversation) => {
+              const key = `${conversation.account_id}:${conversation.conversation_id}`;
+              const selected = key === selectedConversationKey;
+              return (
+                <Card
+                  key={key}
+                  onClick={() => setSelectedConversationKey(key)}
+                  size="small"
+                  style={{
+                    borderColor: selected ? "#1677ff" : undefined,
+                    cursor: "pointer",
+                  }}
+                >
+                  <Space align="start" direction="vertical" size={8} style={{ width: "100%" }}>
+                    <Space align="start" style={{ justifyContent: "space-between", width: "100%" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <Typography.Text strong>
+                          <MemberIdLink
+                            accountId={conversation.account_id}
+                            label={getConversationPublicUserId(conversation)}
+                            publicUserId={getConversationPublicUserId(conversation)}
+                            userId={conversation.customer_id}
+                          />
+                        </Typography.Text>
+                        <div style={{ marginTop: 4 }}>
+                          <Tag color={MODE_COLORS[conversation.management_mode] ?? "default"}>
+                            {getConversationModeLabel(conversation)}
+                          </Tag>
+                          {conversation.customer_language ? (
+                            <Typography.Text type="secondary">
+                              {conversation.customer_language}
+                            </Typography.Text>
+                          ) : null}
+                        </div>
+                      </div>
+                      <Typography.Text type="secondary">
+                        {formatRelativeTime(conversation.last_message_at)}
+                      </Typography.Text>
+                    </Space>
 
-        {loading ? (
-          <div style={{ color: "#999", padding: 24, textAlign: "center" }}>
-            加载中...
+                    <Typography.Paragraph style={{ margin: 0 }}>
+                      {conversation.last_message_preview || "暂无消息"}
+                    </Typography.Paragraph>
+
+                    {conversation.latest_handover_reason ? (
+                      <Typography.Text type="secondary">
+                        {conversation.latest_handover_reason}
+                      </Typography.Text>
+                    ) : null}
+
+                    <Space wrap>
+                      <Button onClick={() => void handleOpenWorkspace(conversation)} type="primary">
+                        进入工作台
+                      </Button>
+                      {conversation.management_mode !== "human_managed" ? (
+                        <Button onClick={() => void handleClaim(conversation)}>
+                          接管
+                        </Button>
+                      ) : null}
+                    </Space>
+                  </Space>
+                </Card>
+              );
+            })}
           </div>
-        ) : null}
-      </div>
+        </Col>
+
+        <Col lg={9} xs={24}>
+          <Card size="small" title="会话上下文">
+            {selectedConversation ? (
+              <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                <div>
+                  <Typography.Text type="secondary">会话成员</Typography.Text>
+                  <div>
+                    <Typography.Text>{getConversationPublicUserId(selectedConversation)}</Typography.Text>
+                  </div>
+                </div>
+
+                <div>
+                  <Typography.Text type="secondary">会话标签</Typography.Text>
+                  <div>
+                    <Tag color={MODE_COLORS[selectedConversation.management_mode] ?? "default"}>
+                      {getConversationModeLabel(selectedConversation)}
+                    </Tag>
+                    <Tag>{selectedConversation.customer_language || "未识别语言"}</Tag>
+                  </div>
+                </div>
+
+                <div>
+                  <Typography.Text type="secondary">会员认证状态</Typography.Text>
+                  <div>
+                    {memberStatusLoading
+                      ? "加载中..."
+                      : latestVerification?.status ?? memberStatusError ?? "暂无认证记录"}
+                  </div>
+                </div>
+
+                <div>
+                  <Typography.Text type="secondary">WhatsApp 绑定状态</Typography.Text>
+                  <div>
+                    {memberStatusLoading
+                      ? "加载中..."
+                      : latestBinding?.status ?? memberStatusError ?? "暂无绑定记录"}
+                  </div>
+                </div>
+
+                <div>
+                  <Typography.Text type="secondary">工作台快捷入口</Typography.Text>
+                  <div style={{ marginTop: 8 }}>
+                    <Button onClick={() => void handleOpenWorkspace(selectedConversation)} type="link">
+                      打开当前会话
+                    </Button>
+                  </div>
+                </div>
+
+                {memberStatus ? (
+                  <Typography.Text type="secondary">
+                    认证记录 {memberStatus.verificationRequests.length} 条，绑定记录{" "}
+                    {memberStatus.bindingRequests.length} 条
+                  </Typography.Text>
+                ) : null}
+              </Space>
+            ) : (
+              <EmptyGuide description="从左侧选择一个会话后，这里会展示会员与接管上下文。" title="未选择会话" />
+            )}
+          </Card>
+        </Col>
+      </Row>
     </PageShell>
   );
 }

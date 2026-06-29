@@ -109,7 +109,7 @@ def test_agent_status_management_and_assignment_query(client: TestClient) -> Non
         },
     )
     assert conversations_response.status_code == 200
-    conversations = conversations_response.json()
+    conversations = conversations_response.json()["items"]
 
     assert len(conversations) == 1
     assert conversations[0]["conversation_id"] == "conv-20"
@@ -344,7 +344,7 @@ def test_offline_agent_cannot_be_assigned_and_close_returns_conversation_to_ai(
         params={"account_id": "mock-account-21", "status": "open"},
     )
     assert reopened_conversations_response.status_code == 200
-    reopened_conversations = reopened_conversations_response.json()
+    reopened_conversations = reopened_conversations_response.json()["items"]
 
     assert len(reopened_conversations) == 1
     assert reopened_conversations[0]["conversation_id"] == "conv-21"
@@ -627,8 +627,14 @@ def test_only_assigned_agent_can_reply_close_and_resume_ai(client: TestClient) -
     assert outbound_response.status_code == 403
     assert "assigned to 'agent-auth-1'" in outbound_response.json()["detail"]
 
+    other_agent_headers = {
+        "X-Actor-Id": "agent-auth-2",
+        "X-Actor-Role": "operator",
+        "X-Actor-Account-Ids": "auth-account-1",
+    }
     resume_response = client.post(
         "/api/runtime/conversations/auth-conv-1/handover?account_id=auth-account-1",
+        headers=other_agent_headers,
         json={
             "management_mode": "ai_managed",
             "agent_id": "agent-auth-2",
@@ -647,6 +653,7 @@ def test_only_assigned_agent_can_reply_close_and_resume_ai(client: TestClient) -
 
     close_response = client.post(
         "/api/conversations/auth-account-1/auth-conv-1/close",
+        headers=other_agent_headers,
         json={
             "agent_id": "agent-auth-2",
             "reason": "force close",
@@ -724,8 +731,14 @@ def test_runtime_handover_rejects_missing_agent_and_illegal_transition(client: T
     )
     assert inbound_response.status_code == 200
 
+    missing_agent_headers = {
+        "X-Actor-Id": "missing-agent",
+        "X-Actor-Role": "operator",
+        "X-Actor-Account-Ids": "handover-guard-account-1",
+    }
     missing_agent_response = client.post(
         "/api/runtime/conversations/handover-guard-conv-1/handover?account_id=handover-guard-account-1",
+        headers=missing_agent_headers,
         json={
             "management_mode": "human_managed",
             "agent_id": "missing-agent",
@@ -736,6 +749,7 @@ def test_runtime_handover_rejects_missing_agent_and_illegal_transition(client: T
 
     illegal_transition_response = client.post(
         "/api/runtime/conversations/handover-guard-conv-1/handover?account_id=handover-guard-account-1",
+        headers=missing_agent_headers,
         json={
             "management_mode": "paused",
             "agent_id": "missing-agent",
@@ -1033,8 +1047,14 @@ def test_non_assigned_agent_cannot_pause_conversation(client: TestClient) -> Non
     )
     assert assign_response.status_code == 200
 
+    other_agent_headers = {
+        "X-Actor-Id": "handover-pause-other-1",
+        "X-Actor-Role": "operator",
+        "X-Actor-Account-Ids": "handover-pause-account-1",
+    }
     rogue_pause_response = client.post(
         "/api/runtime/conversations/handover-pause-conv-1/handover?account_id=handover-pause-account-1",
+        headers=other_agent_headers,
         json={
             "management_mode": "paused",
             "agent_id": "handover-pause-other-1",
@@ -1044,8 +1064,14 @@ def test_non_assigned_agent_cannot_pause_conversation(client: TestClient) -> Non
     assert rogue_pause_response.status_code == 403
     assert "assigned to 'handover-pause-owner-1'" in rogue_pause_response.json()["detail"]
 
+    owner_headers = {
+        "X-Actor-Id": "handover-pause-owner-1",
+        "X-Actor-Role": "operator",
+        "X-Actor-Account-Ids": "handover-pause-account-1",
+    }
     owner_pause_response = client.post(
         "/api/runtime/conversations/handover-pause-conv-1/handover?account_id=handover-pause-account-1",
+        headers=owner_headers,
         json={
             "management_mode": "paused",
             "agent_id": "handover-pause-owner-1",
@@ -1308,8 +1334,14 @@ def test_non_assigned_agent_cannot_pause_or_resume_conversation_handover(client:
     )
     assert assign_response.status_code == 200
 
+    other_agent_headers = {
+        "X-Actor-Id": "pause-other-1",
+        "X-Actor-Role": "operator",
+        "X-Actor-Account-Ids": "pause-auth-account-1",
+    }
     blocked_pause_response = client.post(
         "/api/runtime/conversations/pause-auth-conv-1/handover?account_id=pause-auth-account-1",
+        headers=other_agent_headers,
         json={
             "management_mode": "paused",
             "agent_id": "pause-other-1",
@@ -1319,8 +1351,14 @@ def test_non_assigned_agent_cannot_pause_or_resume_conversation_handover(client:
     assert blocked_pause_response.status_code == 403
     assert "assigned to 'pause-owner-1'" in blocked_pause_response.json()["detail"]
 
+    owner_headers = {
+        "X-Actor-Id": "pause-owner-1",
+        "X-Actor-Role": "operator",
+        "X-Actor-Account-Ids": "pause-auth-account-1",
+    }
     owner_pause_response = client.post(
         "/api/runtime/conversations/pause-auth-conv-1/handover?account_id=pause-auth-account-1",
+        headers=owner_headers,
         json={
             "management_mode": "paused",
             "agent_id": "pause-owner-1",
@@ -1332,6 +1370,7 @@ def test_non_assigned_agent_cannot_pause_or_resume_conversation_handover(client:
 
     blocked_resume_response = client.post(
         "/api/runtime/conversations/pause-auth-conv-1/handover?account_id=pause-auth-account-1",
+        headers=other_agent_headers,
         json={
             "management_mode": "ai_managed",
             "agent_id": "pause-other-1",
@@ -1562,8 +1601,14 @@ def test_runtime_handover_resume_human_management_keeps_assignment_and_audit_rea
     )
     assert assign_response.status_code == 200
 
+    owner_headers = {
+        "X-Actor-Id": "resume-human-owner-1",
+        "X-Actor-Role": "operator",
+        "X-Actor-Account-Ids": "resume-human-account-1",
+    }
     pause_response = client.post(
         "/api/runtime/conversations/resume-human-conv-1/handover?account_id=resume-human-account-1",
+        headers=owner_headers,
         json={
             "management_mode": "paused",
             "agent_id": "resume-human-owner-1",
@@ -1576,6 +1621,7 @@ def test_runtime_handover_resume_human_management_keeps_assignment_and_audit_rea
 
     resume_response = client.post(
         "/api/runtime/conversations/resume-human-conv-1/handover?account_id=resume-human-account-1",
+        headers=owner_headers,
         json={
             "management_mode": "human_managed",
             "agent_id": "resume-human-owner-1",
@@ -1590,6 +1636,11 @@ def test_runtime_handover_resume_human_management_keeps_assignment_and_audit_rea
 
     blocked_pause_response = client.post(
         "/api/runtime/conversations/resume-human-conv-1/handover?account_id=resume-human-account-1",
+        headers={
+            "X-Actor-Id": "resume-human-other-1",
+            "X-Actor-Role": "operator",
+            "X-Actor-Account-Ids": "resume-human-account-1",
+        },
         json={
             "management_mode": "paused",
             "agent_id": "resume-human-other-1",
@@ -1657,7 +1708,7 @@ def test_support_agent_can_use_actor_identity_for_handover_and_close_without_age
 
     support_agent_headers = {
         "X-Actor-Id": "implicit-actor-agent-1",
-        "X-Actor-Role": "support_agent",
+        "X-Actor-Role": "operator",
         "X-Actor-Account-Ids": "implicit-actor-account-1",
     }
 
@@ -1850,7 +1901,7 @@ def test_non_assigned_agent_cannot_toggle_conversation_ai_for_manually_assigned_
         "/api/runtime/conversations/toggle-ai-conv-1/ai?account_id=toggle-ai-account-1",
         headers={
             "X-Actor-Id": "toggle-other-1",
-            "X-Actor-Role": "support_agent",
+            "X-Actor-Role": "operator",
             "X-Actor-Account-Ids": "toggle-ai-account-1",
         },
         json={"enabled": False},
@@ -1862,7 +1913,7 @@ def test_non_assigned_agent_cannot_toggle_conversation_ai_for_manually_assigned_
         "/api/runtime/conversations/toggle-ai-conv-1/ai?account_id=toggle-ai-account-1",
         headers={
             "X-Actor-Id": "toggle-owner-1",
-            "X-Actor-Role": "support_agent",
+            "X-Actor-Role": "operator",
             "X-Actor-Account-Ids": "toggle-ai-account-1",
         },
         json={"enabled": False},

@@ -137,7 +137,7 @@ def test_worker_rechecks_faq_rule_before_calling_ai_provider(client, monkeypatch
 
         monkeypatch.setattr(
             "app.services.ai_queue_processor.get_ai_provider",
-            lambda settings: ShouldNotBeCalledProvider(),
+            lambda settings, account_id=None: ShouldNotBeCalledProvider(),
         )
         processed_job = asyncio.run(
             process_reserved_job(

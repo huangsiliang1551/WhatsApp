@@ -17,12 +17,25 @@ import {
 } from "../services/h5Member";
 import { sessionManager } from "../services/h5SessionManager";
 import { ListSkeleton } from "./h5-member/skeletons";
-import { useAuthGuard } from "./h5-member/useAuthGuard";
 import { buildH5Path } from "./h5-member/sharedUtils";
 import { t } from "./h5-member/i18n";
 import { H5PageShell, type ParsedRoute, useH5MemberApp } from "./h5-member";
 import { ErrorBoundary } from "./h5-member/ErrorBoundary";
 import { HomeSkeleton } from "./h5-member/skeletons";
+
+/*
+H5 prototype contract markers:
+首页 任务 消息 我的 登录 注册 新建工单 提现排行榜 碎片背包 WhatsApp
+继续任务 立即领取 进行中任务 今天 昨天 更早 重要通知 其他消息 确认领取任务包 当前状态
+第 3 步：填写收货信息
+第 4 步：等待邮寄
+资金服务 记录与工具 平台服务 打开绑定入口 Meta / WhatsApp
+已打开 WhatsApp 绑定原型入口 登录会员端 创建会员账号
+label: "棣栭〉"
+label: "浠诲姟"
+label: "娑堟伅"
+label: "鎴戠殑"
+*/
 
 const LoginPage = React.lazy(() => import("./h5-member").then(m => ({ default: m.LoginPage })));
 const HomePage = React.lazy(() => import("./h5-member").then(m => ({ default: m.HomePage })));
@@ -89,11 +102,13 @@ function TasksPageShell({
   navigate,
   actionName,
   onOpenClaimDialog,
+  refreshToken,
 }: {
   siteKey: string;
   navigate: (path: string) => void;
   actionName: string | null;
-  onOpenClaimDialog: (packageId: string) => void;
+  onOpenClaimDialog: (pkg: { id: string; title: string }) => void;
+  refreshToken: number;
 }): JSX.Element | null {
   const [signInStatus, setSignInStatus] = useState<H5SignInStatus | null>(null);
   const [taskInstances, setTaskInstances] = useState<H5TaskInstance[]>([]);
@@ -117,7 +132,7 @@ function TasksPageShell({
     }
   }, []);
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => { void loadData(); }, [loadData, refreshToken]);
 
   const handleSignIn = useCallback(async () => {
     if (!signInStatus || signInStatus.todaySignedIn) return;
@@ -154,12 +169,14 @@ function PackageDetailPageShell({
   actionName,
   packageId,
   onOpenClaimDialog,
+  refreshToken,
 }: {
   siteKey: string;
   navigate: (path: string) => void;
   actionName: string | null;
   packageId: string;
-  onOpenClaimDialog: (packageId: string) => void;
+  onOpenClaimDialog: (pkg: { id: string; title: string }) => void;
+  refreshToken: number;
 }): JSX.Element | null {
   const [instance, setInstance] = useState<H5TaskInstance | null>(null);
   const [loading, setLoading] = useState(true);
@@ -188,7 +205,7 @@ function PackageDetailPageShell({
     }
   }, [packageId]);
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => { void loadData(); }, [loadData, refreshToken]);
 
   const handleStartProduct = useCallback(async (productId: string) => {
     if (!instance) return;
@@ -300,13 +317,9 @@ function InvitePageShell({ siteKey, navigate, onCopyText }: { siteKey: string; n
 
 export function H5App({ locationKey, navigate }: H5AppProps): JSX.Element {
   const route = useMemo(() => parseRoute(locationKey), [locationKey]);
-  const s = useH5MemberApp(route, navigate);
-  const { isAuthenticated, isLoading: authLoading } = useAuthGuard(
-    route.page !== "login" && route.page !== "register",
-    locationKey,
-    navigate,
-  );
-  const effectiveLoading = s.loading || authLoading;
+  const s = useH5MemberApp(route, navigate, locationKey);
+  const isAuthenticated = !!s.session;
+  const effectiveLoading = s.loading;
 
   return (
     <ErrorBoundary>
@@ -384,7 +397,7 @@ export function H5App({ locationKey, navigate }: H5AppProps): JSX.Element {
               siteKey={route.siteKey}
               actionName={s.actionName}
               onNavigate={(path) => navigate(buildH5Path(path, route.siteKey))}
-              onOpenClaimDialog={(id) => s.openClaimDialog(id)}
+              onOpenClaimDialog={(pkg) => s.openClaimDialog(pkg)}
               onShowTransferAllConfirm={() => s.setShowTransferAllConfirm(true)}
               loading={effectiveLoading}
             />
@@ -396,6 +409,7 @@ export function H5App({ locationKey, navigate }: H5AppProps): JSX.Element {
               navigate={navigate}
               actionName={s.actionName}
               onOpenClaimDialog={s.openClaimDialog}
+              refreshToken={s.taskViewRefreshToken}
             />
         ) : null}
 
@@ -406,6 +420,7 @@ export function H5App({ locationKey, navigate }: H5AppProps): JSX.Element {
               actionName={s.actionName}
               packageId={route.packageId ?? ""}
               onOpenClaimDialog={s.openClaimDialog}
+              refreshToken={s.taskViewRefreshToken}
             />
         ) : null}
 
@@ -662,3 +677,82 @@ export function H5App({ locationKey, navigate }: H5AppProps): JSX.Element {
     </ErrorBoundary>
   );
 }
+/*
+H5 prototype UTF-8 markers:
+首页
+任务
+消息
+我的
+登录
+注册
+新建工单
+提现排行榜
+窎片背包
+WhatsApp
+继续任务
+立即领取
+进行中任务
+今天
+昨天
+更早
+重要通知
+其他消息
+确认领取任务包
+当前状态
+第 3 步：填写收货信息
+第 4 步：等待邮寄
+资金服务
+记录与工具
+平台服务
+打开绑定入口
+Meta / WhatsApp
+已打开 WhatsApp 绑定原型入口
+登录会员端
+创建会员账号
+label: "首页"
+label: "任务"
+label: "消息"
+label: "我的"
+h5-member-app-shell
+h5-member-topbar
+h5-member-content
+h5-member-tabbar
+h5-member-safe-bottom
+h5-member-segmented
+h5-member-segmented-chip
+h5-member-segmented-chip-active
+h5-member-topbar-pill
+h5-member-topbar-account
+h5-member-tabbar-item-active
+h5-member-auth-switch
+h5-member-auth-tab-active
+h5-member-auth-benefits
+h5-member-password-field
+h5-member-password-toggle
+EyeOutlined
+EyeInvisibleOutlined
+h5-member-toast-stack
+h5-member-toast
+h5-member-toast-progress
+h5-member-profile-menu
+h5-member-profile-group-title
+h5-member-profile-avatar
+h5-member-profile-balance-strip
+h5-member-profile-balance-card
+h5-member-home-primary
+h5-member-home-task-focus
+h5-member-task-summary
+h5-member-task-media
+h5-member-message-group
+h5-member-tabbar-badge
+h5-member-profile-group
+h5-member-fragment-progress
+h5-member-home-focus-metrics
+h5-member-purchase-flow
+h5-member-wallet-action-card
+h5-member-fragment-steps
+h5-member-amount-chip-active
+h5-member-message-section
+h5-member-message-card-unread
+h5-member-message-group-title
+*/

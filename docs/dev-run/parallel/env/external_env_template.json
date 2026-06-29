@@ -1,0 +1,49 @@
+{
+  "a_server": {
+    "api_base_url": "",
+    "internal_api_base_url": "",
+    "admin_domain": "",
+    "webhook_domain": "",
+    "payment_callback_domain": ""
+  },
+  "b_nodes": [
+    {
+      "name": "",
+      "public_ip": "",
+      "private_ip": "",
+      "ssh_host": "",
+      "ssh_port": 22,
+      "ssh_user": "",
+      "ssh_key_secret_name": "",
+      "region": ""
+    }
+  ],
+  "h5_domains": [
+    {
+      "site_key": "",
+      "domain": "",
+      "dns_mode": "manual",
+      "dns_expected_target": ""
+    }
+  ],
+  "cdn": {
+    "provider": "none",
+    "api_token_secret_name": "",
+    "origin_secret_header_name": "X-Origin-Verify",
+    "origin_secret_value_secret_name": ""
+  },
+  "meta": {
+    "app_id": "",
+    "app_secret_secret_name": "",
+    "verify_token_secret_name": "",
+    "wabas": []
+  },
+  "payment": {
+    "providers": []
+  },
+  "production_secrets": {
+    "admin_jwt_secret_name": "",
+    "payment_config_encryption_key_secret_name": "",
+    "h5_cookie_secret_name": ""
+  }
+}

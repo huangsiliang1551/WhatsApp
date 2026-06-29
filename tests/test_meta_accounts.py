@@ -668,7 +668,7 @@ def test_subscribe_meta_account_webhook(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["webhook_subscribed"] is True
-    assert response.json()["webhook_subscription_status"] == "mock_subscribed"
+    assert response.json()["webhook_subscription_status"] == "remote_subscribed"
     assert response.json()["webhook_callback_url"] == "https://example.com/webhook"
 
     all_phone_numbers_response = client.get("/api/meta/accounts/phone-numbers")
@@ -2120,8 +2120,8 @@ def test_sync_meta_account_phone_numbers_returns_provider_sync_result(
     sync_response = client.post(sync_path)
     assert sync_response.status_code == 200
     payload = sync_response.json()
-    assert payload["provider_name"] == "mock"
-    assert payload["sync_mode"] == "mock_echo"
+    assert payload["provider_name"] == "whatsapp"
+    assert payload["sync_mode"] == "remote_fetch"
     assert payload["status"] == "success"
     assert [item["phone_number_id"] for item in payload["phone_numbers"]] == [
         "pn-phone-sync-1",
@@ -2193,7 +2193,7 @@ def test_list_webhook_subscription_history_rows(client: TestClient) -> None:
     assert latest_row["verify_token_present"] is True
     assert latest_row["app_secret_present"] is True
     assert latest_row["app_id"] == "app-first"
-    assert latest_row["status"] == "mock_subscribed"
+    assert latest_row["status"] == "remote_subscribed"
     assert latest_row["current_scope_state_applied"] is True
     assert latest_row["subscribed_at"] is not None
     assert latest_row["webhook_verification_status"] == "pending"
@@ -2208,7 +2208,7 @@ def test_list_webhook_subscription_history_rows(client: TestClient) -> None:
     assert previous_row["verify_token_present"] is True
     assert previous_row["app_secret_present"] is True
     assert previous_row["app_id"] == "app-first"
-    assert previous_row["status"] == "mock_subscribed"
+    assert previous_row["status"] == "remote_subscribed"
     assert previous_row["current_scope_state_applied"] is False
     assert previous_row["webhook_verification_status"] == "pending"
     assert previous_row["webhook_runtime_status"] == "pending"
@@ -2524,7 +2524,7 @@ def test_list_all_meta_phone_numbers_with_scope_and_filters(client: TestClient) 
     assert first_row["account_id"] == "meta-account-scope-1"
     assert first_row["account_display_name"] == "Brand Scope 1"
     assert first_row["waba_id"] == "waba-scope-1"
-    assert first_row["webhook_subscription_status"] == "mock_subscribed"
+    assert first_row["webhook_subscription_status"] == "remote_subscribed"
     assert first_row["ready_for_webhook_delivery"] is True
     assert first_row["ready_for_outbound_messages"] is True
     assert first_row["ready_for_meta_activation"] is True
@@ -2641,7 +2641,14 @@ def test_manual_meta_account_rejects_cross_account_waba_reassignment(client: Tes
     assert "already assigned" in second_response.json()["detail"]
 
 
-def test_embedded_signup_session_creates_local_waba_skeleton_on_completion(client: TestClient) -> None:
+def test_embedded_signup_session_creates_local_waba_skeleton_on_completion(
+    client: TestClient,
+    override_meta_management_provider,
+) -> None:
+    override_meta_management_provider(
+        client,
+        StubMetaManagementProvider(completion_remote_confirmed=False),
+    )
     create_response = client.post(
         "/api/meta/accounts/embedded-signup/session",
         json={
@@ -2653,7 +2660,7 @@ def test_embedded_signup_session_creates_local_waba_skeleton_on_completion(clien
     assert create_response.status_code == 200
     created_session = create_response.json()
     assert created_session["status"] == "created"
-    assert created_session["provider_name"] == "mock"
+    assert created_session["provider_name"] == "whatsapp"
     assert created_session["completion_stage"] == "pending_callback"
     assert created_session["waba_id"] is None
 
@@ -3184,6 +3191,10 @@ def test_embedded_signup_session_list_supports_status_and_waba_filters(
     client: TestClient,
     override_meta_management_provider,
 ) -> None:
+    override_meta_management_provider(
+        client,
+        StubMetaManagementProvider(completion_remote_confirmed=False),
+    )
     pending_response = client.post(
         "/api/meta/accounts/embedded-signup/session",
         json={
@@ -4475,7 +4486,9 @@ def test_embedded_signup_session_filters_follow_webhook_verification_retry_state
 
 def test_embedded_signup_completion_with_authorization_code_stores_provider_token(
     client: TestClient,
+    override_meta_management_provider,
 ) -> None:
+    override_meta_management_provider(client, CapturingEmbeddedSignupProvider())
     create_response = client.post(
         "/api/meta/accounts/embedded-signup/session",
         json={
@@ -4658,7 +4671,7 @@ def test_webhook_subscription_list_filters_preserve_account_and_waba_scope_field
         params={
             "account_id": "meta-account-webhook-scope-a",
             "waba_id": "waba-webhook-scope-a",
-            "status": "mock_subscribed",
+            "status": "remote_subscribed",
         },
     )
     assert filtered_response.status_code == 200
@@ -4667,7 +4680,7 @@ def test_webhook_subscription_list_filters_preserve_account_and_waba_scope_field
     assert rows[0]["account_id"] == "meta-account-webhook-scope-a"
     assert rows[0]["waba_id"] == "waba-webhook-scope-a"
     assert rows[0]["callback_url"] == "https://example.com/webhook-scope-a"
-    assert rows[0]["status"] == "mock_subscribed"
+    assert rows[0]["status"] == "remote_subscribed"
     assert rows[0]["verify_token_present"] is True
 
     cross_scope_response = client.get(

@@ -140,3 +140,11 @@ def test_get_builtin_role_permissions_for_operator_excludes_unknown_codes() -> N
     assert "batch.manage" not in resolved
     assert "backups.view" in resolved
     assert "batch.tags" in resolved
+
+
+def test_get_builtin_role_permissions_for_operator_includes_customer_timeline() -> None:
+    resolved = get_builtin_role_permissions(ActorRole.OPERATOR)
+
+    assert "customers.view" in resolved
+    assert "customers.detail" in resolved
+    assert "customers.timeline" in resolved

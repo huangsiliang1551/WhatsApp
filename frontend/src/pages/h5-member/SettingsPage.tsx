@@ -180,7 +180,7 @@ export function SettingsPage({
           <button className="h5-primary-button" disabled={actionName === "settings-profile" || actionName === "settings-avatar"} type="submit">
             {actionName === "settings-profile" || actionName === "settings-avatar" ? t('settings.saving') : t('settings.saveProfile')}
           </button>
-          {profileSaveSuccess ? <span className="h5-field-success">{t('notification.profileUpdated')}</span> : null}
+          {profileSaveSuccess ? <span className="h5-field-success">{t("notification.profileUpdated")}</span> : null}
           {profileSaveError ? <span className="h5-field-error">{profileSaveError}</span> : null}
         </form>
       </article>
@@ -255,7 +255,7 @@ export function SettingsPage({
           <button className="h5-primary-button" disabled={actionName === "settings-password"} type="submit">
             {actionName === "settings-password" ? t('settings.modifying') : t('settings.modifyPassword')}
           </button>
-          {passwordChangeSuccess ? <span className="h5-field-success">{t('notification.passwordChanged')}</span> : null}
+          {passwordChangeSuccess ? <span className="h5-field-success">{t("notification.passwordChanged")}</span> : null}
         </form>
       </article>
     </section>

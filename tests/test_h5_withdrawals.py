@@ -322,3 +322,43 @@ def test_h5_withdrawal_persists_account_snapshot_and_duplicate_flags(
             "bank_name": "ICBC",
             "account_no_masked": "************1234",
         }
+
+
+def test_h5_withdrawal_rejects_when_active_request_already_exists(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-withdraw-duplicate", site_key="h5-withdraw-duplicate")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-withdraw-duplicate",
+        phone="+8613900010403",
+        display_name="Duplicate Withdraw Member",
+    )
+    _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-withdraw-duplicate",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("300"),
+        task_balance=Decimal("0"),
+    )
+
+    first_response = client.post("/api/h5/withdrawals", json={"amount": 120})
+    assert first_response.status_code == 200, first_response.text
+
+    duplicate_response = client.post("/api/h5/withdrawals", json={"amount": 80})
+    assert duplicate_response.status_code == 409, duplicate_response.text
+    assert "active withdrawal request" in str(duplicate_response.json()["detail"]).lower()
+
+    with db_session_factory() as session:
+        withdrawals = session.query(WithdrawalRequest).filter(
+            WithdrawalRequest.account_id == "acct-h5-withdraw-duplicate",
+        ).all()
+        wallet = session.query(WalletAccount).filter(
+            WalletAccount.account_id == "acct-h5-withdraw-duplicate",
+        ).one()
+
+        assert len(withdrawals) == 1
+        assert wallet.system_balance == Decimal("180")
+        assert wallet.system_cash_frozen == Decimal("120")

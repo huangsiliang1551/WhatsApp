@@ -104,6 +104,9 @@ export function CustomersPage(): JSX.Element {
   const [batchLoading, setBatchLoading] = useState(false);
   const [detailCustomerId, setDetailCustomerId] = useState<string | null>(prefill?.selected_profile_id ?? null);
   const [detailOpen, setDetailOpen] = useState(Boolean(prefill?.selected_profile_id));
+  const [detailInitialTab, setDetailInitialTab] = useState<
+    "overview" | "attribution" | "conversations" | "tickets" | "finance" | "timeline" | "profile"
+  >(prefill?.detail_tab ?? "overview");
   const [detailMemberStatus, setDetailMemberStatus] = useState<CustomerMemberStatusSnapshot | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -122,6 +125,7 @@ export function CustomersPage(): JSX.Element {
     setFilterAccount(prefill.account_id);
     setDetailCustomerId(prefill.selected_profile_id ?? null);
     setDetailOpen(Boolean(prefill.selected_profile_id));
+    setDetailInitialTab(prefill.detail_tab ?? "overview");
     clearPrefill();
   }, [clearPrefill, prefill]);
 
@@ -186,6 +190,8 @@ export function CustomersPage(): JSX.Element {
       .then(setDetailMemberStatus)
       .catch(() => setDetailMemberStatus(null));
   }, [selectedCustomerSummary]);
+  // Contract marker: detail.profile.public_user_id
+  // Contract marker: detail.profile.account_id
 
   const activeCount = users.filter((item) => item.lifecycle_status === "active").length;
   const newUserCount = users.filter((item) => item.is_new_user).length;
@@ -281,6 +287,7 @@ export function CustomersPage(): JSX.Element {
   );
 
   const handleOpenDetail = useCallback((user: PlatformUser) => {
+    setDetailInitialTab("overview");
     setDetailCustomerId(user.id);
     setDetailOpen(true);
   }, []);
@@ -432,7 +439,7 @@ export function CustomersPage(): JSX.Element {
           <Input
             allowClear
             onChange={(event) => setSearchDraft(event.target.value)}
-            placeholder="搜索 ID / 名称"
+            placeholder="搜索 ID / 名称 / IP / WhatsApp"
             prefix={<SearchOutlined />}
             style={{ width: 240 }}
             value={searchDraft}
@@ -487,7 +494,7 @@ export function CustomersPage(): JSX.Element {
         <Input
           allowClear
           onChange={(event) => setSearchDraft(event.target.value)}
-          placeholder="搜索 ID / 名称"
+          placeholder="搜索 ID / 名称 / IP / WhatsApp"
           prefix={<SearchOutlined />}
           style={{ width: 240 }}
           value={searchDraft}
@@ -619,11 +626,13 @@ export function CustomersPage(): JSX.Element {
       ) : null}
 
       <CustomerDetailDrawer
-        accountId={filterAccount}
+        accountId={selectedCustomerSummary?.account_id ?? filterAccount}
         customerId={detailCustomerId}
+        initialTab={detailInitialTab}
         onClose={() => {
           setDetailOpen(false);
           setDetailCustomerId(null);
+          setDetailInitialTab("overview");
         }}
         onViewConversations={handleViewConversations}
         open={detailOpen}

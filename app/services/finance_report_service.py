@@ -6,6 +6,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.auth import RequestActor
 from app.db.models import (
     AppUser,
     PaymentCallback,
@@ -17,6 +18,7 @@ from app.db.models import (
     WithdrawalRequest,
     utc_now,
 )
+from app.services.data_scope_filter_service import DataScopeFilterService
 from app.services.wallet_ledger_service import WalletLedgerService
 
 
@@ -30,6 +32,7 @@ class FinanceReportService:
         filters: dict | None = None,
         sort_field: str | None = None,
         sort_order: str | None = None,
+        scope_actor: RequestActor | None = None,
     ) -> list[dict]:
         query = select(WalletLedgerEntry).where(
             WalletLedgerEntry.ledger_type == "system",
@@ -59,6 +62,8 @@ class FinanceReportService:
                 query = query.where(WalletLedgerEntry.cash_amount > 0)
             elif fund_scope == "bonus":
                 query = query.where(WalletLedgerEntry.bonus_amount > 0)
+        if scope_actor is not None:
+            query = DataScopeFilterService(self._session).filter_wallet_ledger_entries(query, scope_actor, mode="current")
 
         allowed_sort_fields = {
             "amount": WalletLedgerEntry.amount,
@@ -82,6 +87,7 @@ class FinanceReportService:
         filters: dict | None = None,
         sort_field: str | None = None,
         sort_order: str | None = None,
+        scope_actor: RequestActor | None = None,
     ) -> list[dict]:
         query = select(WithdrawalRequest)
         if filters:
@@ -102,6 +108,8 @@ class FinanceReportService:
                 query = query.where(WithdrawalRequest.cash_amount > 0)
             elif fund_scope == "bonus":
                 query = query.where(WithdrawalRequest.bonus_amount > 0)
+        if scope_actor is not None:
+            query = DataScopeFilterService(self._session).filter_withdrawals(query, scope_actor, mode="current")
 
         allowed_sort_fields = {
             "amount": WithdrawalRequest.amount,
@@ -131,6 +139,7 @@ class FinanceReportService:
         filters: dict | None = None,
         sort_field: str | None = None,
         sort_order: str | None = None,
+        scope_actor: RequestActor | None = None,
     ) -> list[dict]:
         query = select(WalletLedgerEntry).where(WalletLedgerEntry.ledger_type == "system")
         if filters:
@@ -153,6 +162,8 @@ class FinanceReportService:
                 query = query.where(WalletLedgerEntry.cash_amount > 0)
             elif fund_scope == "bonus":
                 query = query.where(WalletLedgerEntry.bonus_amount > 0)
+        if scope_actor is not None:
+            query = DataScopeFilterService(self._session).filter_wallet_ledger_entries(query, scope_actor, mode="current")
 
         allowed_sort_fields = {
             "amount": WalletLedgerEntry.amount,
@@ -174,7 +185,11 @@ class FinanceReportService:
         rows = self._session.execute(query).scalars().all()
         return [self._wallet_ledger_to_dict(r) for r in rows]
 
-    def get_finance_summary(self, filters: dict | None = None) -> dict:
+    def get_finance_summary(
+        self,
+        filters: dict | None = None,
+        scope_actor: RequestActor | None = None,
+    ) -> dict:
         recharge_filters = [
             WalletLedgerEntry.ledger_type == "system",
             WalletLedgerEntry.direction == "credit",
@@ -204,25 +219,46 @@ class FinanceReportService:
                 withdrawal_filters.append(WithdrawalRequest.created_at <= filters["date_to"])
         include_bonus = not (filters and filters.get("include_bonus") is False)
 
-        recharge_row = self._session.execute(
-            select(func.sum(WalletLedgerEntry.cash_amount), func.count(WalletLedgerEntry.id)).where(*recharge_filters)
-        ).one()
+        recharge_query = select(
+            func.sum(WalletLedgerEntry.cash_amount),
+            func.count(WalletLedgerEntry.id),
+        ).select_from(WalletLedgerEntry).where(*recharge_filters)
+        if scope_actor is not None:
+            recharge_query = DataScopeFilterService(self._session).filter_wallet_ledger_entries(
+                recharge_query,
+                scope_actor,
+                mode="current",
+            )
+        recharge_row = self._session.execute(recharge_query).one()
         recharge_total = recharge_row[0] or Decimal("0")
         recharge_count = recharge_row[1] or 0
 
-        bonus_row = self._session.execute(
-            select(func.sum(WalletLedgerEntry.bonus_amount), func.count(WalletLedgerEntry.id)).where(*bonus_filters)
-        ).one()
+        bonus_query = select(
+            func.sum(WalletLedgerEntry.bonus_amount),
+            func.count(WalletLedgerEntry.id),
+        ).select_from(WalletLedgerEntry).where(*bonus_filters)
+        if scope_actor is not None:
+            bonus_query = DataScopeFilterService(self._session).filter_wallet_ledger_entries(
+                bonus_query,
+                scope_actor,
+                mode="current",
+            )
+        bonus_row = self._session.execute(bonus_query).one()
         bonus_total = bonus_row[0] or Decimal("0")
 
-        withdrawal_row = self._session.execute(
-            select(
+        withdrawal_query = select(
                 func.sum(WithdrawalRequest.amount),
                 func.sum(WithdrawalRequest.cash_amount),
                 func.sum(WithdrawalRequest.bonus_amount),
                 func.count(WithdrawalRequest.id),
-            ).where(*withdrawal_filters)
-        ).one()
+            ).select_from(WithdrawalRequest).where(*withdrawal_filters)
+        if scope_actor is not None:
+            withdrawal_query = DataScopeFilterService(self._session).filter_withdrawals(
+                withdrawal_query,
+                scope_actor,
+                mode="current",
+            )
+        withdrawal_row = self._session.execute(withdrawal_query).one()
         withdrawal_total = withdrawal_row[0] or Decimal("0")
         withdrawal_cash_total = withdrawal_row[1] or Decimal("0")
         withdrawal_bonus_total = withdrawal_row[2] or Decimal("0")
@@ -245,7 +281,11 @@ class FinanceReportService:
             "net_recharge": float(recharge_total - withdrawal_cash_total),
         }
 
-    def get_anomaly_alerts(self, agency_id: str | None = None) -> list[dict]:
+    def get_anomaly_alerts(
+        self,
+        agency_id: str | None = None,
+        scope_actor: RequestActor | None = None,
+    ) -> list[dict]:
         alerts = []
         now = datetime.now(timezone.utc)
         since = now - timedelta(hours=24)
@@ -258,6 +298,12 @@ class FinanceReportService:
         )
         if agency_id:
             recharge_query = recharge_query.where(WalletLedgerEntry.account_id == agency_id)
+        if scope_actor is not None:
+            recharge_query = DataScopeFilterService(self._session).filter_wallet_ledger_entries(
+                recharge_query,
+                scope_actor,
+                mode="current",
+            )
         large = self._session.execute(recharge_query).scalars().all()
         for r in large:
             alerts.append(
@@ -278,6 +324,12 @@ class FinanceReportService:
         )
         if agency_id:
             withdrawal_query = withdrawal_query.where(WithdrawalRequest.account_id == agency_id)
+        if scope_actor is not None:
+            withdrawal_query = DataScopeFilterService(self._session).filter_withdrawals(
+                withdrawal_query,
+                scope_actor,
+                mode="current",
+            )
         freq = self._session.execute(
             withdrawal_query.group_by(WithdrawalRequest.user_id).having(func.count() > 3)
         ).all()

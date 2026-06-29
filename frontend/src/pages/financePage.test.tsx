@@ -351,6 +351,17 @@ describe("FinancePage", () => {
     expect(screen.queryByText("user-100")).toBeNull();
   });
 
+  it("renders readable chinese finance copy and table pagination totals with sortable headers", async () => {
+    render(<FinancePage />);
+
+    expect(await screen.findByText("财务管理")).toBeTruthy();
+    expect(screen.getByText("真实充值、提现、赠金与异常告警统一汇总")).toBeTruthy();
+    expect(screen.getByText("共 2 条")).toBeTruthy();
+
+    const sortableHeader = screen.getByText("时间").closest("th");
+    expect(sortableHeader?.className).toContain("ant-table-column-has-sorters");
+  });
+
   it("loads bonus grants and recharge repairs from real finance endpoints", async () => {
     render(<FinancePage />);
 
@@ -397,7 +408,7 @@ describe("FinancePage", () => {
 
     render(<FinancePage />);
 
-    expect(await screen.findByText("鏆傛棤鍙敤璐㈠姟鑳藉姏")).toBeTruthy();
+    expect(await screen.findByText("暂无可用财务能力")).toBeTruthy();
     expect(screen.queryByRole("tab")).toBeNull();
     expect(hoisted.listRechargeRecordsMock).not.toHaveBeenCalled();
     expect(hoisted.listAnomalyAlertsMock).not.toHaveBeenCalled();
@@ -417,7 +428,7 @@ describe("FinancePage", () => {
       expect(hoisted.listWithdrawalRecordsMock).toHaveBeenCalled();
     });
 
-    expect(screen.queryByRole("tab", { name: "寮傚父鍛婅" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "异常告警" })).toBeNull();
     expect(hoisted.listAnomalyAlertsMock).not.toHaveBeenCalled();
   });
 

@@ -49,7 +49,7 @@ vi.mock("antd", async () => {
     label?: React.ReactNode;
     children?: React.ReactNode;
   }) => React.createElement("div", null, label, children);
-  const Drawer = ({
+  const Modal = ({
     open,
     children,
     title,
@@ -57,14 +57,15 @@ vi.mock("antd", async () => {
     open?: boolean;
     children?: React.ReactNode;
     title?: React.ReactNode;
-  }) => (open ? React.createElement("div", null, title, children) : null);
+  }) => (open ? React.createElement("div", { "data-testid": "customer-profile-modal" }, title, children) : null);
+  Modal.confirm = vi.fn();
   return {
     Button: Wrapper,
     Descriptions,
-    Drawer,
+    Modal,
     Spin: Wrapper,
     Tag: Wrapper,
-    Typography: { Text: Wrapper },
+    Typography: { Text: Wrapper, Title: Wrapper },
   };
 });
 
@@ -90,6 +91,8 @@ describe("CustomerProfileDrawer", () => {
       },
       wallet: {
         balance: 100,
+        system_balance: 70,
+        task_balance: 30,
         total_recharged: 80,
         total_withdrawn: 20,
         recent_transactions: [],
@@ -125,6 +128,8 @@ describe("CustomerProfileDrawer", () => {
       expect(hoisted.getCustomerSummaryMock).toHaveBeenCalledWith("user-1", "acct-1");
     });
 
+    expect(screen.getByTestId("customer-profile-modal")).toBeTruthy();
+    expect(screen.getByText("客户资料")).toBeTruthy();
     expect(screen.getByText("member-link:pub-u1:user-1:pub-u1:acct-1")).toBeTruthy();
   });
 
@@ -154,5 +159,23 @@ describe("CustomerProfileDrawer", () => {
     expect(screen.queryByText("100")).toBeNull();
     expect(screen.queryByText("80")).toBeNull();
     expect(screen.queryByText("20")).toBeNull();
+  });
+
+  it("shows the explicit user profile button copy", async () => {
+    render(
+      <CustomerProfileDrawer
+        open
+        customerId="user-1"
+        accountId="acct-1"
+        onClose={() => undefined}
+        onOpenCustomerPage={() => undefined}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(hoisted.getCustomerSummaryMock).toHaveBeenCalledWith("user-1", "acct-1");
+    });
+
+    expect(screen.getByText("查看用户资料")).toBeTruthy();
   });
 });

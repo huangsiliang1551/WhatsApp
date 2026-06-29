@@ -278,6 +278,21 @@ const LazyRateLimitsPage = lazy(() =>
 const LazyAIChatConfigPage = lazy(() =>
   import("./pages/AIChatConfigPage").then((module) => ({ default: module.AIChatConfigPage }))
 );
+const LazyPlatformWhatsAppBindingsPage = lazy(() =>
+  import("./pages/PlatformWhatsAppBindingsPage").then((module) => ({
+    default: module.PlatformWhatsAppBindingsPage,
+  }))
+);
+const LazyH5GatewayNodesPage = lazy(() =>
+  import("./pages/H5GatewayNodesPage").then((module) => ({
+    default: module.H5GatewayNodesPage,
+  }))
+);
+const LazyPermissionCenterPage = lazy(() =>
+  import("./pages/PermissionCenterPage").then((module) => ({
+    default: module.PermissionCenterPage,
+  }))
+);
 
 // Finance & Billing pages
 const LazyFinanceSettingsPage = lazy(() =>
@@ -517,6 +532,9 @@ function renderPage(activePage: AppPageId): JSX.Element {
   if (activePage === "api_stats") return <LazyApiStatsPage />;
   if (activePage === "rate_limits") return <LazyRateLimitsPage />;
   if (activePage === "ai_chat_config") return <LazyAIChatConfigPage />;
+  if (activePage === "platform_whatsapp_bindings") return <LazyPlatformWhatsAppBindingsPage />;
+  if (activePage === "h5_gateway_nodes") return <LazyH5GatewayNodesPage />;
+  if (activePage === "permission_center") return <LazyPermissionCenterPage />;
   if (activePage === "finance_settings") return <LazyFinanceSettingsPage />;
   if (activePage === "finance") return <LazyFinancePage />;
   if (activePage === "agent_usage") return <LazyAgentUsagePage />;

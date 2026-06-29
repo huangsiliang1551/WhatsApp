@@ -1,6 +1,6 @@
-﻿import { act, createElement } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { fireEvent } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as h5Module from "./h5";
@@ -298,6 +298,14 @@ function findButtonByText(text: string): HTMLButtonElement | null {
   return Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes(text)) as HTMLButtonElement | undefined ?? null;
 }
 
+function findLocalizedButton(...texts: string[]): HTMLButtonElement | null {
+  for (const text of texts) {
+    const button = findButtonByText(text);
+    if (button) return button;
+  }
+  return null;
+}
+
 function setTextareaValue(textarea: HTMLTextAreaElement, value: string): void {
   const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
   descriptor?.set?.call(textarea, value);
@@ -383,9 +391,23 @@ function createTaskInstanceState(
     status: "active",
     rewardRatio: 0.2,
     rewardAmount: 4,
+    plannedAmount: 20,
+    systemGeneratedAmount: 20,
+    manualAddedAmount: 0,
+    effectiveAmount: 20,
+    hasAdjustmentNotice: false,
+    adjustmentNotice: null,
     completedCount: 0,
     totalCount: 1,
     systemBalance: 220,
+    currentProduct: {
+      id: "item-1",
+      productName: "Demo Product",
+      imageUrl: "https://example.com/demo.png",
+      price: 20,
+      currency: "USD",
+      status: "available",
+    },
     products: [
       {
         id: "item-1",
@@ -408,6 +430,10 @@ function createTaskPackagePayload(): Record<string, unknown> {
     type: "rookie",
     status: "active",
     rewardRatio: 0.2,
+    plannedAmount: 20,
+    systemGeneratedAmount: 20,
+    manualAddedAmount: 0,
+    effectiveAmount: 20,
     claimedAt: "2026-06-11T00:00:00Z",
     expiresAt: "2026-06-12T00:00:00Z",
     dispatchedAt: "2026-06-11T00:00:00Z",
@@ -419,10 +445,24 @@ function createTaskPackagePayload(): Record<string, unknown> {
         imageUrl: "https://example.com/demo.png",
         price: 20,
         currency: "USD",
+        origin: "system_generated",
+        status: "available",
         completedAt: null,
         orderId: null,
       },
     ],
+    currentItem: {
+      id: "item-1",
+      productName: "Demo Product",
+      imageUrl: "https://example.com/demo.png",
+      price: 20,
+      currency: "USD",
+      origin: "system_generated",
+      status: "available",
+      completedAt: null,
+      orderId: null,
+    },
+    currentItemIndex: 1,
     promotion: {
       metric: "invited_registrations",
       current: 2,
@@ -430,6 +470,8 @@ function createTaskPackagePayload(): Record<string, unknown> {
       inviteCode: "PROMO-38271456",
     },
     taskBalanceAwardedAt: null,
+    hasAdjustmentNotice: true,
+    adjustmentNotice: "Task updated. Newly added items are now included in this package.",
     totalCommission: 4,
     currentCommission: 0,
     completedItems: 0,
@@ -841,7 +883,7 @@ describe("H5 member auth service contract", () => {
     expect(request.headers).not.toMatchObject({ Authorization: expect.anything() });
     expect(getRequestBody(0, fetchMock)).toMatchObject({
       siteKey: "mall-cn",
-      phone: "13800000000",
+      username: "13800000000",
       password: "pass123456",
     });
     expect(getRequestBody(0, fetchMock)).not.toHaveProperty("publicUserId");
@@ -867,7 +909,7 @@ describe("H5 member auth service contract", () => {
     expect(request.credentials).toBe("include");
     expect(getRequestBody(0, fetchMock)).toMatchObject({
       siteKey: "mall-cn",
-      phone: "13800000000",
+      username: "13800000000",
       password: "pass123456",
       confirmPassword: "pass123456",
     });
@@ -927,15 +969,28 @@ describe("H5 member auth service contract", () => {
       .fn()
       .mockResolvedValueOnce(createErrorResponse(401, "Session expired"))
       .mockResolvedValueOnce(createJsonResponse(createAuthPayload()))
-      .mockResolvedValueOnce(createJsonResponse(createHomePayload()));
+      .mockResolvedValueOnce(createJsonResponse(createHomePayload()))
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          state: "official_batch_available",
+          redirectPath: "/h5/tasks",
+          taskPackageId: null,
+          certificationRequiredAmount: 50,
+          currentRealRechargeAmount: 20,
+          remainingRechargeAmount: 30,
+          systemBalance: 220,
+          taskBalance: 40,
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     const dashboard = await getMemberHomeDashboard("mall-cn");
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/member/home");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/h5/auth/refresh");
     expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/h5/member/home");
+    expect(fetchMock.mock.calls[3]?.[0]).toBe("/api/h5/tasks/entry-state");
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body).toBeUndefined();
     expect(dashboard.member.accountId).toBe("38271456");
     expect(dashboard.wallet.systemBalance).toBe(220);
@@ -1032,19 +1087,20 @@ describe("H5 member auth service contract", () => {
     expect(window.localStorage.getItem(MEMBER_SESSION_KEY)).toContain("\"accountId\":\"38271456\"");
   });
 
-  it("skips backend auth probes in dev when no h5 auth cookies exist and falls back to the local member session", async () => {
+  it("probes auth/me even when HttpOnly auth cookies are not visible to document.cookie", async () => {
     window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
     Object.defineProperty(document, "cookie", {
       configurable: true,
       get: () => "",
     });
-    const fetchMock = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue(createJsonResponse(createAuthPayload()));
     vi.stubGlobal("fetch", fetchMock);
 
     const session = await getCurrentMemberSession();
 
-    expect(session).toMatchObject(LEGACY_SESSION);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(session?.accountId).toBe("38271456");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/auth/me");
   });
 
   it("logs out through backend auth, uses credentials include, and clears the member session cache", async () => {
@@ -1072,9 +1128,9 @@ describe("H5 member auth service contract", () => {
     const packages = await h5MemberModule.listTaskPackages();
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/task-packages");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/tasks/packages");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/h5/auth/refresh");
-    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/h5/task-packages");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/h5/tasks/packages");
     expect(packages[0]).toMatchObject({
       id: "pkg-1",
       rewardRatio: 0.2,
@@ -1086,6 +1142,282 @@ describe("H5 member auth service contract", () => {
       image_url: "https://example.com/demo.png",
     });
     expect(packages[0]?.promotion?.inviteCode).toBe("PROMO-38271456");
+  });
+
+  it("maps real-mode task instances from the h5 task package contract instead of legacy task-instance endpoints", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(createJsonResponse([createTaskPackagePayload()]))
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          systemBalance: 200,
+          taskBalance: 40,
+          currency: "USD",
+          withdrawThreshold: 20,
+          canWithdraw: true,
+          shortfallAmount: 0,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const instances = await h5MemberModule.getTaskInstancesApi();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/tasks/packages");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/h5/wallet");
+    expect(instances[0]).toMatchObject({
+      id: "pkg-1",
+      plannedAmount: 20,
+      systemGeneratedAmount: 20,
+      manualAddedAmount: 0,
+      effectiveAmount: 20,
+      hasAdjustmentNotice: true,
+      adjustmentNotice: "Task updated. Newly added items are now included in this package.",
+    });
+    expect(instances[0]?.currentProduct).toMatchObject({
+      id: "item-1",
+      status: "available",
+    });
+  });
+
+  it("loads real-mode task detail from the h5 task package detail contract", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(createJsonResponse(createTaskPackagePayload()))
+      .mockResolvedValueOnce(
+        createJsonResponse({
+          systemBalance: 200,
+          taskBalance: 40,
+          currency: "USD",
+          withdrawThreshold: 20,
+          canWithdraw: true,
+          shortfallAmount: 0,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const detail = await h5MemberModule.getTaskInstanceDetailApi("pkg-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/tasks/packages/pkg-1");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/h5/wallet");
+    expect(detail).toMatchObject({
+      id: "pkg-1",
+      effectiveAmount: 20,
+      hasAdjustmentNotice: true,
+    });
+    expect(detail?.currentProduct).toMatchObject({
+      id: "item-1",
+      status: "available",
+    });
+  });
+
+  it("starts real-mode products through the spec start and complete product contracts", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(createJsonResponse(createTaskPackagePayload()))
+      .mockResolvedValueOnce(createJsonResponse(createPurchasePayload()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await h5MemberModule.startProductApi("pkg-1", "item-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/tasks/packages/pkg-1/current-product/start");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/h5/tasks/packages/pkg-1/current-product/complete");
+    expect(result).toMatchObject({ success: true });
+  });
+
+  it("claims task packages through the spec alias contract", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi.fn().mockResolvedValue(createJsonResponse(createTaskPackagePayload()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await h5MemberModule.claimTaskPackage("pkg-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/tasks/packages/pkg-1/claim");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe("POST");
+    expect(result).toMatchObject({ id: "pkg-1" });
+  });
+
+  it("loads task page package list through the spec alias contract", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi.fn().mockResolvedValue(createJsonResponse([createTaskPackagePayload()]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const packages = await h5MemberModule.getTaskPackagesApi({ page: 1, size: 20, status: "active" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/tasks/packages?status=active");
+    expect(packages[0]).toMatchObject({
+      id: "pkg-1",
+      currentItem: { id: "item-1" },
+    });
+  });
+
+  it("falls back from the spec alias package list route to the direct task package route when the alias is missing", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(createErrorResponse(404, "alias packages missing"))
+      .mockResolvedValueOnce(createJsonResponse([createTaskPackagePayload()]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const packages = await h5MemberModule.getTaskPackagesApi({ page: 1, size: 20, status: "active" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/tasks/packages?status=active");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/h5/task-packages");
+    expect(packages[0]).toMatchObject({
+      id: "pkg-1",
+      currentItem: { id: "item-1" },
+    });
+  });
+
+  it("does not fall back to local package list through the task page wrapper when both alias and direct routes are missing", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(createErrorResponse(404, "alias packages missing"))
+      .mockResolvedValueOnce(createErrorResponse(404, "direct task packages missing"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.getTaskPackagesApi({ page: 1, size: 20, status: "active" })).rejects.toThrow(
+      "direct task packages missing",
+    );
+  });
+
+  it("does not fall back to legacy package list when direct task package loading fails and legacy fallback is disabled", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "false");
+    const fetchMock = vi.fn().mockResolvedValue(createErrorResponse(500, "direct task packages exploded"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.listTaskPackages()).rejects.toThrow("direct task packages exploded");
+  });
+
+  it("does not fall back to legacy package list by default for the real h5 task flow", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "true");
+    const fetchMock = vi.fn().mockResolvedValue(createErrorResponse(500, "direct task packages exploded"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.listTaskPackages()).rejects.toThrow("direct task packages exploded");
+  });
+
+  it("loads task page package detail through the spec alias contract", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi.fn().mockResolvedValue(createJsonResponse(createTaskPackagePayload()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const detail = await h5MemberModule.getTaskPackageDetailApi("pkg-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/tasks/packages/pkg-1");
+    expect(detail).toMatchObject({
+      id: "pkg-1",
+      currentItem: { id: "item-1" },
+    });
+  });
+
+  it("falls back from the spec alias package detail route to the direct task package detail route when the alias is missing", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(createErrorResponse(404, "alias detail missing"))
+      .mockResolvedValueOnce(createJsonResponse(createTaskPackagePayload()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const detail = await h5MemberModule.getTaskPackageDetailApi("pkg-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/tasks/packages/pkg-1");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/h5/task-packages/pkg-1");
+    expect(detail).toMatchObject({
+      id: "pkg-1",
+      currentItem: { id: "item-1" },
+    });
+  });
+
+  it("does not fall back to local package detail through the task page wrapper when both alias and direct detail routes are missing", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(createErrorResponse(404, "alias detail missing"))
+      .mockResolvedValueOnce(createErrorResponse(404, "direct task package detail missing"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.getTaskPackageDetailApi("pkg-1")).rejects.toThrow(
+      "direct task package detail missing",
+    );
+  });
+
+  it("surfaces the direct task package detail error when both alias and legacy detail routes fail", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(createErrorResponse(404, "alias detail missing"))
+      .mockResolvedValueOnce(createErrorResponse(500, "legacy detail exploded"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.getTaskPackageDetailApi("pkg-1")).rejects.toThrow("legacy detail exploded");
+  });
+
+  it("does not fall back to legacy package detail when direct task package detail loading fails and legacy fallback is disabled", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "false");
+    const fetchMock = vi.fn().mockResolvedValue(createErrorResponse(500, "direct task package detail exploded"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.getTaskPackageDetail("pkg-1")).rejects.toThrow("direct task package detail exploded");
+  });
+
+  it("does not fall back to legacy package detail by default for the real h5 task flow", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "true");
+    const fetchMock = vi.fn().mockResolvedValue(createErrorResponse(500, "direct task package detail exploded"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.getTaskPackageDetail("pkg-1")).rejects.toThrow("direct task package detail exploded");
+  });
+
+  it("does not fall back to local package claim when backend claim fails and legacy fallback is disabled", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "false");
+    const fetchMock = vi.fn().mockResolvedValue(createErrorResponse(500, "task claim exploded"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.claimTaskPackage("pkg-1")).rejects.toThrow("task claim exploded");
+  });
+
+  it("does not fall back to local package claim in real-mode when the backend claim route is missing", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "true");
+    const fetchMock = vi.fn().mockResolvedValue(createErrorResponse(404, "task claim route missing"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.claimTaskPackage("pkg-1")).rejects.toThrow("task claim route missing");
+  });
+
+  it("does not fall back to mock task instances when backend task packages fail and legacy fallback is disabled", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "false");
+    const fetchMock = vi.fn().mockResolvedValue(createErrorResponse(500, "task packages exploded"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.getTaskInstancesApi()).rejects.toThrow("正式会员服务暂不可用，请稍后再试。");
+  });
+
+  it("does not fall back to mock task detail when backend task package detail fails and legacy fallback is disabled", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "false");
+    const fetchMock = vi.fn().mockResolvedValue(createErrorResponse(500, "task package detail exploded"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.getTaskInstanceDetailApi("pkg-1")).rejects.toThrow("正式会员服务暂不可用，请稍后再试。");
   });
 
   it("purchases task package items through backend contract", async () => {
@@ -1114,6 +1446,47 @@ describe("H5 member auth service contract", () => {
       order_id: "order-1",
     });
     expect(purchase.fragmentDrop?.fragmentName).toBe("Star Ray Fragment");
+  });
+
+  it("does not fall back to local purchase state when backend purchase fails and legacy fallback is disabled", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "false");
+    const fetchMock = vi.fn().mockResolvedValue(createErrorResponse(500, "purchase exploded"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.startProductApi("pkg-1", "item-1")).rejects.toThrow("purchase exploded");
+  });
+
+  it("does not fall back to local purchase state in real-mode when the backend purchase route is missing", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "true");
+    const fetchMock = vi.fn().mockResolvedValue(createErrorResponse(404, "purchase route missing"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.completeTaskPackagePurchase("pkg-1", "item-1")).rejects.toThrow("purchase route missing");
+  });
+
+  it("does not fall back to the local dashboard in real-mode when member home is unavailable", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "true");
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.getMemberHomeDashboard("mall-cn")).rejects.toThrow("正式会员服务暂不可用，请稍后再试。");
+  });
+
+  it("does not swallow backend entry-state failure when loading the real dashboard", async () => {
+    window.localStorage.setItem(MEMBER_SESSION_KEY, JSON.stringify(LEGACY_SESSION));
+    vi.stubEnv("VITE_H5_MEMBER_LEGACY_FALLBACK", "true");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(createJsonResponse(createHomePayload()))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(h5MemberModule.getMemberHomeDashboard("mall-cn")).rejects.toThrow("正式会员服务暂不可用，请稍后再试。");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/h5/member/home");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/h5/tasks/entry-state");
   });
 
   it("loads backend commerce aggregates instead of local prototype state", async () => {
@@ -1656,6 +2029,53 @@ describe("H5 member auth service contract", () => {
     expect(document.querySelector(".h5-member-toast-stack")).toBeNull();
   });
 
+  it("shows a certification modal with recharge gap details when official tasks are blocked by need_certification", async () => {
+    const navigate = vi.fn();
+    vi.spyOn(h5MemberModule, "getCurrentMemberSession").mockResolvedValue({
+      accountId: "38271456",
+      phone: "13800000000",
+      publicUserId: "h5-38271456",
+      displayName: "Demo Member",
+      inviteCode: "INV-ABCD1234",
+    });
+    vi.spyOn(h5MemberModule, "getMaskedPhone").mockResolvedValue("138****0000");
+    vi.spyOn(h5MemberModule, "getMemberHomeDashboard").mockResolvedValue({
+      ...createDashboardState(),
+      entryState: {
+        state: "need_certification",
+        redirectPath: "/h5/wallet/recharge",
+        taskPackageId: null,
+        certificationRequiredAmount: 50,
+        currentRealRechargeAmount: 20,
+        remainingRechargeAmount: 30,
+        systemBalance: 220,
+        taskBalance: 40,
+      },
+    });
+    vi.spyOn(h5MemberModule, "listTaskPackages").mockResolvedValue([]);
+
+    await renderApp("/h5/home?site_key=mall-cn", navigate);
+
+    expect(document.body.textContent).toContain("认证会员后开启正式任务");
+    expect(document.body.textContent).toContain("认证门槛");
+    expect(document.body.textContent).toContain("已充值");
+    expect(document.body.textContent).toContain("还差");
+    expect(document.body.textContent).toContain("US$50.00");
+    expect(document.body.textContent).toContain("US$20.00");
+    expect(document.body.textContent).toContain("US$30.00");
+
+    const rechargeButton = screen.getByRole("button", { name: "去充值" });
+    const laterButton = screen.getByRole("button", { name: "稍后处理" });
+
+    fireEvent.click(laterButton);
+    expect(document.body.textContent).not.toContain("认证会员后开启正式任务");
+
+    await renderApp("/h5/home?site_key=mall-cn", navigate);
+    fireEvent.click(screen.getByRole("button", { name: "去充值" }));
+    expect(navigate).toHaveBeenCalledWith("/h5/wallet/recharge?site_key=mall-cn");
+    expect(rechargeButton).not.toBeNull();
+  });
+
   it("suppresses floating important notifications on form-heavy secondary pages", async () => {
     vi.spyOn(h5MemberModule, "getCurrentMemberSession").mockResolvedValue({
       accountId: "38271456",
@@ -2050,7 +2470,10 @@ describe("H5App auth routing", () => {
 
     await renderApp("/h5/home?site_key=mall-cn", navigate);
 
-    expect(navigate).toHaveBeenCalledWith("/h5/login?site_key=mall-cn");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(navigate).toHaveBeenCalledWith(
+      "/h5/login?site_key=mall-cn&redirect=%2Fh5%2Fhome%3Fsite_key%3Dmall-cn",
+    );
   });
 
   it("redirects logged-in users away from login page to home", async () => {
@@ -2075,7 +2498,9 @@ describe("H5App auth routing", () => {
 
     await renderApp("/h5/home?site_key=mall-cn", navigate);
 
-    expect(navigate).toHaveBeenCalledWith("/h5/login?site_key=mall-cn");
+    expect(navigate).toHaveBeenCalledWith(
+      "/h5/login?site_key=mall-cn&redirect=%2Fh5%2Fhome%3Fsite_key%3Dmall-cn",
+    );
   });
 
   it("renders mobile auth support shortcuts and keeps password visibility toggles usable", async () => {
@@ -2120,7 +2545,9 @@ describe("H5App auth routing", () => {
     });
     await flushEffects();
 
-    expect(navigate).toHaveBeenCalledWith("/h5/login?site_key=mall-cn");
+    expect(navigate).toHaveBeenCalledWith(
+      "/h5/login?site_key=mall-cn&redirect=%2Fh5%2Ftickets%2Fnew%3Fsite_key%3Dmall-cn",
+    );
   });
 
   it("redirects to login when ticket reply hits an auth-required action error", async () => {
@@ -2155,7 +2582,9 @@ describe("H5App auth routing", () => {
     });
     await flushEffects();
 
-    expect(navigate).toHaveBeenCalledWith("/h5/login?site_key=mall-cn");
+    expect(navigate).toHaveBeenCalledWith(
+      "/h5/login?site_key=mall-cn&redirect=%2Fh5%2Ftickets%2Fticket-2001%3Fsite_key%3Dmall-cn",
+    );
   });
 
   it("redirects to login when task package purchase hits an auth-required action error", async () => {
@@ -2259,12 +2688,63 @@ describe("H5App auth routing", () => {
 
     await renderApp("/h5/tasks?site_key=mall-cn", vi.fn());
 
-    expect(document.querySelector(".h5-task-instance-card")).not.toBeNull();
-    expect(document.querySelector(".h5-task-instance-meta")).not.toBeNull();
+    const taskCard = document.querySelector(".h5-task-instance-card");
+
+    expect(taskCard).not.toBeNull();
+    expect(document.querySelector(".h5-member-task-summary")).not.toBeNull();
     expect(document.querySelector(".h5-task-instance-status-badge.active")).not.toBeNull();
-    expect(document.querySelector(".h5-member-progress")).not.toBeNull();
-    expect(document.body.textContent).toContain("Growth Package B");
+    expect(taskCard?.textContent).toContain("Growth Package B");
+    expect(taskCard?.querySelectorAll(".h5-member-inline-pill")).toHaveLength(1);
+    expect(taskCard?.textContent).toMatch(/View Package|查看任务包/);
     expect(document.querySelectorAll(".h5-task-instance-card")).toHaveLength(1);
+  });
+
+  it("refreshes the task list immediately after confirming a package claim", async () => {
+    vi.spyOn(h5MemberModule, "getCurrentMemberSession").mockResolvedValue({
+      accountId: "38271456",
+      phone: "13800000000",
+      publicUserId: "h5-38271456",
+      displayName: "Demo Member",
+      inviteCode: "INV-ABCD1234",
+    });
+    vi.spyOn(h5MemberModule, "getMemberHomeDashboard").mockResolvedValue(createDashboardState());
+    vi.spyOn(h5MemberModule, "getMaskedPhone").mockResolvedValue("138****0000");
+    vi.spyOn(h5MemberModule, "getSignInStatusApi").mockResolvedValue({
+      consecutiveDays: 3,
+      todaySignedIn: false,
+      goalDays: 7,
+      goalReward: 5,
+      isCompleted: false,
+    });
+    const listSpy = vi
+      .spyOn(h5MemberModule, "getTaskInstancesApi")
+      .mockResolvedValueOnce([
+        createTaskInstanceState({ id: "pkg-1", title: "Starter Package", status: "pending_claim" }),
+      ])
+      .mockResolvedValueOnce([
+        createTaskInstanceState({ id: "pkg-1", title: "Starter Package", status: "active" }),
+      ]);
+    vi.spyOn(h5MemberModule, "claimTaskPackage").mockResolvedValue(
+      createTaskPackageState({ id: "pkg-1", title: "Starter Package", status: "active" }),
+    );
+    vi.spyOn(h5MemberModule, "listTaskPackages").mockResolvedValue([
+      createTaskPackageState({ id: "pkg-1", title: "Starter Package", status: "active" }),
+    ]);
+
+    await renderApp("/h5/tasks?site_key=mall-cn", vi.fn());
+
+    await act(async () => {
+      findLocalizedButton("领取", "Claim")?.click();
+    });
+    await flushEffects();
+    await act(async () => {
+      (document.querySelector(".h5-member-claim-confirm .seed-button:not(.seed-button-secondary)") as HTMLButtonElement | null)?.click();
+    });
+    await waitFor(() => {
+      expect(listSpy).toHaveBeenCalledTimes(2);
+    });
+    expect(document.querySelector(".h5-task-instance-status-badge.pending_claim")).toBeNull();
+    expect(document.querySelector(".h5-task-instance-status-badge.active")).not.toBeNull();
   });
 
   it("groups messages by priority and surfaces withdraw status in profile", async () => {
@@ -2306,6 +2786,53 @@ describe("H5App auth routing", () => {
     await renderApp("/h5/me?site_key=mall-cn", vi.fn());
     expect(document.body.textContent).toContain("系统余额");
     expect(document.body.textContent).toContain("任务余额");
+  });
+
+  it("replaces the message feed with the next page when the message list loads page 2", async () => {
+    let intersectionCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | null = null;
+    class MockIntersectionObserver {
+      constructor(callback: (entries: Array<{ isIntersecting: boolean }>) => void) {
+        intersectionCallback = callback;
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    Object.defineProperty(globalThis, "IntersectionObserver", {
+      configurable: true,
+      writable: true,
+      value: MockIntersectionObserver,
+    });
+
+    vi.spyOn(h5MemberModule, "getCurrentMemberSession").mockResolvedValue({
+      accountId: "38271456",
+      phone: "13800000000",
+      publicUserId: "h5-38271456",
+      displayName: "Demo Member",
+      inviteCode: "INV-ABCD1234",
+    });
+    vi.spyOn(h5MemberModule, "getMaskedPhone").mockResolvedValue("138****0000");
+    vi.spyOn(h5MemberModule, "getMemberHomeDashboard").mockResolvedValue(createDashboardState());
+    vi.spyOn(h5MemberModule, "getNotificationsApi")
+      .mockResolvedValueOnce({
+        items: [createMessageState({ id: "msg-page-1", title: "Page 1 message" })],
+        total: 60,
+      })
+      .mockResolvedValueOnce({
+        items: [createMessageState({ id: "msg-page-2", title: "Page 2 message" })],
+        total: 60,
+      });
+
+    await renderApp("/h5/messages?site_key=mall-cn", vi.fn());
+    expect(document.body.textContent).toContain("Page 1 message");
+
+    await act(async () => {
+      intersectionCallback?.([{ isIntersecting: true }]);
+      await flushEffects();
+    });
+
+    expect(document.body.textContent).toContain("Page 2 message");
+    expect(document.body.textContent).not.toContain("Page 1 message");
   });
 
   it("surfaces whatsapp status and quick actions above the profile service menu", async () => {
@@ -2391,6 +2918,43 @@ describe("H5App auth routing", () => {
     expect(document.querySelector(".h5-package-product-btn")).not.toBeNull();
     expect(document.body.textContent).toContain("Starter Package");
     expect(document.body.textContent).toContain("Demo Product");
+  });
+
+  it("refreshes the package detail immediately after confirming a package claim", async () => {
+    vi.spyOn(h5MemberModule, "getCurrentMemberSession").mockResolvedValue({
+      accountId: "38271456",
+      phone: "13800000000",
+      publicUserId: "h5-38271456",
+      displayName: "Demo Member",
+      inviteCode: "INV-ABCD1234",
+    });
+    vi.spyOn(h5MemberModule, "getMemberHomeDashboard").mockResolvedValue(createDashboardState());
+    vi.spyOn(h5MemberModule, "getMaskedPhone").mockResolvedValue("138****0000");
+    const detailSpy = vi
+      .spyOn(h5MemberModule, "getTaskInstanceDetailApi")
+      .mockResolvedValueOnce(createTaskInstanceState({ id: "pkg-1", status: "pending_claim" }))
+      .mockResolvedValueOnce(createTaskInstanceState({ id: "pkg-1", status: "active" }));
+    vi.spyOn(h5MemberModule, "claimTaskPackage").mockResolvedValue(
+      createTaskPackageState({ id: "pkg-1", title: "Starter Package", status: "active" }),
+    );
+    vi.spyOn(h5MemberModule, "listTaskPackages").mockResolvedValue([
+      createTaskPackageState({ id: "pkg-1", title: "Starter Package", status: "active" }),
+    ]);
+
+    await renderApp("/h5/tasks/package/pkg-1?site_key=mall-cn", vi.fn());
+
+    await act(async () => {
+      findLocalizedButton("领取", "Claim")?.click();
+    });
+    await flushEffects();
+    await act(async () => {
+      (document.querySelector(".h5-member-claim-confirm .seed-button:not(.seed-button-secondary)") as HTMLButtonElement | null)?.click();
+    });
+    await waitFor(() => {
+      expect(detailSpy).toHaveBeenCalledTimes(2);
+    });
+    expect(document.querySelector(".h5-task-instance-status-badge.pending_claim")).toBeNull();
+    expect(document.querySelector(".h5-task-instance-status-badge.active")).not.toBeNull();
   });
 
   it("lets the task package detail route recover from a first-load failure via a localized retry action", async () => {
@@ -2599,6 +3163,70 @@ describe("H5App auth routing", () => {
     const previewImage = document.querySelector(".h5-chat-bubble-image img") as HTMLImageElement | null;
     expect(previewImage).not.toBeNull();
     expect(previewImage?.getAttribute("src")).toBe("blob:chat-preview-1");
+  });
+
+  it("surfaces an inline error when whatsapp chat bootstrap cannot load messages", async () => {
+    vi.spyOn(h5MemberModule, "getCurrentMemberSession").mockResolvedValue({
+      accountId: "38271456",
+      phone: "13800000000",
+      publicUserId: "h5-38271456",
+      displayName: "Demo Member",
+      inviteCode: "INV-ABCD1234",
+    });
+    vi.spyOn(h5MemberModule, "getMemberHomeDashboard").mockResolvedValue(createDashboardState());
+    vi.spyOn(h5MemberModule, "getMaskedPhone").mockResolvedValue("138****0000");
+    vi.spyOn(h5MemberModule, "getWhatsAppBinding").mockResolvedValue({
+      isBound: true,
+      phoneNumber: "+1 202 555 0101",
+      lastUpdatedAt: "2026-06-11T05:00:00Z",
+    });
+    vi.spyOn(h5MemberModule, "getMessagesApi").mockRejectedValue(new Error("Chat bootstrap failed"));
+
+    await renderApp("/h5/whatsapp?site_key=mall-cn", vi.fn());
+
+    expect(document.querySelector(".h5-chat-container")).not.toBeNull();
+    expect(document.body.textContent).toContain("Chat bootstrap failed");
+  });
+
+  it("surfaces a visible error when whatsapp polling refresh fails", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(h5MemberModule, "getCurrentMemberSession").mockResolvedValue({
+      accountId: "38271456",
+      phone: "13800000000",
+      publicUserId: "h5-38271456",
+      displayName: "Demo Member",
+      inviteCode: "INV-ABCD1234",
+    });
+    vi.spyOn(h5MemberModule, "getMemberHomeDashboard").mockResolvedValue(createDashboardState());
+    vi.spyOn(h5MemberModule, "getMaskedPhone").mockResolvedValue("138****0000");
+    vi.spyOn(h5MemberModule, "getWhatsAppBinding").mockResolvedValue({
+      isBound: true,
+      phoneNumber: "+1 202 555 0101",
+      lastUpdatedAt: "2026-06-11T05:00:00Z",
+    });
+    vi.spyOn(h5MemberModule, "getMessagesApi")
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "msg-1",
+            content: "Hello",
+            type: "text",
+            direction: "inbound",
+            status: "read",
+            timestamp: "2026-06-11T05:00:00Z",
+          },
+        ],
+        total: 1,
+      })
+      .mockRejectedValue(new Error("Chat refresh failed"));
+
+    await renderApp("/h5/whatsapp?site_key=mall-cn", vi.fn());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+      await flushEffects();
+    });
+
+    expect(document.body.textContent).toContain("Chat refresh failed");
   });
 
   it("localizes the invite page retry fallback inside the h5 app shell", async () => {
@@ -3085,3 +3713,5 @@ describe("H5App auth routing", () => {
     expect(sent.image_url).toBe("blob:chat-preview-1");
   });
 });
+
+

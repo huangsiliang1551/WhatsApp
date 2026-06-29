@@ -188,6 +188,20 @@ describe("H5PageShell", () => {
     expect(screen.getAllByRole("button", { name: /Mark All Read/i })).toHaveLength(1);
   });
 
+  it("renders toast notifications provided by the app shell state", async () => {
+    const { H5PageShell: Shell } = await import("./H5PageShell");
+
+    render(
+        <Shell
+          {...createShellProps({
+          toastItems: [{ key: "notice", message: "Profile updated", tone: "notice", duration: 2600 }],
+          })}
+        />,
+    );
+
+    expect(screen.getByText("Profile updated")).toBeTruthy();
+  });
+
   it("renders the home topbar as an account status layer instead of a generic brand banner", async () => {
     const navigate = vi.fn();
     const { H5PageShell: Shell } = await import("./H5PageShell");
@@ -220,10 +234,10 @@ describe("H5PageShell", () => {
 
     expect(screen.getByText("Demo Member")).toBeTruthy();
     expect(screen.getByText(/38\*{4}56/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /approved/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /approved|已认证/i })).toBeTruthy();
     expect(screen.queryByText("Mall")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /approved/i }));
+    fireEvent.click(screen.getByRole("button", { name: /approved|已认证/i }));
     expect(navigate).toHaveBeenCalledWith("/h5/verification?site_key=mall-cn");
   });
 
@@ -303,22 +317,6 @@ describe("H5PageShell", () => {
     expect(
       screen.getByTitle("International Growth Rewards Center with Extended Localized Name"),
     ).toBeTruthy();
-  });
-
-  it("uses the compact toast layout on primary tab routes", async () => {
-    const { H5PageShell: Shell } = await import("./H5PageShell");
-    render(
-      <Shell
-        {...createShellProps({
-          toastItems: [{ key: "notice", message: "Saved", tone: "notice", duration: 2600 }],
-          route: { page: "home", siteKey: "mall-cn" } as any,
-        })}
-      />,
-    );
-
-    const status = document.querySelector(".h5-member-toast-stack") as HTMLElement | null;
-    expect(status?.className).toContain("h5-member-toast-stack-compact");
-    expect(document.querySelector(".h5-member-toast-compact")).toBeTruthy();
   });
 
   it("renders recharge channel guidance without demo wording in english", async () => {

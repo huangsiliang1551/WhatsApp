@@ -1,6 +1,18 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 
+import "@fontsource/inter/latin-400.css";
+import "@fontsource/inter/latin-500.css";
+import "@fontsource/inter/latin-600.css";
+import "@fontsource/inter/latin-700.css";
+import "@fontsource/inter/latin-800.css";
+import "@fontsource/manrope/latin-400.css";
+import "@fontsource/manrope/latin-500.css";
+import "@fontsource/manrope/latin-600.css";
+import "@fontsource/manrope/latin-700.css";
+import "@fontsource/manrope/latin-800.css";
+import "@fontsource/ibm-plex-mono/latin-500.css";
+import "@fontsource/ibm-plex-mono/latin-600.css";
 import "@ant-design/v5-patch-for-react-19";
 import { App as AntdApp, ConfigProvider, theme } from "antd";
 
@@ -30,7 +42,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           colorWarning: "#faad14",
           controlHeight: 36,
           fontFamily:
-            '"Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif',
+            '"Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif',
         },
         components: {
           Layout: {

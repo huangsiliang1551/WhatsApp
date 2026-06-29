@@ -25,6 +25,7 @@ import { showError, showSuccess } from "../components/Feedback";
 import { MemberIdLink } from "../components/member/MemberIdLink";
 import { EmptyGuide, PageShell } from "../components/PageShell";
 import { usePermissions } from "../hooks/usePermissions";
+import { withSorter } from "../utils/withSorter";
 import {
   approveBonusGrant,
   approveRechargeRepair,
@@ -95,6 +96,14 @@ function buildExportColumns(columns: Array<{ key: string; label: string }>): Exp
   return columns.map((column) => ({ key: column.key, label: column.label }));
 }
 
+function buildTablePagination(total: number): NonNullable<TableProps<unknown>["pagination"]> {
+  return {
+    pageSize: 10,
+    showSizeChanger: true,
+    showTotal: (value) => `共 ${value} 条`,
+  };
+}
+
 function exportFilename(prefix: string): string {
   const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
   return `${prefix}-${stamp}.csv`;
@@ -147,6 +156,19 @@ function renderDuplicateAccountSummary(record: FinanceWithdrawalRecord): JSX.Ele
       <Tag color={record.risk_level === "high" ? "red" : "orange"}>{label}</Tag>
     </Popover>
   );
+}
+
+function renderRiskLevelTag(level: string | null | undefined): JSX.Element {
+  if (level === "high") {
+    return <Tag color="red">高风险</Tag>;
+  }
+  if (level === "medium") {
+    return <Tag color="orange">中风险</Tag>;
+  }
+  if (level === "low") {
+    return <Tag color="gold">低风险</Tag>;
+  }
+  return <Tag>未分级</Tag>;
 }
 
 const sortOrderOptions: Array<{ label: string; value: SortOrder }> = [
@@ -226,6 +248,9 @@ export function FinancePage(): JSX.Element {
   const [walletLedgerSortField, setWalletLedgerSortField] = useState("created_at");
   const [walletLedgerSortOrder, setWalletLedgerSortOrder] = useState<SortOrder>("desc");
   const [pageError, setPageError] = useState<string | null>(null);
+  const [activeTabKey, setActiveTabKey] = useState<string>(
+    canViewRecharge ? "recharges" : canViewWithdrawal ? "withdrawals" : "summary",
+  );
 
   const [bonusGrantModalOpen, setBonusGrantModalOpen] = useState(false);
   const [rechargeRepairModalOpen, setRechargeRepairModalOpen] = useState(false);
@@ -398,6 +423,26 @@ export function FinancePage(): JSX.Element {
   const duplicateWithdrawalAlerts = useMemo(
     () => withdrawalRows.filter((item) => (item.duplicate_account_count ?? 0) > 0),
     [withdrawalRows],
+  );
+  const pendingWithdrawalCount = useMemo(
+    () => withdrawalRows.filter((item) => item.status === "pending").length,
+    [withdrawalRows],
+  );
+  const highRiskWithdrawalRows = useMemo(
+    () => withdrawalRows.filter((item) => item.risk_level === "high" || (item.duplicate_account_count ?? 0) > 1),
+    [withdrawalRows],
+  );
+  const pendingHighRiskWithdrawalRows = useMemo(
+    () => highRiskWithdrawalRows.filter((item) => item.status === "pending"),
+    [highRiskWithdrawalRows],
+  );
+  const totalDuplicateMembers = useMemo(
+    () => duplicateWithdrawalAlerts.reduce((sum, item) => sum + (item.duplicate_account_count ?? 0), 0),
+    [duplicateWithdrawalAlerts],
+  );
+  const pendingHighRiskAccounts = useMemo(
+    () => Array.from(new Set(pendingHighRiskWithdrawalRows.map((item) => item.account_id).filter((item): item is string => Boolean(item)))),
+    [pendingHighRiskWithdrawalRows],
   );
 
   const openBonusGrantModal = (): void => {
@@ -590,13 +635,13 @@ export function FinancePage(): JSX.Element {
 
   withdrawalColumns.splice(withdrawalColumns.length - 1, 0,
     {
-      title: "鎻愮幇璐︽埛",
+      title: "提现账户",
       dataIndex: "account_no_masked",
       key: "account_no_masked",
       render: (value: string | null | undefined) => value || "-",
     },
     {
-      title: "閲嶅璐︽埛",
+      title: "重复账户",
       key: "duplicate_account_count",
       render: (_: unknown, record: FinanceWithdrawalRecord) => renderDuplicateAccountSummary(record),
     },
@@ -851,15 +896,20 @@ export function FinancePage(): JSX.Element {
     void loadWalletLedgers();
   };
 
+  const openPendingWithdrawalReview = (): void => {
+    setActiveTabKey("withdrawals");
+    setWithdrawalStatus("pending");
+  };
+
   if (!hasPrimaryFinanceAccess) {
     return (
       <PageShell
-        title="璐㈠姟绠＄悊"
-        subtitle="鐪熷疄鍏呭€笺€佹彁鐜般€佽禒閲戜笌寮傚父鍛婅缁熶竴姹囨€?"
+        title="财务管理"
+        subtitle="真实充值、提现、赠金与异常告警统一汇总"
       >
         <EmptyGuide
-          title="鏆傛棤鍙敤璐㈠姟鑳藉姏"
-          description="褰撳墠瑙掕壊灏氭湭寮€閫氬厖鍊笺€佹彁鐜版垨璐㈠姟鎶ヨ〃鏉冮檺锛岃鑱旂郴绠＄悊鍛樿皟鏁存潈闄愰厤缃€?"
+          title="暂无可用财务能力"
+          description="当前角色尚未开通充值、提现或财务报表权限，请联系管理员调整权限配置。"
         />
       </PageShell>
     );
@@ -945,8 +995,8 @@ export function FinancePage(): JSX.Element {
                 rowKey="id"
                 loading={rechargeLoading}
                 dataSource={rechargeRows}
-                columns={rechargeColumns}
-                pagination={{ pageSize: 10 }}
+                columns={withSorter(rechargeColumns)}
+                pagination={buildTablePagination(rechargeRows.length)}
                 locale={{ emptyText: rechargeLoading ? <Spin size="small" /> : <Empty description="暂无充值记录" /> }}
               />
             </Space>
@@ -1028,8 +1078,8 @@ export function FinancePage(): JSX.Element {
                 rowKey="id"
                 loading={withdrawalLoading}
                 dataSource={withdrawalRows}
-                columns={withdrawalColumns}
-                pagination={{ pageSize: 10 }}
+                columns={withSorter(withdrawalColumns)}
+                pagination={buildTablePagination(withdrawalRows.length)}
                 locale={{ emptyText: withdrawalLoading ? <Spin size="small" /> : <Empty description="暂无提现记录" /> }}
               />
             </Space>
@@ -1098,8 +1148,8 @@ export function FinancePage(): JSX.Element {
                 rowKey="id"
                 loading={bonusGrantLoading}
                 dataSource={bonusGrantRows}
-                columns={bonusGrantColumns}
-                pagination={{ pageSize: 10 }}
+                columns={withSorter(bonusGrantColumns)}
+                pagination={buildTablePagination(bonusGrantRows.length)}
                 locale={{ emptyText: bonusGrantLoading ? <Spin size="small" /> : <Empty description="暂无赠金记录" /> }}
               />
             </Space>
@@ -1141,8 +1191,8 @@ export function FinancePage(): JSX.Element {
                 rowKey="id"
                 loading={rechargeRepairLoading}
                 dataSource={rechargeRepairRows}
-                columns={rechargeRepairColumns}
-                pagination={{ pageSize: 10 }}
+                columns={withSorter(rechargeRepairColumns)}
+                pagination={buildTablePagination(rechargeRepairRows.length)}
                 locale={{ emptyText: rechargeRepairLoading ? <Spin size="small" /> : <Empty description="暂无补单记录" /> }}
               />
             </Space>
@@ -1244,8 +1294,8 @@ export function FinancePage(): JSX.Element {
                 rowKey="id"
                 loading={walletLedgerLoading}
                 dataSource={walletLedgerRows}
-                columns={walletLedgerColumns}
-                pagination={{ pageSize: 10 }}
+                columns={withSorter(walletLedgerColumns)}
+                pagination={buildTablePagination(walletLedgerRows.length)}
                 locale={{ emptyText: walletLedgerLoading ? <Spin size="small" /> : <Empty description="暂无钱包流水" /> }}
               />
             </Space>
@@ -1273,8 +1323,8 @@ export function FinancePage(): JSX.Element {
                 rowKey={(record) => record.record_id || `${record.type}-${record.user_id || "none"}-${record.time || "none"}`}
                 loading={alertsLoading}
                 dataSource={alerts}
-                columns={alertColumns}
-                pagination={{ pageSize: 10 }}
+                columns={withSorter(alertColumns)}
+                pagination={buildTablePagination(alerts.length)}
                 locale={{ emptyText: alertsLoading ? <Spin size="small" /> : <Empty description="暂无异常告警" /> }}
               />
             </Space>
@@ -1291,6 +1341,33 @@ export function FinancePage(): JSX.Element {
     >
       <Space direction="vertical" size={16} style={{ width: "100%" }}>
         {pageError ? <Alert type="error" showIcon message={pageError} /> : null}
+        {canViewWithdrawal && pendingHighRiskWithdrawalRows.length > 0 ? (
+          <Alert
+            type="warning"
+            showIcon
+            message={`当前有 ${pendingHighRiskWithdrawalRows.length} 笔待处理高风险提现`}
+            description={(
+              <Space wrap size={8}>
+                <Typography.Text type="secondary">
+                  {pendingHighRiskAccounts.length > 0
+                    ? `涉及账号：${pendingHighRiskAccounts.join(", ")}`
+                    : "当前记录未返回账号维度，请在提现列表中按待审核状态复核。"}
+                </Typography.Text>
+                <Button size="small" type="link" onClick={openPendingWithdrawalReview}>
+                  查看提现列表
+                </Button>
+              </Space>
+            )}
+          />
+        ) : null}
+        {canViewWithdrawal ? (
+          <Space wrap size={12}>
+            <Card size="small"><Statistic title="待审核提现" value={pendingWithdrawalCount} /></Card>
+            <Card size="small"><Statistic title="高风险提现" value={highRiskWithdrawalRows.length} /></Card>
+            <Card size="small"><Statistic title="待处理高风险" value={pendingHighRiskWithdrawalRows.length} /></Card>
+            <Card size="small"><Statistic title="重复账户涉及人数" value={totalDuplicateMembers} /></Card>
+          </Space>
+        ) : null}
         {duplicateWithdrawalAlerts.length > 0 ? (
           <Alert
             type="warning"
@@ -1308,7 +1385,59 @@ export function FinancePage(): JSX.Element {
             )}
           />
         ) : null}
-        <Tabs items={tabs} />
+        {canViewWithdrawal ? (
+          <Card
+            size="small"
+            title="提现风控待办"
+            extra={<Typography.Text type="secondary">优先处理高风险且仍处于 pending 的提现单</Typography.Text>}
+          >
+            <Table
+              rowKey="id"
+              size="small"
+              pagination={{ pageSize: 5, showSizeChanger: false }}
+              dataSource={pendingHighRiskWithdrawalRows}
+              locale={{ emptyText: <Empty description="当前没有待处理的高风险提现" /> }}
+              columns={withSorter([
+                {
+                  title: "申请时间",
+                  dataIndex: "created_at",
+                  render: (value: string | null | undefined) => formatDateTime(value),
+                },
+                {
+                  title: "用户",
+                  dataIndex: "user_id",
+                  render: (value: string | undefined, record: FinanceWithdrawalRecord) =>
+                    renderMemberLink(value, record.account_id, record.public_user_id ?? value),
+                },
+                {
+                  title: "提现金额",
+                  dataIndex: "amount",
+                  render: (value: number) => formatMoney(value),
+                },
+                {
+                  title: "风控等级",
+                  dataIndex: "risk_level",
+                  render: (value: string | null | undefined) => renderRiskLevelTag(value),
+                },
+                {
+                  title: "重复账户",
+                  render: (_: unknown, record: FinanceWithdrawalRecord) => renderDuplicateAccountSummary(record),
+                },
+                {
+                  title: "操作",
+                  render: (_: unknown, record: FinanceWithdrawalRecord) => (
+                    record.status === "pending" ? (
+                      <Button size="small" type="link" onClick={() => showSuccess(`请在提现列表中审核 ${record.id}`)}>
+                        去审核
+                      </Button>
+                    ) : null
+                  ),
+                },
+              ])}
+            />
+          </Card>
+        ) : null}
+        <Tabs activeKey={activeTabKey} items={tabs} onChange={setActiveTabKey} />
 
         <Modal
           title="新建赠金"

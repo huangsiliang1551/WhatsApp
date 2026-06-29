@@ -1,6 +1,7 @@
 from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 
 from app.api.deps import (
     get_db_session,
@@ -12,6 +13,7 @@ from app.api.deps import (
 )
 from app.core.auth import ActorRole, RequestActor, filter_account_scoped_items
 from app.core.settings import get_settings
+from app.db.models import Conversation
 from app.schemas.audit import AuditLogEntry
 from app.schemas.handover import AgentRegistrationRequest, AgentStatusUpdateRequest
 from app.schemas.runtime import (
@@ -35,6 +37,7 @@ from app.schemas.support_knowledge import (
     SupportKnowledgeImportResult,
 )
 from app.services.business_hours_service import BusinessHoursService
+from app.services.data_scope_filter_service import DataScopeFilterService
 from app.services.handover_service import HandoverService
 from app.services.launch_readiness_service import LaunchReadinessService
 from app.services.meta_scope_validation import MetaScopeValidator
@@ -43,6 +46,24 @@ from app.services.support_knowledge_service import SupportKnowledgeService
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/runtime", tags=["runtime"])
+
+
+def _ensure_runtime_conversation_scope(
+    runtime_state_store: RuntimeStateStore,
+    actor: RequestActor,
+    *,
+    account_id: str,
+    conversation_id: str,
+) -> None:
+    actor.require_account_access(account_id)
+    stmt = select(Conversation.id).where(
+        Conversation.account_id == account_id,
+        Conversation.external_conversation_id == conversation_id,
+    )
+    if not actor.is_super_admin:
+        stmt = DataScopeFilterService(runtime_state_store.session).filter_conversations(stmt, actor)
+    if runtime_state_store.session.scalar(stmt.limit(1)) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
 
 
 def _validate_runtime_meta_scope(
@@ -76,6 +97,7 @@ def _validate_runtime_meta_scope(
 )
 async def get_runtime_state(
     runtime_state_store: RuntimeStateStore = Depends(get_runtime_state_service),
+    db_session: Session = Depends(get_db_session),
     actor: RequestActor = Depends(require_permission("runtime.view")),
 ) -> dict[str, object]:
     try:
@@ -89,13 +111,22 @@ async def get_runtime_state(
         ).model_dump()
     if actor.is_super_admin:
         return state.model_dump()
+    scoped_pairs = {
+        (account_id, conversation_id)
+        for account_id, conversation_id in db_session.execute(
+            DataScopeFilterService(db_session).filter_conversations(
+                select(Conversation.account_id, Conversation.external_conversation_id),
+                actor,
+            )
+        ).all()
+    }
     filtered_state = RuntimeStateResponse(
         global_ai_enabled=state.global_ai_enabled,
         accounts=[account for account in state.accounts if actor.can_access_account(account.account_id)],
         conversations=[
             conversation
             for conversation in state.conversations
-            if actor.can_access_account(conversation.account_id)
+            if (conversation.account_id, conversation.conversation_id) in scoped_pairs
         ],
     )
     return filtered_state.model_dump()
@@ -878,7 +909,12 @@ async def set_agent_status(
     runtime_state_store: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("runtime.edit")),
 ) -> dict[str, object]:
-    actor.require_account_access(account_id)
+    if account_id is not None:
+        actor.require_account_access(account_id)
+    else:
+        target_agent = runtime_state_store._find_agent(account_id=None, agent_id=agent_id)
+        if target_agent is not None:
+            actor.require_account_access(target_agent.account_id)
     handover_service = HandoverService(runtime_state_store)
     try:
         return (
@@ -953,7 +989,12 @@ async def set_conversation_ai(
     runtime_state_store: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("conversations.handover")),
 ) -> dict[str, object]:
-    actor.require_account_access(account_id)
+    _ensure_runtime_conversation_scope(
+        runtime_state_store,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     resolved_agent_id = actor.validate_agent_id(payload.agent_id)
     if resolved_agent_id is None and actor.role in {ActorRole.OPERATOR, ActorRole.SUPPORT_AGENT}:
         resolved_agent_id = actor.actor_id
@@ -988,7 +1029,12 @@ async def get_conversation_ai_status(
     runtime_state_store: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("runtime.view")),
 ) -> dict[str, object]:
-    actor.require_account_access(account_id)
+    _ensure_runtime_conversation_scope(
+        runtime_state_store,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     try:
         status = await runtime_state_store.get_effective_ai_status(account_id, conversation_id)
     except (LookupError, ValueError) as exc:
@@ -1009,7 +1055,12 @@ async def set_conversation_handover(
     runtime_state_store: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("conversations.handover")),
 ) -> dict[str, object]:
-    actor.require_account_access(account_id)
+    _ensure_runtime_conversation_scope(
+        runtime_state_store,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     resolved_agent_id = actor.validate_agent_id(payload.agent_id)
     if resolved_agent_id is None and actor.role in {ActorRole.OPERATOR, ActorRole.SUPPORT_AGENT}:
         resolved_agent_id = actor.actor_id

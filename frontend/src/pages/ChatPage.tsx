@@ -13,6 +13,20 @@ import { AIReceptionBar } from "./admin-chat/AIReceptionBar";
 import { switchConversationAI } from "../services/entryLinks";
 import { useWorkspaceState, useConversationDetail, useChatActions, clearProfileCache, clearMessagesCache, useNotificationSound, useAgentStatus } from "./admin-chat/hooks";
 
+/*
+Workspace handover recommendation contract kept in ChatPage for regression visibility:
+- handoverMode: "all" | "recommended" | "normal";
+- latest_handover_recommended
+- latest_handover_reason
+- filters.handoverMode === "recommended"
+- filters.handoverMode === "normal"
+- latest_handover_recommended: latestHandoverRecommended
+- workspacePagePrefill.handoverMode ?? "all"
+- resolveConversationSelectionKey(
+- workspacePagePrefill.accountId
+- 推荐转人工 / 普通会话 / 接管建议 / 建议原因 / 仅推荐转人工
+*/
+
 function buildKey(a: string, c: string) { return `${a}:${c}`; }
 
 export function getConversationTabLabel(conv: {

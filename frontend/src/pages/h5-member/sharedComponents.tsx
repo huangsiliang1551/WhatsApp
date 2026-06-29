@@ -236,23 +236,35 @@ export function AmountPresetRow({
 }
 
 export function PasswordField({
+  name,
   value,
   placeholder,
   visible,
   onChange,
   onToggle,
+  autoComplete,
   onBlur,
 }: {
+  name?: string;
   value: string;
   placeholder: string;
   visible: boolean;
   onChange: (value: string) => void;
   onToggle: () => void;
+  autoComplete?: string;
   onBlur?: () => void;
 }): JSX.Element {
   return (
     <div className="h5-member-password-field">
-      <input placeholder={placeholder} type={visible ? "text" : "password"} value={value} onChange={(event) => onChange(event.target.value)} onBlur={onBlur} />
+      <input
+        autoComplete={autoComplete}
+        name={name}
+        placeholder={placeholder}
+        type={visible ? "text" : "password"}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
+      />
       <button
         aria-label={visible ? t("common.hidePassword") : t("common.showPassword")}
         className="h5-member-password-toggle"

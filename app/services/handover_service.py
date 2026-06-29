@@ -5,6 +5,7 @@ from app.schemas.handover import (
     AgentSummary,
     AgentWorkloadSummary,
 )
+from app.schemas.runtime import ConversationHandoverRequest
 from app.schemas.runtime import ConversationRuntimeState
 from app.services.agent_presence_service import AgentPresenceService
 from app.services.runtime_state import RuntimeStateStore
@@ -179,6 +180,26 @@ class HandoverService:
             agent_id=agent_id,
             assigned_by_agent_id=assigned_by_agent_id,
             reason=reason,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            admin_override=admin_override,
+        )
+
+    async def request_handover(
+        self,
+        account_id: str,
+        conversation_id: str,
+        payload: ConversationHandoverRequest,
+        actor_type: str | None = None,
+        actor_id: str | None = None,
+        admin_override: bool = False,
+    ) -> ConversationRuntimeState:
+        return await self._runtime_state.set_conversation_management_mode(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            management_mode=payload.management_mode,
+            agent_id=payload.agent_id,
+            reason=payload.reason,
             actor_type=actor_type,
             actor_id=actor_id,
             admin_override=admin_override,

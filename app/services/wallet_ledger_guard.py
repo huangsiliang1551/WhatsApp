@@ -10,8 +10,14 @@ class WalletLedgerGuard:
         amount = WalletLedgerGuard._amount(getattr(entry, "amount", None))
         cash_amount = WalletLedgerGuard._amount(getattr(entry, "cash_amount", None))
         bonus_amount = WalletLedgerGuard._amount(getattr(entry, "bonus_amount", None))
+        task_amount = WalletLedgerGuard._amount(getattr(entry, "task_amount", None))
+        ledger_type = getattr(entry, "ledger_type", None)
+        fund_type = getattr(entry, "fund_type", None)
 
-        if cash_amount + bonus_amount != amount:
+        if ledger_type == "task" or fund_type == "task":
+            if task_amount != amount or cash_amount != Decimal("0.00") or bonus_amount != Decimal("0.00"):
+                raise ValueError("LEDGER_TASK_SPLIT_INVALID")
+        elif cash_amount + bonus_amount != amount:
             raise ValueError("LEDGER_SPLIT_INVALID")
 
         if not getattr(entry, "source_type", None):

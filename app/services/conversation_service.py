@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from app.core.auth import RequestActor
 from app.core.metrics import business_outbound_messages_total, message_processing_failures_total
 from app.core.settings import Settings
 from app.db.models import AppUser, Conversation, Message
@@ -15,10 +16,12 @@ from app.schemas.conversations import (
     OutboundMessageRequest,
     OutboundMessageResponse,
 )
+from app.services.data_scope_filter_service import DataScopeFilterService
 from app.services.messaging_dispatch import build_outbound_dispatch_request
 from app.services.meta_scope_validation import MetaScopeValidator
 from app.services.runtime_state import RuntimeStateStore
 from app.services.translation_service import TranslationService
+from sqlalchemy import select
 
 
 def _fmt_utc(dt):
@@ -54,6 +57,7 @@ class ConversationService:
         is_sleeping: bool | None = None,
         allowed_account_ids: set[str] | None = None,
         agency_id: str | None = None,
+        scope_actor: RequestActor | None = None,
         *,
         sort_by: str | None = None,
         sort_desc: bool = True,
@@ -81,6 +85,7 @@ class ConversationService:
             management_mode=management_mode,
             is_sleeping=is_sleeping,
             agency_id=agency_id,
+            scope_actor=scope_actor,
             sort_by=sort_by,
             sort_desc=sort_desc,
             offset=max(0, (page - 1) * size),
@@ -95,6 +100,7 @@ class ConversationService:
             management_mode=management_mode,
             is_sleeping=is_sleeping,
             agency_id=agency_id,
+            scope_actor=scope_actor,
         )
 
         # Tag filter applied early (avoids unnecessary batch queries for filtered-out items)
@@ -204,22 +210,34 @@ class ConversationService:
             actor_type=actor_type,
             actor_id=actor_id,
         )
-        return ConversationSummary(
+        conversation = await self._runtime_state.get_conversation_model(
             account_id=state.account_id,
             conversation_id=state.conversation_id,
-            waba_id=state.waba_id,
-            phone_number_id=state.phone_number_id,
-            customer_id=state.customer_id,
-            customer_language=state.customer_language,
-            customer_language_source=state.customer_language_source,
-            status=state.status,
-            management_mode=state.management_mode,
-            ai_enabled=state.ai_enabled,
-            assigned_agent_id=state.assigned_agent_id,
-            assigned_agent_name=state.assigned_agent_name,
-            last_message_at=state.last_message_at,
-            is_sleeping=state.is_sleeping,
-            last_customer_message_at=_fmt_utc(state.last_customer_message_at) if hasattr(state, 'last_customer_message_at') else None,
+        )
+        phone_number = conversation.phone_number
+        return ConversationSummary(
+            account_id=conversation.account_id,
+            conversation_id=conversation.external_conversation_id,
+            waba_id=self._resolve_phone_number_waba_id(phone_number),
+            phone_number_id=phone_number.phone_number_id if phone_number is not None else None,
+            customer_id=conversation.customer_id,
+            customer_language=conversation.customer_language,
+            customer_language_source=conversation.customer_language_source,
+            status=conversation.status,
+            management_mode=conversation.management_mode,
+            ai_enabled=conversation.ai_enabled,
+            assigned_agent_id=self._runtime_state.get_public_agent_id(
+                conversation.assigned_agent,
+                fallback=conversation.assigned_agent_id,
+            ),
+            assigned_agent_name=(
+                conversation.assigned_agent.display_name
+                if conversation.assigned_agent is not None
+                else None
+            ),
+            last_message_at=_fmt_utc(conversation.last_message_at) if conversation.last_message_at else None,
+            is_sleeping=bool(conversation.is_sleeping),
+            last_customer_message_at=_fmt_utc(conversation.last_customer_message_at) if conversation.last_customer_message_at else None,
         )
 
     async def list_messages(self, account_id: str, conversation_id: str) -> list[ConversationMessageView]:
@@ -228,6 +246,29 @@ class ConversationService:
             conversation_id=conversation_id,
             include_translations=False,
         )
+
+    async def _ensure_conversation_scope(
+        self,
+        *,
+        account_id: str,
+        conversation_id: str,
+        scope_actor: RequestActor | None,
+    ) -> None:
+        if scope_actor is None or scope_actor.is_super_admin:
+            return
+        stmt = select(Conversation.id).where(
+            Conversation.account_id == account_id,
+            Conversation.external_conversation_id == conversation_id,
+        )
+        stmt = DataScopeFilterService(self._runtime_state.session).filter_conversations(
+            stmt,
+            scope_actor,
+        )
+        scoped_conversation_id = self._runtime_state.session.scalar(stmt.limit(1))
+        if scoped_conversation_id is None:
+            raise LookupError(
+                f"Conversation '{conversation_id}' not found for account '{account_id}'."
+            )
 
     async def list_messages_with_options(
         self,
@@ -238,9 +279,15 @@ class ConversationService:
         include_cold: bool = False,
         offset: int = 0,
         limit: int | None = None,
+        scope_actor: RequestActor | None = None,
     ) -> list[ConversationMessageView]:
         # include_translations 仅控制是否返回已缓存的译文，不再触发自动翻译。
         # 翻译由前端通过 POST /messages/{id}/translate 和 /messages/translate-batch 显式触发。
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
+        )
         messages = await self._runtime_state.list_message_models(
             account_id=account_id,
             conversation_id=conversation_id,
@@ -299,7 +346,13 @@ class ConversationService:
         account_id: str,
         conversation_id: str,
         limit: int = 50,
+        scope_actor: RequestActor | None = None,
     ) -> list[ConversationTimelineItem]:
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
+        )
         audit_logs = await self._runtime_state.list_conversation_audit_logs(
             account_id=account_id,
             conversation_id=conversation_id,
@@ -329,7 +382,13 @@ class ConversationService:
         payload: OutboundMessageRequest,
         actor_type: str = "system",
         actor_id: str | None = None,
+        scope_actor: RequestActor | None = None,
     ) -> OutboundMessageResponse:
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
+        )
         conversation = await self._runtime_state.get_conversation_model(
             account_id=account_id,
             conversation_id=conversation_id,
@@ -366,6 +425,11 @@ class ConversationService:
                 "target_language": target_language,
                 "translated": translated,
             },
+        )
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
         )
         try:
             dispatch_result = await self._messaging_provider.send_outbound(dispatch_request)
@@ -528,8 +592,14 @@ class ConversationService:
         account_id: str,
         conversation_id: str,
         message_id: str,
+        scope_actor: RequestActor | None = None,
     ) -> dict[str, str | None]:
         """翻译单条消息并持久化。返回 {translated_text, translated_language_code}。"""
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
+        )
         messages = await self._runtime_state.list_message_models(
             account_id=account_id,
             conversation_id=conversation_id,
@@ -570,8 +640,14 @@ class ConversationService:
         *,
         account_id: str,
         conversation_id: str,
+        scope_actor: RequestActor | None = None,
     ) -> dict:
         """批量翻译对话中所有未翻译的入站消息和 AI 外文回复。返回 {count, translations}。"""
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
+        )
         await self._ensure_conversation_view_translations(
             account_id=account_id,
             conversation_id=conversation_id,
@@ -831,10 +907,16 @@ class ConversationService:
         q: str,
         limit: int = 50,
         offset: int = 0,
+        scope_actor: RequestActor | None = None,
     ) -> list[ConversationMessageView]:
         """搜索当前会话消息的 content_text 和 translated_text（ILIKE），返回匹配消息列表，支持分页。"""
         from sqlalchemy import select, or_
 
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
+        )
         conversation = self._runtime_state._require_conversation(
             account_id=account_id, conversation_id=conversation_id
         )
@@ -862,9 +944,11 @@ class ConversationService:
         customer_id: str,
         exclude_conversation_id: str | None = None,
         limit: int = 20,
+        scope_actor: RequestActor | None = None,
     ) -> list[dict[str, object]]:
         """查询同 customer_id 的所有会话，按 last_message_at 倒序。"""
         from sqlalchemy import select
+        from app.services.data_scope_filter_service import DataScopeFilterService
 
         stmt = (
             select(Conversation)
@@ -874,6 +958,8 @@ class ConversationService:
             )
             .order_by(Conversation.last_message_at.desc().nulls_last())
         )
+        if scope_actor is not None:
+            stmt = DataScopeFilterService(self._runtime_state.session).filter_conversations(stmt, scope_actor)
         if exclude_conversation_id:
             stmt = stmt.where(
                 Conversation.external_conversation_id != exclude_conversation_id
@@ -912,11 +998,22 @@ class ConversationService:
         include_context: bool = False,
         actor_type: str = "system",
         actor_id: str | None = None,
+        scope_actor: RequestActor | None = None,
     ) -> dict[str, str]:
         """将一条消息转发到目标会话，作为 outbound 消息写入。"""
         messages = await self._runtime_state.list_message_models(
             account_id=account_id,
             conversation_id=conversation_id,
+        )
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
+        )
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=target_conversation_id,
+            scope_actor=scope_actor,
         )
         source_message: Message | None = None
         for m in messages:
@@ -982,8 +1079,14 @@ class ConversationService:
         self,
         account_id: str,
         conversation_id: str,
+        scope_actor: RequestActor | None = None,
     ) -> dict[str, object]:
         """取最近 20 条入站消息，调用 AI 分析情绪。"""
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
+        )
         messages = await self._runtime_state.list_message_models(
             account_id=account_id,
             conversation_id=conversation_id,
@@ -1009,6 +1112,11 @@ class ConversationService:
             "\n\n对话: " + combined_text
         )
 
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
+        )
         try:
             ai_provider = get_ai_provider(self._settings, account_id=account_id)
             if ai_provider.provider_name == "mock":
@@ -1062,8 +1170,14 @@ class ConversationService:
         self,
         account_id: str,
         conversation_id: str,
+        scope_actor: RequestActor | None = None,
     ) -> dict[str, object]:
         """计算等待时间、SLA 状态。"""
+        await self._ensure_conversation_scope(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=scope_actor,
+        )
         messages = await self._runtime_state.list_message_models(
             account_id=account_id,
             conversation_id=conversation_id,
@@ -1102,6 +1216,7 @@ class ConversationService:
         self,
         account_id: str,
         conversation_id: str,
+        scope_actor: RequestActor | None = None,
     ) -> dict[str, object]:
         """取最近 10 条消息作为上下文，调用 AI 生成拟回复（不存储）。"""
         try:

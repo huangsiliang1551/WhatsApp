@@ -1,6 +1,9 @@
 """Tests for Conversation SLA API (B-05)."""
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.db.models import Conversation
 
 from tests.test_conversations import _create_manual_meta_account, _post_mock_inbound_message
 
@@ -23,6 +26,27 @@ def _setup_account(client: TestClient) -> str:
         ],
     )
     return account_id
+
+
+def _create_empty_conversation(
+    db_session_factory: sessionmaker[Session],
+    *,
+    account_id: str,
+    conversation_id: str,
+    customer_id: str,
+) -> None:
+    with db_session_factory() as session:
+        session.add(
+            Conversation(
+                id=conversation_id,
+                account_id=account_id,
+                external_conversation_id=conversation_id,
+                customer_id=customer_id,
+                status="open",
+                is_sleeping=False,
+            )
+        )
+        session.commit()
 
 
 class TestConversationSla:
@@ -54,8 +78,18 @@ class TestConversationSla:
         assert isinstance(data["is_overdue"], bool)
         assert data["last_inbound_at"] is not None
 
-    def test_sla_no_messages_returns_defaults(self, client: TestClient) -> None:
+    def test_sla_no_messages_returns_defaults(
+        self,
+        client: TestClient,
+        db_session_factory: sessionmaker[Session],
+    ) -> None:
         account_id = _setup_account(client)
+        _create_empty_conversation(
+            db_session_factory,
+            account_id=account_id,
+            conversation_id="conv-sla-empty",
+            customer_id="user-sla-empty",
+        )
         resp = client.get(
             f"/api/conversations/{account_id}/conv-sla-empty/sla",
         )

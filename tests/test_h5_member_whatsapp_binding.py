@@ -80,11 +80,17 @@ def test_h5_whatsapp_binding_placeholder_contract_and_start_flow(
 def test_h5_whatsapp_binding_requires_member_authentication(client: TestClient) -> None:
     response = client.get("/api/h5/whatsapp-binding")
     assert response.status_code == 401, response.text
-    assert response.json()["detail"] == "H5 member authentication is required."
+    assert response.json()["detail"] == {
+        "code": "auth_required",
+        "message": "H5 member authentication is required.",
+    }
 
     start_response = client.post("/api/h5/whatsapp-binding/start")
     assert start_response.status_code == 401, start_response.text
-    assert start_response.json()["detail"] == "H5 member authentication is required."
+    assert start_response.json()["detail"] == {
+        "code": "auth_required",
+        "message": "H5 member authentication is required.",
+    }
 
 
 def test_h5_whatsapp_binding_start_reuses_existing_request_scope(

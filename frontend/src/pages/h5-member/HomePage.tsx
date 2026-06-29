@@ -1,4 +1,4 @@
-import { type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import {
   AppstoreOutlined,
   BellOutlined,
@@ -44,11 +44,12 @@ type HomePageProps = {
   notificationCount: number;
   loading?: boolean;
   onNavigate: (path: string) => void;
-  onOpenClaimDialog: (packageId: string) => void;
+  onOpenClaimDialog: (pkg: { id: string; title: string }) => void;
   onShowTransferAllConfirm: () => void;
 };
 
 function getPrimaryActionPath(action: HomePrimaryAction): string {
+  if (action.kind === "navigate") return action.path ?? "/h5/tasks";
   if (action.kind === "withdraw") return "/h5/withdraw";
   if (action.kind === "recharge") return "/h5/wallet";
   return "/h5/tasks";
@@ -70,6 +71,20 @@ export function HomePage({
   onOpenClaimDialog,
   onShowTransferAllConfirm,
 }: HomePageProps): JSX.Element {
+  const [certificationPromptDismissed, setCertificationPromptDismissed] = useState(false);
+
+  useEffect(() => {
+    if (dashboard.entryState?.state === "need_certification") {
+      setCertificationPromptDismissed(false);
+    }
+  }, [
+    dashboard.entryState?.state,
+    dashboard.entryState?.redirectPath,
+    dashboard.entryState?.certificationRequiredAmount,
+    dashboard.entryState?.currentRealRechargeAmount,
+    dashboard.entryState?.remainingRechargeAmount,
+  ]);
+
   if (loading) return <HomeSkeleton />;
 
   const todayEarned = focusTaskPackage?.currentCommission ?? 0;
@@ -80,7 +95,7 @@ export function HomePage({
     dashboard.activeCount + dashboard.pendingClaimCount + (dashboard.wallet.canWithdraw ? 1 : 0),
   );
   const weeklyGoalProgress = weeklyGoalDone / weeklyGoalTarget;
-  const headerAction = getHomePrimaryAction(focusTaskPackage, dashboard.wallet);
+  const headerAction = getHomePrimaryAction(dashboard.entryState ?? null, focusTaskPackage, dashboard.wallet);
   const recentNotice = dashboard.recentMessages[0] ?? null;
   const accountHint = session ? maskAccountId(session.accountId) : memberPhoneMasked;
   const displayName = session?.displayName || dashboard.member.displayName || accountHint;
@@ -92,6 +107,12 @@ export function HomePage({
   }).format(new Date());
   const verificationStatus = getVerificationStatusLabel(dashboard.verification.currentStatus);
   const statusAlerts = notificationCount > 0 ? t("home.statusAlerts", { count: notificationCount }) : t("home.statusClear");
+  const certificationPromptVisible =
+    dashboard.entryState?.state === "need_certification" && !certificationPromptDismissed;
+  const certificationRedirectPath = dashboard.entryState?.redirectPath ?? "/h5/wallet/recharge";
+  const certificationRequiredAmount = dashboard.entryState?.certificationRequiredAmount ?? 0;
+  const certificationCurrentRechargeAmount = dashboard.entryState?.currentRealRechargeAmount ?? 0;
+  const certificationRemainingAmount = dashboard.entryState?.remainingRechargeAmount ?? 0;
 
   return (
     <section className="h5-card-stack">
@@ -163,11 +184,15 @@ export function HomePage({
               disabled={actionName === "claim-home" || actionName === "withdraw" || actionName === "recharge"}
               onClick={() => {
                 if (primaryHomeAction.kind === "claim" && focusTaskPackage) {
-                  onOpenClaimDialog(focusTaskPackage.id);
+                  onOpenClaimDialog({ id: focusTaskPackage.id, title: focusTaskPackage.title });
                   return;
                 }
                 if (primaryHomeAction.kind === "continue" && focusTaskPackage) {
                   onNavigate(`/h5/tasks/package/${focusTaskPackage.id}`);
+                  return;
+                }
+                if (primaryHomeAction.kind === "navigate") {
+                  onNavigate(primaryHomeAction.path ?? "/h5/tasks");
                   return;
                 }
                 onNavigate(getPrimaryActionPath(primaryHomeAction));
@@ -193,7 +218,7 @@ export function HomePage({
               meta={getTaskPackageTypeLabel(focusTaskPackage.type)}
               onClick={() => {
                 if (focusTaskPackage.status === "pending_claim") {
-                  onOpenClaimDialog(focusTaskPackage.id);
+                  onOpenClaimDialog({ id: focusTaskPackage.id, title: focusTaskPackage.title });
                   return;
                 }
                 onNavigate(`/h5/tasks/package/${focusTaskPackage.id}`);
@@ -325,6 +350,47 @@ export function HomePage({
             title={t("home.noLeaderboard")}
           />
         </section>
+      ) : null}
+
+      {certificationPromptVisible ? (
+        <div className="h5-member-claim-confirm-backdrop" role="presentation">
+          <article
+            aria-modal="true"
+            className="h5-card h5-member-claim-confirm h5-member-certification-dialog"
+            role="dialog"
+          >
+            <SectionHeader title={t("home.certificationModalTitle")} />
+            <div className="h5-card-stack">
+              <p className="muted">{t("home.certificationModalBody")}</p>
+              <div className="h5-member-certification-metrics">
+                <div className="h5-member-certification-metric">
+                  <span>{t("home.certificationRequiredLabel")}</span>
+                  <strong>{formatMoney(certificationRequiredAmount, dashboard.wallet.currency)}</strong>
+                </div>
+                <div className="h5-member-certification-metric">
+                  <span>{t("home.certificationCurrentRechargeLabel")}</span>
+                  <strong>{formatMoney(certificationCurrentRechargeAmount, dashboard.wallet.currency)}</strong>
+                </div>
+                <div className="h5-member-certification-metric">
+                  <span>{t("home.certificationRemainingLabel")}</span>
+                  <strong>{formatMoney(certificationRemainingAmount, dashboard.wallet.currency)}</strong>
+                </div>
+              </div>
+            </div>
+            <div className="h5-member-card-actions">
+              <button
+                className="seed-button seed-button-secondary"
+                onClick={() => setCertificationPromptDismissed(true)}
+                type="button"
+              >
+                {t("home.certificationLater")}
+              </button>
+              <button className="seed-button" onClick={() => onNavigate(certificationRedirectPath)} type="button">
+                {t("home.actionGoRecharge")}
+              </button>
+            </div>
+          </article>
+        </div>
       ) : null}
     </section>
   );

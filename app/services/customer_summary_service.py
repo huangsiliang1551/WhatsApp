@@ -61,6 +61,8 @@ class CustomerSummaryService:
         # Detect multi-IP registration for the same phone number
         registration_ips: list[str] = []
         multi_ip = False
+        same_ip_user_count = 0
+        registration_location = self._format_registration_location(user.registration_ip)
         if user.has_phone:
             phone_identity = self._session.scalars(
                 select(UserIdentity).where(
@@ -81,6 +83,17 @@ class CustomerSummaryService:
                 registration_ips = sorted(ips)
                 multi_ip = len(registration_ips) > 1
 
+        if user.registration_ip:
+            same_ip_user_count = int(
+                self._session.scalar(
+                    select(func.count(AppUser.id)).where(
+                        AppUser.account_id == user.account_id,
+                        AppUser.registration_ip == user.registration_ip,
+                    )
+                )
+                or 0
+            )
+
         return {
             "id": user.id,
             "public_user_id": user.public_user_id,
@@ -90,8 +103,19 @@ class CustomerSummaryService:
             "lifecycle_status": user.lifecycle_status,
             "registration_ip": user.registration_ip,
             "registration_ips": registration_ips,
+            "registration_location": registration_location,
+            "same_ip_user_count": same_ip_user_count,
             "multi_ip": multi_ip,
         }
+
+    @staticmethod
+    def _format_registration_location(ip: str | None) -> str:
+        if not ip:
+            return "-"
+        normalized = ip.strip().lower()
+        if normalized in {"127.0.0.1", "::1", "localhost"}:
+            return "本机"
+        return "-"
 
     async def _get_conversations(self, customer_id: str, account_id: str | None = None) -> dict:
         query = select(Conversation).where(Conversation.customer_id == customer_id)
@@ -134,7 +158,14 @@ class CustomerSummaryService:
             query = query.where(WalletAccount.account_id == account_id)
         wallet = self._session.execute(query).scalar_one_or_none()
         if wallet is None:
-            return {"balance": 0, "total_recharged": 0, "total_withdrawn": 0, "recent_transactions": []}
+            return {
+                "balance": 0,
+                "system_balance": 0,
+                "task_balance": 0,
+                "total_recharged": 0,
+                "total_withdrawn": 0,
+                "recent_transactions": [],
+            }
 
         wa_id = wallet.id
         ledger_query = select(WalletLedgerEntry).where(
@@ -164,6 +195,8 @@ class CustomerSummaryService:
 
         return {
             "balance": float(wallet.system_balance + wallet.task_balance),
+            "system_balance": float(wallet.system_balance),
+            "task_balance": float(wallet.task_balance),
             "total_recharged": round(total_recharged, 2) if entries else 0,
             "total_withdrawn": round(total_withdrawn, 2),
             "recent_transactions": recent,

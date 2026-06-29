@@ -27,6 +27,7 @@ from app.core.metrics import (
 from app.core.settings import Settings, get_settings
 from app.providers.messaging.whatsapp_provider import WhatsAppProvider
 from app.schemas.whatsapp_webhook import WhatsAppWebhookPayload
+from app.services.messaging_dispatch import build_outbound_dispatch_request
 from app.services.chat import process_inbound_message
 from app.services.media_asset_service import MediaAssetService
 from app.services.media_message_processor import MediaMessageProcessor
@@ -39,6 +40,10 @@ from app.services.queue_service import QueueService
 from app.services.runtime_state import RuntimeStateStore
 from app.services.template_service import TemplateService
 from app.services.translation_service import TranslationService
+from app.services.whatsapp_inbound_command_router import (
+    WhatsAppInboundCommandRouter,
+    WhatsAppInboundRouteResult,
+)
 from sqlalchemy.orm import Session
 
 import structlog
@@ -525,6 +530,98 @@ def _sum_root_webhook_scope_metric(
     return sum(int(result.get(key, 0)) for result in scoped_results)
 
 
+async def _dispatch_routed_reply(
+    *,
+    route_result: WhatsAppInboundRouteResult,
+    normalized: object,
+    runtime_state_store: RuntimeStateStore,
+    provider: WhatsAppProvider,
+    settings: Settings,
+) -> dict[str, object]:
+    normalized_conversation_id = str(getattr(normalized, "conversation_id"))
+    normalized_user_id = str(getattr(normalized, "user_id"))
+    normalized_account_id = str(getattr(normalized, "account_id"))
+    normalized_phone_number_id = getattr(normalized, "phone_number_id", None)
+    normalized_waba_id = getattr(normalized, "waba_id", None)
+    reply_text = route_result.reply_text or ""
+    conversation_id = route_result.conversation_scope_key or normalized_conversation_id
+
+    await runtime_state_store.ensure_conversation(
+        account_id=normalized_account_id,
+        conversation_id=conversation_id,
+        customer_id=normalized_user_id,
+        provider_phone_number_id=route_result.reply_phone_number_id or normalized_phone_number_id,
+    )
+    conversation = await runtime_state_store.get_conversation_model(
+        normalized_account_id,
+        conversation_id,
+    )
+    runtime_state_store.ensure_conversation_messaging_available(conversation)
+    if settings.test_mode:
+        dispatch_provider_name = provider.provider_name
+        dispatch_provider_message_id = (
+            f"test-route-{getattr(normalized, 'external_message_id', None) or conversation_id}"
+        )
+        dispatch_accepted = True
+    else:
+        dispatch_request = build_outbound_dispatch_request(
+            provider=provider,
+            conversation=conversation,
+            account_id=normalized_account_id,
+            conversation_id=conversation_id,
+            recipient_id=normalized_user_id,
+            text=reply_text,
+            metadata={
+                "delivery_mode": route_result.action,
+                "route_action": route_result.action,
+            },
+        )
+        dispatch_result = await provider.send_outbound(dispatch_request)
+        dispatch_provider_name = dispatch_result.provider_name
+        dispatch_provider_message_id = dispatch_result.provider_message_id
+        dispatch_accepted = dispatch_result.accepted
+    await runtime_state_store.record_outbound_message(
+        account_id=normalized_account_id,
+        conversation_id=conversation_id,
+        recipient_id=normalized_user_id,
+        text=reply_text,
+        language_code=None,
+        translated_text=None,
+        translated_language_code=None,
+        delivery_mode=route_result.action,
+        ai_generated=False,
+        payload={
+            "provider": dispatch_provider_name,
+            "provider_message_id": dispatch_provider_message_id,
+            "provider_accepted": dispatch_accepted,
+            "text": reply_text,
+            "delivery_mode": route_result.action,
+            "route_action": route_result.action,
+            "waba_id": route_result.reply_waba_id or normalized_waba_id,
+            "phone_number_id": route_result.reply_phone_number_id or normalized_phone_number_id,
+        },
+        provider_message_id=dispatch_provider_message_id,
+    )
+    return {
+        "action": route_result.action,
+        "handled": route_result.handled,
+        "should_enter_ai": route_result.should_enter_ai,
+        "reply_text": reply_text,
+        "invite_link": route_result.invite_link,
+        "site_id": route_result.site_id,
+        "account_id": route_result.account_id,
+        "user_id": route_result.user_id,
+        "conversation_id": conversation_id,
+        "outbound": {
+            "provider": dispatch_provider_name,
+            "provider_message_id": dispatch_provider_message_id,
+            "accepted": dispatch_accepted,
+            "delivery_mode": route_result.action,
+            "text": reply_text,
+        },
+    }
+
+
 async def _verify_whatsapp_webhook_for_scope(
     *,
     account_id: str,
@@ -790,7 +887,7 @@ async def _receive_whatsapp_webhook_for_scope(
         meta_account_registry.record_webhook_runtime_result(
             account_id=account_id,
             waba_id=waba_id,
-            status="verification_pending",
+            status="signature_unavailable",
             error_message="missing_app_secret",
         )
         runtime_state_store.add_audit_log(
@@ -1012,6 +1109,7 @@ async def _receive_whatsapp_webhook_for_scope(
         messaging_provider=provider,
         media_asset_service=media_asset_service,
     )
+    inbound_command_router = WhatsAppInboundCommandRouter(session=session, settings=settings)
 
     results: list[dict[str, object]] = []
     accepted_messages = 0
@@ -1114,6 +1212,82 @@ async def _receive_whatsapp_webhook_for_scope(
         # gate production processing. ``_reset_message_dedup`` is kept only as
         # a test helper.
         message_id = normalized.external_message_id or ""
+
+        try:
+            route_result = inbound_command_router.try_handle_inbound(
+                text=normalized.text,
+                wa_id=normalized.user_id,
+                inbound_phone_number_id=normalized.phone_number_id or "",
+                inbound_waba_id=normalized.waba_id or "",
+                inbound_message_id=normalized.external_message_id,
+            )
+        except Exception:
+            processing_failures += 1
+            message_processing_failures_total.labels(
+                provider=provider.provider_name,
+                stage="webhook_inbound_route",
+            ).inc()
+            logger.exception(
+                "webhook_inbound_command_route_failed",
+                account_id=account_id,
+                waba_id=waba_id,
+                message_id=message_id,
+            )
+            continue
+
+        if route_result.action != "unknown_phone_number" and route_result.handled:
+            try:
+                if route_result.reply_text:
+                    result = await _dispatch_routed_reply(
+                        route_result=route_result,
+                        normalized=normalized,
+                        runtime_state_store=runtime_state_store,
+                        provider=provider,
+                        settings=settings,
+                    )
+                else:
+                    result = {
+                        "action": route_result.action,
+                        "handled": route_result.handled,
+                        "should_enter_ai": route_result.should_enter_ai,
+                        "reply_text": route_result.reply_text,
+                        "invite_link": route_result.invite_link,
+                        "site_id": route_result.site_id,
+                        "account_id": route_result.account_id,
+                        "user_id": route_result.user_id,
+                    }
+                results.append(result)
+                accepted_messages += 1
+                accepted_message_phone_counts[normalized.phone_number_id or "unknown"] = (
+                    accepted_message_phone_counts.get(normalized.phone_number_id or "unknown", 0) + 1
+                )
+                business_inbound_messages_total.labels(
+                    provider=provider.provider_name,
+                    outcome="accepted",
+                ).inc()
+            except Exception:
+                processing_failures += 1
+                message_processing_failures_total.labels(
+                    provider=provider.provider_name,
+                    stage="webhook_inbound_route_dispatch",
+                ).inc()
+                logger.exception(
+                    "webhook_inbound_command_dispatch_failed",
+                    account_id=account_id,
+                    waba_id=waba_id,
+                    message_id=message_id,
+                    route_action=route_result.action,
+                )
+            continue
+
+        if route_result.action != "unknown_phone_number" and route_result.conversation_scope_key:
+            normalized.conversation_id = route_result.conversation_scope_key
+        if route_result.action != "unknown_phone_number" and route_result.message_routing_metadata:
+            normalized.metadata = {
+                **(normalized.metadata or {}),
+                **route_result.message_routing_metadata,
+                "conversation_scope_key": route_result.conversation_scope_key,
+            }
 
         # BE2-009: Download and store inbound media
         await media_processor.process_inbound_media(normalized)
@@ -1293,10 +1467,22 @@ async def _receive_whatsapp_webhook_for_scope(
         provider=provider.provider_name,
         outcome="accepted",
     ).inc(len(results))
+    for phone_number_id, count in accepted_message_phone_counts.items():
+        whatsapp_webhook_messages_scoped_total.labels(
+            account_id=account_id,
+            waba_id=waba_id,
+            phone_number_id=phone_number_id,
+        ).inc(count)
     whatsapp_webhook_status_updates_total.labels(
         provider=provider.provider_name,
         outcome="accepted",
     ).inc(accepted_status_updates)
+    for phone_number_id, count in accepted_status_phone_counts.items():
+        whatsapp_webhook_status_updates_scoped_total.labels(
+            account_id=account_id,
+            waba_id=waba_id,
+            phone_number_id=phone_number_id,
+        ).inc(count)
 
     return {
         "account_id": account_id,

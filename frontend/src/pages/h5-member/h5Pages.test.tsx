@@ -5,6 +5,30 @@ import { t } from "./i18n";
 
 // Custom localStorage mock (same pattern as existing tests)
 const storage = new Map<string, string>();
+const originalXmlHttpRequest = globalThis.XMLHttpRequest;
+
+class MockXMLHttpRequest {
+  readyState = 4;
+  status = 200;
+  response = null;
+  responseText = "";
+  responseType = "";
+  onreadystatechange: (() => void) | null = null;
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  open(): void {}
+  setRequestHeader(): void {}
+  abort(): void {}
+  addEventListener(): void {}
+  removeEventListener(): void {}
+  getAllResponseHeaders(): string { return ""; }
+  getResponseHeader(): string | null { return null; }
+  send(): void {
+    this.onreadystatechange?.();
+    this.onload?.();
+  }
+}
 
 function installLocalStorageMock(): void {
   Object.defineProperty(window, "localStorage", {
@@ -30,10 +54,20 @@ beforeEach(() => {
   storage.clear();
   installLocalStorageMock();
   storage.set("h5-lang", "zh-CN");
+  Object.defineProperty(globalThis, "XMLHttpRequest", {
+    configurable: true,
+    writable: true,
+    value: MockXMLHttpRequest,
+  });
 });
 
 afterEach(() => {
   storage.clear();
+  Object.defineProperty(globalThis, "XMLHttpRequest", {
+    configurable: true,
+    writable: true,
+    value: originalXmlHttpRequest,
+  });
 });
 
 describe("Shared utilities", () => {
@@ -240,6 +274,15 @@ describe("Shared utilities", () => {
       const source = readFileSync(file, "utf8");
       expect(source).not.toMatch(/from\s+["']\.\/shared["']/);
     });
+  });
+
+  it("keeps important unread message toast promotion in the app hook while task package manual-add notices stay page-local", () => {
+    const hookSource = readFileSync("src/pages/h5-member/useH5MemberApp.ts", "utf8");
+
+    expect(hookSource).toMatch(/isImportantMessage/);
+    expect(hookSource).toMatch(/importantToast/);
+    expect(hookSource).toMatch(/shownImportantToastKeysRef/);
+    expect(hookSource).not.toMatch(/adjustmentNotice/);
   });
 
   it("returns production-ready english whatsapp support copy", () => {
@@ -760,10 +803,14 @@ describe("Shared utilities", () => {
     const css = readFileSync("src/styles/h5-member.css", "utf8");
     const timeMarks = [1000, 1200, 1200, 1200];
     const dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => timeMarks.shift() ?? 1200);
+    const inlineImages = [
+      "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%2399c'/%3E%3C/svg%3E",
+      "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%239c9'/%3E%3C/svg%3E",
+    ];
 
     const { container } = render(
       <ImageViewer
-        images={["https://example.com/proof-a.jpg", "https://example.com/proof-b.jpg"]}
+        images={inlineImages}
         onClose={() => undefined}
       />,
     );
@@ -1579,7 +1626,8 @@ describe("TasksPage", () => {
     expect(inProgressHeading.compareDocumentPosition(signInButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
-  it("renders condensed task card metrics, exposes full button copy, and a claim action for pending packages", async () => {
+  it("renders task cards with only batch progress, title, status, estimated reward, and the primary action", async () => {
+    storage.set("h5-lang", "en-US");
     const { TasksPage } = await import("./TasksPage");
     const onOpenClaimDialog = vi.fn();
 
@@ -1602,6 +1650,8 @@ describe("TasksPage", () => {
             rewardRatio: 0.18,
             rewardAmount: 36,
             products: [],
+            batchIndex: 1,
+            batchTotal: 5,
             completedCount: 0,
             totalCount: 3,
             systemBalance: 120,
@@ -1621,15 +1671,20 @@ describe("TasksPage", () => {
       />,
     );
 
-    expect(screen.getAllByText(t("tasks.remainingTime")).length).toBeGreaterThan(0);
-    expect(screen.getByText("02:00:00")).toBeTruthy();
-    expect(screen.getAllByText(t("tasks.totalCommission")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(t("tasks.typeGrowth")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Reward Ratio/).length).toBeGreaterThan(0);
+    const taskCard = document.querySelector(".h5-task-instance-card");
+    expect(taskCard).toBeTruthy();
+    expect(taskCard?.textContent).toContain("Today's Task 1/5");
+    expect(taskCard?.textContent).toContain("Growth Package");
+    expect(taskCard?.textContent).toContain(t("tasks.groupAvailable"));
+    expect(taskCard?.textContent).toContain("Est. Reward: $36.00");
+    expect(taskCard?.textContent).not.toContain(t("tasks.remainingTime"));
+    expect(taskCard?.textContent).not.toContain(t("tasks.totalCommission"));
+    expect(taskCard?.textContent).not.toContain("Reward Ratio");
+    expect(taskCard?.textContent).not.toContain("item(s)");
     expect(screen.getByRole("button", { name: t("tasks.signIn") }).getAttribute("title")).toBe(t("tasks.signIn"));
 
     fireEvent.click(screen.getAllByRole("button", { name: t("tasks.claim") })[0]);
-    expect(onOpenClaimDialog).toHaveBeenCalledWith("pkg-pending");
+    expect(onOpenClaimDialog).toHaveBeenCalledWith({ id: "pkg-pending", title: "Growth Package" });
   });
 
   it("surfaces a single execution focus card before the sign-in and overview blocks", async () => {
@@ -1705,7 +1760,7 @@ describe("TasksPage", () => {
     expect(onNavigate).toHaveBeenCalledWith("/h5/tasks/package/pkg-active");
   });
 
-  it("uses dedicated task progress, error, and action spacing classes instead of inline card chrome", async () => {
+  it("uses dedicated task error and action spacing classes without restoring deprecated task-card progress chrome", async () => {
     storage.set("h5-lang", "en-US");
     const { TasksPage } = await import("./TasksPage");
 
@@ -1748,10 +1803,9 @@ describe("TasksPage", () => {
     );
 
     expect(container.querySelector(".h5-signin-progress-fill-complete")).toBeTruthy();
-    expect(container.querySelector(".h5-task-card-progress")).toBeTruthy();
+    expect(container.querySelector(".h5-task-card-progress")).toBeNull();
     expect(container.querySelector(".h5-task-card-actions")).toBeTruthy();
     expect(container.querySelector(".h5-task-error-copy")).toBeTruthy();
-    expect(container.querySelector(".h5-task-card-progress")?.getAttribute("style") ?? "").not.toContain("margin-top");
   });
 });
 
@@ -1784,6 +1838,14 @@ describe("PackageDetailPage", () => {
           completedCount: 0,
           totalCount: 1,
           systemBalance: 100,
+          currentProduct: {
+            id: "prod-1",
+            productName: "Product 1",
+            imageUrl: "",
+            price: 20,
+            currency: "USD",
+            status: "available",
+          },
           products: [
             {
               id: "prod-1",
@@ -1834,6 +1896,14 @@ describe("PackageDetailPage", () => {
           completedCount: 0,
           totalCount: 1,
           systemBalance: 100,
+          currentProduct: {
+            id: "prod-2",
+            productName: "Product 2",
+            imageUrl: "",
+            price: 20,
+            currency: "USD",
+            status: "available",
+          },
           products: [
             {
               id: "prod-2",
@@ -1917,6 +1987,77 @@ describe("PackageDetailPage", () => {
     expect(screen.getByText(/Current Commission/)).toBeTruthy();
   });
 
+  it("shows task amount breakdown without surfacing the manual adjustment notice copy", async () => {
+    storage.set("h5-lang", "en-US");
+    const { PackageDetailPage } = await import("./PackageDetailPage");
+
+    render(
+      <PackageDetailPage
+        instance={{
+          id: "pkg-adjusted",
+          title: "Growth Package",
+          description: "desc",
+          type: "growth",
+          status: "active",
+          rewardRatio: 0.12,
+          rewardAmount: 48,
+          plannedAmount: 50,
+          systemGeneratedAmount: 50,
+          manualAddedAmount: 26,
+          effectiveAmount: 76,
+          hasAdjustmentNotice: true,
+          adjustmentNotice: "Task updated. Newly added items are now included in this package.",
+          completedCount: 1,
+          totalCount: 3,
+          systemBalance: 100,
+          currentCommission: 12,
+          totalCommission: 48,
+          countdownSeconds: 3661,
+          currentProduct: {
+            id: "prod-2",
+            productName: "Product 2",
+            imageUrl: "",
+            price: 28,
+            currency: "USD",
+            status: "available",
+          },
+          products: [
+            {
+              id: "prod-1",
+              productName: "Product 1",
+              imageUrl: "",
+              price: 20,
+              currency: "USD",
+              status: "completed",
+            },
+            {
+              id: "prod-2",
+              productName: "Product 2",
+              imageUrl: "",
+              price: 28,
+              currency: "USD",
+              status: "available",
+            },
+          ],
+        } as any}
+        actionName={null}
+        onStartProduct={vi.fn().mockResolvedValue({ success: true })}
+        onRetryProduct={vi.fn().mockResolvedValue({ success: true })}
+        onNavigate={vi.fn()}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText(/Planned Amount/i)).toBeTruthy();
+    expect(screen.getByText(/System Amount/i)).toBeTruthy();
+    expect(screen.getByText(/Manual Add Amount/i)).toBeTruthy();
+    expect(screen.getByText(/Effective Amount/i)).toBeTruthy();
+    expect(screen.getAllByText("$50.00").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("$26.00")).toBeTruthy();
+    expect(screen.getByText("$76.00")).toBeTruthy();
+    expect(screen.queryByText("Task updated. Newly added items are now included in this package.")).toBeNull();
+  });
+
   it("renders reward summary, completion steps, and notes support sections in order", async () => {
     const { PackageDetailPage } = await import("./PackageDetailPage");
     const onNavigate = vi.fn();
@@ -1977,6 +2118,182 @@ describe("PackageDetailPage", () => {
     expect(onNavigate).toHaveBeenCalledWith("/h5/tickets/new");
   });
 
+  it("renders only the current product card when currentProduct is provided", async () => {
+    const { PackageDetailPage } = await import("./PackageDetailPage");
+
+    render(
+      <PackageDetailPage
+        instance={{
+          id: "pkg-current-only",
+          title: "Growth Package",
+          description: "desc",
+          type: "growth",
+          status: "active",
+          rewardRatio: 0.12,
+          rewardAmount: 48,
+          completedCount: 1,
+          totalCount: 4,
+          systemBalance: 100,
+          currentCommission: 12,
+          totalCommission: 48,
+          countdownSeconds: 3661,
+          batchIndex: 2,
+          batchTotal: 5,
+          currentProduct: {
+            id: "prod-2",
+            productName: "Product 2",
+            imageUrl: "",
+            price: 28,
+            currency: "USD",
+            status: "available",
+          },
+          products: [
+            {
+              id: "prod-1",
+              productName: "Product 1",
+              imageUrl: "",
+              price: 20,
+              currency: "USD",
+              status: "completed",
+            },
+            {
+              id: "prod-2",
+              productName: "Product 2",
+              imageUrl: "",
+              price: 28,
+              currency: "USD",
+              status: "available",
+            },
+            {
+              id: "prod-3",
+              productName: "Product 3",
+              imageUrl: "",
+              price: 30,
+              currency: "USD",
+              status: "pending",
+            },
+          ],
+        } as any}
+        actionName={null}
+        onStartProduct={vi.fn().mockResolvedValue({ success: true })}
+        onRetryProduct={vi.fn().mockResolvedValue({ success: true })}
+        onNavigate={vi.fn()}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText("Product 2")).toBeTruthy();
+    expect(screen.queryByText("Product 1")).toBeNull();
+    expect(screen.queryByText("Product 3")).toBeNull();
+    expect(screen.getByText("2/5")).toBeTruthy();
+  });
+
+  it("shows a waiting hint instead of a blank product area when no current product is available yet", async () => {
+    storage.set("h5-lang", "en-US");
+    const { PackageDetailPage } = await import("./PackageDetailPage");
+
+    render(
+      <PackageDetailPage
+        instance={{
+          id: "pkg-waiting-product",
+          title: "Growth Package",
+          description: "desc",
+          type: "growth",
+          status: "active",
+          rewardRatio: 0.12,
+          rewardAmount: 48,
+          completedCount: 1,
+          totalCount: 4,
+          systemBalance: 100,
+          currentCommission: 12,
+          totalCommission: 48,
+          countdownSeconds: 3661,
+          currentProduct: null,
+          products: [
+            {
+              id: "prod-1",
+              productName: "Product 1",
+              imageUrl: "",
+              price: 20,
+              currency: "USD",
+              status: "completed",
+            },
+            {
+              id: "prod-2",
+              productName: "Product 2",
+              imageUrl: "",
+              price: 28,
+              currency: "USD",
+              status: "pending",
+            },
+          ],
+        } as any}
+        actionName={null}
+        onStartProduct={vi.fn().mockResolvedValue({ success: true })}
+        onRetryProduct={vi.fn().mockResolvedValue({ success: true })}
+        onNavigate={vi.fn()}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getAllByText(t("tasks.detailWaitingNextTask")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: t("tasks.productAvailable") })).toBeNull();
+    expect(screen.queryByRole("button", { name: t("tasks.productRunning") })).toBeNull();
+  });
+
+  it("does not expose a future available product when currentProduct is still null", async () => {
+    storage.set("h5-lang", "en-US");
+    const { PackageDetailPage } = await import("./PackageDetailPage");
+
+    render(
+      <PackageDetailPage
+        instance={{
+          id: "pkg-hide-future-product",
+          title: "Growth Package",
+          description: "desc",
+          type: "growth",
+          status: "active",
+          rewardRatio: 0.12,
+          rewardAmount: 48,
+          completedCount: 1,
+          totalCount: 4,
+          systemBalance: 100,
+          currentCommission: 12,
+          totalCommission: 48,
+          countdownSeconds: 3661,
+          currentProduct: null,
+          products: [
+            {
+              id: "prod-1",
+              productName: "Product 1",
+              imageUrl: "",
+              price: 20,
+              currency: "USD",
+              status: "completed",
+            },
+            {
+              id: "prod-2",
+              productName: "Product 2",
+              imageUrl: "",
+              price: 28,
+              currency: "USD",
+              status: "available",
+            },
+          ],
+        } as any}
+        actionName={null}
+        onStartProduct={vi.fn().mockResolvedValue({ success: true })}
+        onRetryProduct={vi.fn().mockResolvedValue({ success: true })}
+        onNavigate={vi.fn()}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getAllByText(t("tasks.detailWaitingNextTask")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Product 2")).toBeNull();
+    expect(screen.queryByRole("button", { name: t("tasks.productAvailable") })).toBeNull();
+  });
+
   it("surfaces a dedicated task focus card before the reward summary", async () => {
     storage.set("h5-lang", "en-US");
     const { PackageDetailPage } = await import("./PackageDetailPage");
@@ -1997,6 +2314,14 @@ describe("PackageDetailPage", () => {
           currentCommission: 12,
           totalCommission: 48,
           countdownSeconds: 3661,
+          currentProduct: {
+            id: "prod-1",
+            productName: "Product 1",
+            imageUrl: "",
+            price: 20,
+            currency: "USD",
+            status: "available",
+          },
           products: [
             {
               id: "prod-1",
@@ -2053,6 +2378,14 @@ describe("PackageDetailPage", () => {
           currentCommission: 12,
           totalCommission: 48,
           countdownSeconds: 3661,
+          currentProduct: {
+            id: "prod-1",
+            productName: "Product 1",
+            imageUrl: "",
+            price: 20,
+            currency: "USD",
+            status: "available",
+          },
           products: [
             {
               id: "prod-1",
@@ -2255,6 +2588,14 @@ describe("PackageDetailPage", () => {
           completedCount: 0,
           totalCount: 1,
           systemBalance: 100,
+          currentProduct: {
+            id: "prod-fallback",
+            productName: "Product fallback",
+            imageUrl: "",
+            price: 20,
+            currency: "USD",
+            status: "available",
+          },
           products: [
             {
               id: "prod-fallback",
@@ -2992,6 +3333,81 @@ describe("HomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: t("profile.title") }));
 
     expect(onNavigate).toHaveBeenCalledWith("/h5/me");
+  });
+
+  it("routes generic home CTA actions to their explicit entry-state path", async () => {
+    const { HomePage } = await import("./HomePage");
+    const onNavigate = vi.fn();
+
+    render(
+      <HomePage
+        dashboard={{
+          site: {
+            site_key: "mall-cn",
+            brand_name: "Mall",
+            tagline: "tagline",
+            accent_color: "#1677ff",
+          },
+          member: {
+            accountId: "38271456",
+            accountIdMasked: "38****56",
+            phone: "13800000000",
+            publicUserId: "h5-38271456",
+            displayName: "Demo Member",
+            inviteCode: "INV-ABCD1234",
+            createdAt: "2026-06-20T00:00:00.000Z",
+          },
+          wallet: {
+            currency: "USD",
+            systemBalance: 0,
+            taskBalance: 0,
+            withdrawThreshold: 100,
+            shortfallAmount: 100,
+            canWithdraw: false,
+          },
+          unreadCount: 0,
+          pendingClaimCount: 0,
+          activeCount: 0,
+          expiringCount: 0,
+          recentMessages: [],
+          leaderboard: [],
+          verification: {
+            currentStatus: "not_submitted",
+            hasActiveRequest: false,
+          },
+          fragments: {
+            totalCount: 3,
+            completedCount: 0,
+            missingCount: 3,
+            canExchange: false,
+            shippingOrderCount: 0,
+            latestShippingStatus: null,
+            rewardName: null,
+          },
+        }}
+        session={null}
+        memberPhoneMasked="138****0000"
+        focusTaskPackage={null}
+        primaryHomeAction={{
+          title: t("home.actionBindWhatsApp"),
+          description: t("home.actionBindWhatsAppDesc"),
+          buttonLabel: t("home.actionGoBindWhatsApp"),
+          kind: "navigate",
+          path: "/h5/whatsapp",
+        }}
+        unreadMessageCount={0}
+        siteKey="mall-cn"
+        actionName={null}
+        homeWalletBalance={null}
+        notificationCount={0}
+        onNavigate={onNavigate}
+        onOpenClaimDialog={vi.fn()}
+        onShowTransferAllConfirm={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t("home.actionGoBindWhatsApp") }));
+    expect(onNavigate).toHaveBeenCalledWith("/h5/whatsapp");
   });
 
   it("renders growth-home sections in the expected order", async () => {
@@ -4633,10 +5049,14 @@ describe("SettingsPage", () => {
     );
 
     fireEvent.submit(screen.getByRole("button", { name: t("settings.saveProfile") }).closest("form")!);
-    expect(await screen.findByText(t("notification.profileUpdated"))).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(screen.getByText(t("notification.profileUpdated"))).toBeTruthy();
+    });
 
     fireEvent.submit(screen.getByRole("button", { name: t("settings.modifyPassword") }).closest("form")!);
-    expect(await screen.findByText(t("notification.passwordChanged"))).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(screen.getByText(t("notification.passwordChanged"))).toBeTruthy();
+    });
   });
 });
 

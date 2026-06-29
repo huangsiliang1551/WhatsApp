@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.auth import RequestActor
 from app.db.models import (
     AppUser,
     MemberNotification,
@@ -20,6 +21,8 @@ from app.schemas.platform_withdrawals import (
     PlatformWithdrawalResponse,
     PlatformWithdrawalStatus,
 )
+from app.services.data_scope_filter_service import DataScopeFilterService
+from app.services.withdrawal_risk_service import WithdrawalRiskService
 from app.services.wallet_ledger_service import WalletLedgerService
 
 TERMINAL_WITHDRAWAL_STATUSES = {"rejected", "paid"}
@@ -49,6 +52,7 @@ class PlatformWithdrawalService:
         account_id: str | None,
         allowed_account_ids: set[str] | None,
         status: PlatformWithdrawalStatus | None,
+        scope_actor: RequestActor | None = None,
     ) -> list[PlatformWithdrawalResponse]:
         query = select(WithdrawalRequest).order_by(
             WithdrawalRequest.created_at.desc(),
@@ -60,6 +64,8 @@ class PlatformWithdrawalService:
             query = query.where(WithdrawalRequest.account_id.in_(sorted(allowed_account_ids)))
         if status is not None:
             query = query.where(WithdrawalRequest.status == status)
+        if scope_actor is not None:
+            query = DataScopeFilterService(self._session).filter_withdrawals(query, scope_actor, mode="current")
         withdrawals = self._session.scalars(query).all()
         return self._serialize_withdrawals(withdrawals)
 
@@ -110,6 +116,12 @@ class PlatformWithdrawalService:
             )
         if status == "rejected" and not (rejection_reason or "").strip():
             raise ValueError("Rejected withdrawals require a rejection reason.")
+        decision = WithdrawalRiskService(session=self._session).evaluate_for_transition(
+            withdrawal=withdrawal,
+            next_status=status,
+        )
+        if not decision.allowed:
+            raise ValueError(decision.message or "Withdrawal risk policy blocked the transition.")
 
         now = utc_now()
         review_note = (note or "").strip() or self._default_status_note(status)

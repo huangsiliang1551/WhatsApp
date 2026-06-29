@@ -19,6 +19,7 @@ from app.core.auth import RequestActor
 from app.core.settings import get_settings
 from app.db.models import Conversation, HandoverLog, Message
 from app.services.admin_auth_service import AdminAuthService
+from app.services.data_scope_filter_service import DataScopeFilterService
 
 logger = structlog.get_logger(__name__)
 
@@ -41,6 +42,12 @@ def _query_events(
     (``"new_message"`` or ``"handover"``).
     """
     events: list[dict] = []
+    scoped_conversation_ids = None
+    if actor is not None and not actor.is_super_admin:
+        scoped_conversation_ids = DataScopeFilterService(session).filter_conversations(
+            select(Conversation.id),
+            actor,
+        )
 
     # 1. New messages — join Conversation to get external ID (frontend uses external ID, not UUID)
     msg_query = (
@@ -52,6 +59,8 @@ def _query_events(
     )
     if account_id:
         msg_query = msg_query.where(Message.account_id == account_id)
+    if scoped_conversation_ids is not None:
+        msg_query = msg_query.where(Conversation.id.in_(scoped_conversation_ids))
 
     for msg, ext_conv_id in session.execute(msg_query).all():
         if actor is not None and not actor.can_access_account(msg.account_id):
@@ -68,21 +77,24 @@ def _query_events(
 
     # 2. Handover logs
     ho_query = (
-        select(HandoverLog)
+        select(HandoverLog, Conversation.external_conversation_id)
+        .join(Conversation, HandoverLog.conversation_id == Conversation.id)
         .where(HandoverLog.created_at > since_dt)
         .order_by(HandoverLog.created_at.asc())
         .limit(20)
     )
     if account_id:
         ho_query = ho_query.where(HandoverLog.account_id == account_id)
+    if scoped_conversation_ids is not None:
+        ho_query = ho_query.where(Conversation.id.in_(scoped_conversation_ids))
 
-    for log in session.scalars(ho_query).all():
+    for log, ext_conv_id in session.execute(ho_query).all():
         if actor is not None and not actor.can_access_account(log.account_id):
             continue
         events.append({
             "event": "handover",
             "account_id": log.account_id,
-            "conversation_id": log.conversation_id,
+            "conversation_id": ext_conv_id,
             "from_mode": log.from_mode,
             "to_mode": log.to_mode,
             "agent_id": log.triggered_by_id,

@@ -24,6 +24,8 @@ import {
   getTaskPackageDetail,
   getTaskPackageDetailApi,
   getTaskPackagesApi,
+  getTaskInstanceDetailApi,
+  getTaskInstancesApi,
   getWalletBalanceApi,
   getWalletTransactionsApi,
   getWhatsAppBinding,
@@ -93,6 +95,7 @@ import {
 import { sessionManager } from "../../services/h5SessionManager";
 import {
   buildH5Path,
+  buildH5LoginRedirectPath,
   buildPromotionInvitees,
   buildPromotionLink,
   createVerificationSummaryFromRequest,
@@ -117,7 +120,7 @@ import { DEFAULT_SHIPPING_FORM } from "./formDefaults";
 import { DEFAULT_TICKET_DRAFT } from "./ticketDefaults";
 import { t } from "./i18n";
 
-// ─── Route types ─────────────────────────────────────────────────
+// 鈹€鈹€鈹€ Route types 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 export type ParsedRoute =
   | { page: "login"; siteKey: string }
@@ -141,31 +144,39 @@ export type ParsedRoute =
   | { page: "whatsapp"; siteKey: string }
   | { page: "invite"; siteKey: string };
 
-// ─── Local type aliases ──────────────────────────────────────────
+// 鈹€鈹€鈹€ Local type aliases 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 type TaskPackageListItem = Awaited<ReturnType<typeof listTaskPackages>>[number];
 type TaskPackageDetailView = Awaited<ReturnType<typeof getTaskPackageDetail>>;
+
+type ClaimDialogPackage = {
+  id: string;
+  title: string;
+};
 
 type ImportantToastCandidate = {
   key: string;
   message: string;
 };
 
-// ─── Hook ─────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ Hook 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 export function useH5MemberApp(
   route: ParsedRoute,
   navigate: (path: string) => void,
+  locationKey = "/",
 ) {
   const taskRouteFilter = route.page === "tasks" ? route.filter : "all";
 
-  // ── State ──────────────────────────────────────────────────────
+  // 鈹€鈹€ State 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   const [session, setSession] = useState<H5MemberSession | null>(null);
   const [memberPhoneMasked, setMemberPhoneMasked] = useState("");
   const [dashboard, setDashboard] = useState<H5HomeDashboard | null>(null);
   const [taskPackages, setTaskPackages] = useState<TaskPackageListItem[]>([]);
   const [taskPackageDetail, setTaskPackageDetail] = useState<TaskPackageDetailView | null>(null);
+  const [taskViewRefreshToken, setTaskViewRefreshToken] = useState(0);
+  const [claimDialogPackageState, setClaimDialogPackageState] = useState<ClaimDialogPackage | null>(null);
   const [messages, setMessages] = useState<H5MessageItem[]>([]);
   const [walletSummary, setWalletSummary] = useState<H5WalletSummary | null>(null);
   const [walletTransactions, setWalletTransactions] = useState<H5WalletTransaction[]>([]);
@@ -225,7 +236,7 @@ export function useH5MemberApp(
   const [taskPage, setTaskPage] = useState(1);
   const [hasMoreTasks, setHasMoreTasks] = useState(false);
 
-  // ── H52-012: Message pagination & ticket state ────────────────
+  // 鈹€鈹€ H52-012: Message pagination & ticket state 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   const [messagePage, setMessagePage] = useState(1);
   const [messageTotalMessages, setMessageTotalMessages] = useState(0);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -233,26 +244,26 @@ export function useH5MemberApp(
   const [ticketsLoading, setTicketsLoading] = useState(false);
   const [ticketsError, setTicketsError] = useState<string | null>(null);
 
-  // ── H52-014: Fragment loading/error state ──────────────────
+  // 鈹€鈹€ H52-014: Fragment loading/error state 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   const [fragmentsLoading, setFragmentsLoading] = useState(false);
   const [fragmentsError, setFragmentsError] = useState<string | null>(null);
 
-  // ── H52-013: Orders pagination state ──────────────────────────
+  // 鈹€鈹€ H52-013: Orders pagination state 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   const [ordersPage, setOrdersPage] = useState(1);
   const [ordersTotal, setOrdersTotal] = useState(0);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [ordersRealCount, setOrdersRealCount] = useState(0);
 
-  // ── Verification form state (new API) ──────────────────────
+  // 鈹€鈹€ Verification form state (new API) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   const [verificationName, setVerificationName] = useState("");
   const [verificationIdNumber, setVerificationIdNumber] = useState("");
   const [verificationPhotoFiles, setVerificationPhotoFiles] = useState<File[]>([]);
 
-  // ── WhatsApp form state (new API) ──────────────────────────
+  // 鈹€鈹€ WhatsApp form state (new API) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   const [whatsappPhone, setWhatsappPhone] = useState("");
 
-  // ── H52-016: Chat state ──────────────────────────────────────
+  // 鈹€鈹€ H52-016: Chat state 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   const [chatMessages, setChatMessages] = useState<H5ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatPage, setChatPage] = useState(1);
@@ -260,9 +271,10 @@ export function useH5MemberApp(
   const [chatHasMore, setChatHasMore] = useState(false);
 
   const requestIdRef = useRef(0);
+  const latestMessagePageRef = useRef(1);
   const shownImportantToastKeysRef = useRef<Set<string>>(new Set());
 
-  // ── Effects ────────────────────────────────────────────────────
+  // 鈹€鈹€ Effects 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   useEffect(() => {
     setTaskFilter(taskRouteFilter);
@@ -276,7 +288,7 @@ export function useH5MemberApp(
 
   useEffect(() => {
     if (!dashboard) return;
-    setSettingsPhone(dashboard.member.phone);
+    setSettingsPhone(dashboard.member.phone ?? dashboard.member.username ?? "");
     setSettingsAvatarUrl(dashboard.member.avatarUrl ?? null);
   }, [dashboard]);
 
@@ -293,24 +305,11 @@ export function useH5MemberApp(
   }, [error]);
 
   useEffect(() => {
-    if (!importantToast) return;
-    const timer = window.setTimeout(() => {
-      setImportantToast((current) => (current?.key === importantToast.key ? null : current));
-    }, importantToast.duration);
-    return () => window.clearTimeout(timer);
-  }, [importantToast]);
-
-  useEffect(() => {
-    shownImportantToastKeysRef.current.clear();
-    setImportantToast(null);
-  }, [route.siteKey, session?.accountId]);
-
-  useEffect(() => {
     void loadRouteData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.page, route.siteKey, "packageId" in route ? route.packageId : "", "ticketId" in route ? route.ticketId : ""]);
 
-  // ── Helper functions ───────────────────────────────────────────
+  // 鈹€鈹€ Helper functions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   function handleAuthRequiredActionError(error: unknown): boolean {
     if (!isH5AuthRequiredError(error)) {
@@ -319,7 +318,7 @@ export function useH5MemberApp(
     setSession(null);
     setDashboard(null);
     setTicketDetail(null);
-    navigate(buildH5Path("/h5/login", route.siteKey));
+    navigate(buildH5LoginRedirectPath(locationKey, route.siteKey));
     return true;
   }
 
@@ -392,19 +391,14 @@ export function useH5MemberApp(
       if (requestId !== requestIdRef.current) return;
       setSession(activeSession);
 
-      // 两套 localStorage session 同步检查：
-      // - sessionManager (h5_access_token) 有有效期
-      // - MEMBER_SESSION_KEY (readSession) 永不过期
-      // 必须两者都通过才算有效登录态，防止过期 token 导致 login ↔ home 死循环
-      const isSessionManagerAuth = sessionManager.isAuthenticated();
-      if (activeSession && !isSessionManagerAuth) {
-        // 令牌已过期但 MEMBER_SESSION_KEY 残留 → 清除残留避免死循环
-        try { localStorage.removeItem("frontend.h5.member-session.v1"); } catch { /* storage unavailable */ }
-      }
-      const isEffectivelyAuth = !!(activeSession && isSessionManagerAuth);
+      // 涓ゅ localStorage session 鍚屾妫€鏌ワ細
+      // - sessionManager (h5_access_token) 鏈夋湁鏁堟湡
+      // - MEMBER_SESSION_KEY (readSession) 姘镐笉杩囨湡
+      // 蹇呴』涓よ€呴兘閫氳繃鎵嶇畻鏈夋晥鐧诲綍鎬侊紝闃叉杩囨湡 token 瀵艰嚧 login 鈫?home 姝诲惊鐜?
+      const isEffectivelyAuth = !!activeSession;
 
       if (!isEffectivelyAuth && route.page !== "login" && route.page !== "register") {
-        navigate(buildH5Path("/h5/login", route.siteKey));
+        navigate(buildH5LoginRedirectPath(locationKey, route.siteKey));
         return;
       }
       if (isEffectivelyAuth && (route.page === "login" || route.page === "register")) {
@@ -537,16 +531,19 @@ export function useH5MemberApp(
           setChatPage(1);
           setChatLoading(true);
           try {
-            // Try to load initial messages; on error just show empty chat
             try {
               const msgResult = await getMessagesApi({ page: 1, size: 30 });
               setChatMessages(msgResult.items);
               setChatTotal(msgResult.total);
               setChatHasMore(msgResult.items.length >= 30);
-            } catch {
+            } catch (chatError) {
+              if (handleAuthRequiredActionError(chatError)) {
+                return;
+              }
               setChatMessages([]);
               setChatTotal(0);
               setChatHasMore(false);
+              setError(chatError instanceof Error ? chatError.message : t("notification.messageLoadFailed"));
             }
           } finally {
             setChatLoading(false);
@@ -589,28 +586,26 @@ export function useH5MemberApp(
     }
   }
 
-  // ── Event Handlers ─────────────────────────────────────────────
+  // 鈹€鈹€ Event Handlers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   async function handleLogin(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const submittedUsername = String(formData.get("loginUsername") ?? loginPhone).trim();
+    const submittedPassword = String(formData.get("loginPassword") ?? loginPassword).trim();
     setActionName("login");
     setError(null);
     try {
       const profile = await loginMember({
         siteKey: route.siteKey,
-        phone: loginPhone,
-        password: loginPassword,
+        username: submittedUsername,
+        password: submittedPassword,
       });
-      // Store session tokens
-      sessionManager.setSession(
-        "mock_access_" + profile.accountId,
-        "mock_refresh_" + profile.accountId,
-        604800, // 7 days
-        rememberMe,
-      );
+      setLoginPhone(submittedUsername);
+      setLoginPassword(submittedPassword);
       sessionManager.setUserInfo({
         accountId: profile.accountId,
-        phone: profile.phone,
+        phone: profile.phone ?? profile.username ?? "",
         publicUserId: profile.publicUserId,
         displayName: profile.displayName,
         inviteCode: profile.inviteCode,
@@ -633,7 +628,13 @@ export function useH5MemberApp(
 
   async function handleRegister(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (registerPassword.trim() !== registerConfirmPassword.trim()) {
+    const formData = new FormData(event.currentTarget);
+    const submittedUsername = String(formData.get("registerUsername") ?? registerPhone).trim();
+    const submittedPassword = String(formData.get("registerPassword") ?? registerPassword).trim();
+    const submittedConfirmPassword = String(
+      formData.get("registerConfirmPassword") ?? registerConfirmPassword,
+    ).trim();
+    if (submittedPassword !== submittedConfirmPassword) {
       setError(t("notification.passwordMismatch"));
       return;
     }
@@ -642,19 +643,16 @@ export function useH5MemberApp(
     try {
       const profile = await registerMember({
         siteKey: route.siteKey,
-        phone: registerPhone,
-        password: registerPassword,
-        confirmPassword: registerConfirmPassword,
+        username: submittedUsername,
+        password: submittedPassword,
+        confirmPassword: submittedConfirmPassword,
       });
-      // Store session tokens
-      sessionManager.setSession(
-        "mock_access_" + profile.accountId,
-        "mock_refresh_" + profile.accountId,
-        604800, // 7 days
-      );
+      setRegisterPhone(submittedUsername);
+      setRegisterPassword(submittedPassword);
+      setRegisterConfirmPassword(submittedConfirmPassword);
       sessionManager.setUserInfo({
         accountId: profile.accountId,
-        phone: profile.phone,
+        phone: profile.phone ?? profile.username ?? "",
         publicUserId: profile.publicUserId,
         displayName: profile.displayName,
         inviteCode: profile.inviteCode,
@@ -682,7 +680,7 @@ export function useH5MemberApp(
       setSession(null);
       setDashboard(null);
       setNotice(t("notification.logoutSuccess"));
-      navigate(buildH5Path("/h5/login", route.siteKey));
+      navigate(buildH5LoginRedirectPath(window.location.pathname + window.location.search, route.siteKey));
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : t("notification.logoutFailed"));
     } finally {
@@ -813,13 +811,15 @@ export function useH5MemberApp(
     }
   }
 
-  function openClaimDialog(packageId: string): void {
-    setClaimingPackageId(packageId);
+  function openClaimDialog(pkg: ClaimDialogPackage): void {
+    setClaimingPackageId(pkg.id);
+    setClaimDialogPackageState(pkg);
   }
 
   function closeClaimDialog(): void {
     if (actionName?.startsWith("claim:")) return;
     setClaimingPackageId(null);
+    setClaimDialogPackageState(null);
   }
 
   async function handleClaimTaskPackage(packageId: string): Promise<void> {
@@ -829,9 +829,13 @@ export function useH5MemberApp(
       const updated = await claimTaskPackage(packageId);
       setNotice(t("notification.packageClaimed", { title: updated.title }));
       setTaskPackageDetail(updated);
-      setTaskPackages(await listTaskPackages());
+      await getTaskInstanceDetailApi(packageId);
+      await getTaskInstancesApi();
+      setTaskPackages(await getTaskPackagesApi());
+      setTaskViewRefreshToken((current) => current + 1);
       await refreshDashboard();
       setClaimingPackageId(null);
+      setClaimDialogPackageState(null);
     } catch (actionError) {
       if (handleAuthRequiredActionError(actionError)) return;
       setError(actionError instanceof Error ? actionError.message : t("notification.packageClaimFailed"));
@@ -877,8 +881,8 @@ export function useH5MemberApp(
         }));
         setError(result.reason ?? t("notification.purchaseFailed"));
       }
-      setTaskPackageDetail(await getTaskPackageDetail(packageId));
-      setTaskPackages(await listTaskPackages());
+      setTaskPackageDetail(await getTaskPackageDetailApi(packageId));
+      setTaskPackages(await getTaskPackagesApi());
       await refreshDashboard();
     } catch (actionError) {
       if (handleAuthRequiredActionError(actionError)) return;
@@ -1053,7 +1057,7 @@ export function useH5MemberApp(
     }
   }
 
-  /** 使用新 API 提交认证（姓名 + 身份证号 + 照片） */
+  /** 浣跨敤鏂?API 鎻愪氦璁よ瘉锛堝鍚?+ 韬唤璇佸彿 + 鐓х墖锛?*/
   async function handleSubmitVerificationApi(): Promise<void> {
     setActionName("verification-api-submit");
     setError(null);
@@ -1099,16 +1103,16 @@ export function useH5MemberApp(
               }
             : current
         ));
-        // 上传照片
+        // 涓婁紶鐓х墖
         if (verificationPhotoFiles.length > 0) {
           await uploadVerificationPhotosApi(result.id, verificationPhotoFiles);
         }
         setNotice(t("notification.verificationSubmitted"));
-        // 清除表单
+        // 娓呴櫎琛ㄥ崟
         setVerificationName("");
         setVerificationIdNumber("");
         setVerificationPhotoFiles([]);
-        // 刷新认证数据
+        // 鍒锋柊璁よ瘉鏁版嵁
         await loadVerificationData(requestIdRef.current, { preserveStateOnError: true, suppressErrorNotice: true });
       } else {
         setError(t("notification.verificationSubmitFailed"));
@@ -1121,7 +1125,7 @@ export function useH5MemberApp(
     }
   }
 
-  /** 使用新 API 发起 WhatsApp 绑定 */
+  /** 浣跨敤鏂?API 鍙戣捣 WhatsApp 缁戝畾 */
   async function handleStartWhatsAppBindingApi(): Promise<void> {
     setActionName("whatsapp-api");
     setError(null);
@@ -1129,7 +1133,7 @@ export function useH5MemberApp(
       const result = await startWhatsAppBindingApi(whatsappPhone);
       if (result.status === 'pending') {
         setNotice(t("notification.whatsappRequestSubmitted"));
-        // 刷新绑定状态
+        // 鍒锋柊缁戝畾鐘舵€?
         setWhatsAppBinding(await getWhatsAppBinding());
       }
     } catch (actionError) {
@@ -1140,7 +1144,7 @@ export function useH5MemberApp(
     }
   }
 
-  // ── H52-016: Chat handlers ────────────────────────────────────
+  // 鈹€鈹€ H52-016: Chat handlers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   async function handleSendMessage(content: string, type: string = 'text', imageUrl?: string): Promise<void> {
     try {
@@ -1167,8 +1171,10 @@ export function useH5MemberApp(
       setChatMessages((prev) => [...msgResult.items, ...prev]);
       setChatTotal(msgResult.total);
       setChatHasMore(msgResult.items.length >= 30);
-    } catch {
+    } catch (loadMoreError) {
+      if (handleAuthRequiredActionError(loadMoreError)) return;
       setChatPage((prev) => prev - 1);
+      setError(loadMoreError instanceof Error ? loadMoreError.message : t("notification.messageLoadFailed"));
     } finally {
       setChatLoading(false);
     }
@@ -1183,8 +1189,9 @@ export function useH5MemberApp(
         return [...prev, ...newMsgs];
       });
       setChatTotal(msgResult.total);
-    } catch {
-      // Silently ignore polling errors
+    } catch (refreshError) {
+      if (handleAuthRequiredActionError(refreshError)) return;
+      setError(refreshError instanceof Error ? refreshError.message : t("notification.messageLoadFailed"));
     }
   }
 
@@ -1197,16 +1204,17 @@ export function useH5MemberApp(
     }
   }
 
-  // ── H52-012: Message pagination & ticket retry handlers ─────────
+  // 鈹€鈹€ H52-012: Message pagination & ticket retry handlers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   async function handleMessagePageChange(page: number): Promise<void> {
     if (page < 1 || loading) return;
+    latestMessagePageRef.current = page;
     setMessagePage(page);
     setMessagesLoading(true);
     setMessagesError(null);
     try {
       const msgResult = await getNotificationsApi({ page, size: 50 });
-      if (page !== messagePage) {
+      if (page !== latestMessagePageRef.current) {
         // Another page change happened while loading
         return;
       }
@@ -1220,6 +1228,7 @@ export function useH5MemberApp(
   }
 
   async function handleRetryMessages(): Promise<void> {
+    latestMessagePageRef.current = 1;
     setMessagePage(1);
     setMessagesLoading(true);
     setMessagesError(null);
@@ -1310,7 +1319,7 @@ export function useH5MemberApp(
     }
   }
 
-  // ── H52-013: Orders page change handler ─────────────────────────
+  // 鈹€鈹€ H52-013: Orders page change handler 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   async function handleOrderPageChange(page: number): Promise<void> {
     if (page < 1 || ordersLoading) return;
@@ -1343,7 +1352,7 @@ export function useH5MemberApp(
     }
   }
 
-  // ── H52-014: Mailing subscription handlers ──────────────────────
+  // 鈹€鈹€ H52-014: Mailing subscription handlers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   async function handleSubscribeMailing(email: string): Promise<void> {
     setActionName("mailing-subscribe");
@@ -1381,7 +1390,7 @@ export function useH5MemberApp(
     }
   }
 
-  // ── H52-014: Fragment retry handler ──────────────────────────────
+  // 鈹€鈹€ H52-014: Fragment retry handler 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   async function handleRetryFragments(): Promise<void> {
     setFragmentsLoading(true);
@@ -1396,7 +1405,7 @@ export function useH5MemberApp(
     }
   }
 
-  // ── Memoized computed values ───────────────────────────────────
+  // 鈹€鈹€ Memoized computed values 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   const filteredTaskPackages = useMemo(() => {
     if (taskFilter === "active") return taskPackages.filter((item) => item.status === "active");
@@ -1456,8 +1465,8 @@ export function useH5MemberApp(
   }, [taskPackages]);
 
   const primaryHomeAction = useMemo(
-    () => getHomePrimaryAction(focusTaskPackage, dashboard?.wallet ?? null),
-    [dashboard?.wallet, focusTaskPackage],
+    () => getHomePrimaryAction(dashboard?.entryState ?? null, focusTaskPackage, dashboard?.wallet ?? null),
+    [dashboard?.entryState, dashboard?.wallet, focusTaskPackage],
   );
 
   const canShowImportantToast = route.page === "messages";
@@ -1491,9 +1500,15 @@ export function useH5MemberApp(
 
   const claimDialogPackage = useMemo(() => {
     if (!claimingPackageId) return null;
-    if (taskPackageDetail?.id === claimingPackageId) return taskPackageDetail;
-    return taskPackages.find((item) => item.id === claimingPackageId) ?? null;
-  }, [claimingPackageId, taskPackageDetail, taskPackages]);
+    if (taskPackageDetail?.id === claimingPackageId) {
+      return { id: taskPackageDetail.id, title: taskPackageDetail.title };
+    }
+    const packageFromList = taskPackages.find((item) => item.id === claimingPackageId);
+    if (packageFromList) {
+      return { id: packageFromList.id, title: packageFromList.title };
+    }
+    return claimDialogPackageState;
+  }, [claimDialogPackageState, claimingPackageId, taskPackageDetail, taskPackages]);
 
   const fragmentCompletion = useMemo(() => {
     if (!fragmentOverview) return { completed: 0, total: 0, missing: 0, progress: 0 };
@@ -1581,13 +1596,19 @@ export function useH5MemberApp(
 
   const toastItems = useMemo<ToastItem[]>(() => {
     const items: ToastItem[] = [];
-    if (error) items.push({ key: "error", message: error, tone: "error", duration: 3600 });
-    if (importantToast) items.push(importantToast);
-    if (notice) items.push({ key: "notice", message: notice, tone: "notice", duration: 2600 });
+    if (notice) {
+      items.push({ key: "notice", message: notice, tone: "notice", duration: 2600 });
+    }
+    if (importantToast) {
+      items.push(importantToast);
+    }
+    if (error) {
+      items.push({ key: "error", message: error, tone: "error", duration: 3600 });
+    }
     return items;
   }, [error, importantToast, notice]);
 
-  // ── Return ─────────────────────────────────────────────────────
+  // 鈹€鈹€ Return 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   return {
     // Core
@@ -1609,6 +1630,7 @@ export function useH5MemberApp(
     rechargeAmount, transferAmount, withdrawAmount, shippingForm,
     // UI states
     purchaseStates, claimingPackageId, showRechargeChannels, showTransferAllConfirm, verificationActionId,
+    taskViewRefreshToken,
     // Computed
     filteredTaskPackages, filteredOrders, profileLinks, profileQuickActions, canExchangeFragments,
     unreadMessageCount, effectiveVerificationSummary, profileVerificationStatusLabel,
@@ -1662,4 +1684,5 @@ export function useH5MemberApp(
     handleSendMessage, handleLoadMoreMessages, handleRefreshMessages,
   };
 }
+
 

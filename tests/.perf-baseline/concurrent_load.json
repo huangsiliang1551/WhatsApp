@@ -4,15 +4,15 @@
   "workers_simulated": 10,
   "messages_per_worker": 5,
   "total_requests": 50,
-  "total_time_ms": 2718.75,
-  "throughput_msg_per_sec": 18.39,
+  "total_time_ms": 984.02,
+  "throughput_msg_per_sec": 50.81,
   "errors": 0,
   "latency_ms": {
-    "avg": 54.36,
-    "p50": 46.82,
-    "p95": 51.14,
-    "p99": 231.79,
-    "min": 43.67,
-    "max": 243.48
+    "avg": 19.66,
+    "p50": 17.91,
+    "p95": 24.75,
+    "p99": 45.23,
+    "min": 14.83,
+    "max": 64.4
   }
 }

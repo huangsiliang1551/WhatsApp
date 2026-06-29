@@ -35,6 +35,7 @@ export interface AdminUser {
 
 interface RawAdminMeResponse {
   user_id: string;
+  id?: string;
   username: string;
   role: string;
 }
@@ -50,9 +51,10 @@ export interface ChangePasswordPayload {
   new_password: string;
 }
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ||
-  (import.meta.env.DEV ? "http://localhost:8000" : "");
+const API_BASE = resolveApiBaseUrl(
+  import.meta.env.VITE_API_BASE_URL as string | undefined,
+  import.meta.env.DEV,
+);
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -154,7 +156,7 @@ export class AdminAuthService {
   private _userType: string | null = null;
 
   async login(payload: LoginPayload): Promise<AdminTokens> {
-    const tokens = await apiPost<AdminTokens>("/api/auth/login", {
+    const tokens = await apiPost<AdminTokens>("/api/admin/auth/login", {
       username: payload.username,
       password: payload.password,
     });
@@ -168,7 +170,7 @@ export class AdminAuthService {
     if (!refreshToken) return false;
 
     try {
-      const resp = await fetch("/api/auth/refresh", {
+      const resp = await fetch(`${API_BASE}/api/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: refreshToken }),
@@ -197,7 +199,7 @@ export class AdminAuthService {
     if (this._currentUser) return this._currentUser;
     const raw = await apiGet<RawAdminMeResponse & { user_type?: string; agency_id?: string; agency_name?: string; display_name?: string; email?: string }>("/api/admin/auth/me");
     const user: AdminUser = {
-      id: raw.user_id,
+      id: raw.user_id ?? raw.id ?? "",
       username: raw.username,
       display_name: raw.display_name ?? raw.username,
       role: raw.role as AdminUser["role"],
@@ -247,3 +249,4 @@ export class AdminAuthService {
 }
 
 export const adminAuth = new AdminAuthService();
+import { resolveApiBaseUrl } from "./resolveApiBaseUrl";

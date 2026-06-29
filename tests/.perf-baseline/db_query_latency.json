@@ -3,44 +3,44 @@
   "description": "常用 DB 查询接口 P95 延迟 (SQLite in test mode)",
   "queries": {
     "list_conversations": {
-      "avg_ms": 6.98,
-      "p50_ms": 6.94,
-      "p95_ms": 8.36,
-      "p99_ms": 11.02,
-      "min_ms": 5.75,
-      "max_ms": 11.68
+      "avg_ms": 11.34,
+      "p50_ms": 10.19,
+      "p95_ms": 21.19,
+      "p99_ms": 21.5,
+      "min_ms": 7.77,
+      "max_ms": 21.57
     },
     "list_messages": {
-      "avg_ms": 5.84,
-      "p50_ms": 5.81,
-      "p95_ms": 6.66,
-      "p99_ms": 6.73,
-      "min_ms": 4.85,
-      "max_ms": 6.75
+      "avg_ms": 8.87,
+      "p50_ms": 9.03,
+      "p95_ms": 10.37,
+      "p99_ms": 10.74,
+      "min_ms": 7.3,
+      "max_ms": 10.83
     },
     "list_meta_accounts": {
-      "avg_ms": 5.33,
-      "p50_ms": 5.1,
-      "p95_ms": 6.13,
-      "p99_ms": 10.31,
-      "min_ms": 4.13,
-      "max_ms": 11.35
+      "avg_ms": 6.15,
+      "p50_ms": 5.92,
+      "p95_ms": 7.64,
+      "p99_ms": 8.94,
+      "min_ms": 4.88,
+      "max_ms": 9.26
     },
     "runtime_state": {
-      "avg_ms": 7.34,
-      "p50_ms": 5.3,
-      "p95_ms": 8.96,
-      "p99_ms": 38.31,
-      "min_ms": 4.37,
-      "max_ms": 45.65
+      "avg_ms": 7.19,
+      "p50_ms": 6.89,
+      "p95_ms": 8.94,
+      "p99_ms": 12.86,
+      "min_ms": 5.35,
+      "max_ms": 13.84
     },
     "conversation_timeline": {
-      "avg_ms": 7.43,
-      "p50_ms": 7.19,
-      "p95_ms": 8.18,
-      "p99_ms": 11.41,
-      "min_ms": 6.47,
-      "max_ms": 12.21
+      "avg_ms": 11.33,
+      "p50_ms": 11.23,
+      "p95_ms": 14.69,
+      "p99_ms": 17.18,
+      "min_ms": 8.06,
+      "max_ms": 17.8
     }
   }
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { adminAuth } from "../services/adminAuth";
+import { resolveApiBaseUrl } from "../services/resolveApiBaseUrl";
 
 export interface PermissionsInfo {
   user_type: "super_admin" | "agent" | "agent_member";
@@ -33,9 +34,10 @@ export function canSeePageWithMenus(menus: string[], pageId: string): boolean {
   return new Set(menus).has(pageId);
 }
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ||
-  (import.meta.env.DEV ? "http://localhost:8000" : "");
+const API_BASE = resolveApiBaseUrl(
+  import.meta.env.VITE_API_BASE_URL as string | undefined,
+  import.meta.env.DEV,
+);
 
 async function fetchPermissions(): Promise<PermissionsInfo | null> {
   try {

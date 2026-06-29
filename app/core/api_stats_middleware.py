@@ -23,6 +23,14 @@ REDIS_SOCKET_TIMEOUT_SECONDS = 2
 REDIS_CONNECT_TIMEOUT_SECONDS = 0.2
 
 
+def _has_observable_auth_context(request: Request) -> bool:
+    return bool(
+        request.headers.get("Authorization")
+        or request.headers.get("X-Actor-Id")
+        or request.headers.get("X-Actor-Role")
+    )
+
+
 def _resolve_request_scope_id(request: Request, *, jwt_secret: str) -> str:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
@@ -61,7 +69,10 @@ class ApiStatsMiddleware(BaseHTTPMiddleware):
             return response
 
         settings = get_settings()
-        if settings.test_mode or "PYTEST_CURRENT_TEST" in os.environ:
+        if settings.test_mode:
+            return response
+
+        if "PYTEST_CURRENT_TEST" in os.environ and not _has_observable_auth_context(request):
             return response
 
         try:

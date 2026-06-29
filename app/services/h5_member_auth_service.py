@@ -2,13 +2,15 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import hashlib
 import hmac
+import json
 import re
 import secrets
-import time
 
+from redis import Redis
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.core.platform_enums import UserIdentityType, UserLifecycleStatus
 from app.core.settings import Settings
 from app.db.models import (
     AppUser,
@@ -40,7 +42,8 @@ class H5MemberContext:
     member_profile: MemberProfile
     user: AppUser
     site: H5Site
-    phone: str
+    username: str
+    phone: str | None
     auth_session: MemberAuthSession
 
     @property
@@ -56,6 +59,84 @@ class H5AuthTokens:
     refresh_expires_at: datetime
 
 
+class H5AuthError(Exception):
+    def __init__(self, *, status_code: int, code: str, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.message = message
+
+    def to_detail(self) -> dict[str, str]:
+        return {"code": self.code, "message": self.message}
+
+
+class _SlidingWindowFailureStore:
+    _shared_memory: dict[str, list[float]] = {}
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._redis: Redis | None = None
+        self._redis_available = False
+        if not settings.test_mode:
+            try:
+                self._redis = Redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=2)
+                self._redis.ping()
+                self._redis_available = True
+            except Exception:
+                self._redis = None
+                self._redis_available = False
+
+    def is_locked(self, key: str, *, threshold: int, window_seconds: int) -> int | None:
+        timestamps = self._read(key, window_seconds)
+        if len(timestamps) < threshold:
+            return None
+        retry_after = int(max(1, timestamps[0] + window_seconds - self._now()))
+        return retry_after
+
+    def record_failure(self, key: str, *, window_seconds: int) -> None:
+        self._append(key, window_seconds)
+
+    def clear(self, key: str) -> None:
+        if self._redis_available and self._redis is not None:
+            self._redis.delete(key)
+            return
+        self._shared_memory.pop(key, None)
+
+    @staticmethod
+    def _now() -> float:
+        return utc_now().timestamp()
+
+    def _read(self, key: str, window_seconds: int) -> list[float]:
+        cutoff = self._now() - window_seconds
+        if self._redis_available and self._redis is not None:
+            raw_values = self._redis.lrange(key, 0, -1)
+            values = [float(raw) for raw in raw_values if float(raw) > cutoff]
+            if len(values) != len(raw_values):
+                pipe = self._redis.pipeline()
+                pipe.delete(key)
+                if values:
+                    pipe.rpush(key, *[json.dumps(value) for value in values])
+                    pipe.expire(key, window_seconds)
+                pipe.execute()
+            return values
+        values = [value for value in self._shared_memory.get(key, []) if value > cutoff]
+        self._shared_memory[key] = values
+        return values
+
+    def _append(self, key: str, window_seconds: int) -> None:
+        now = self._now()
+        values = self._read(key, window_seconds)
+        values.append(now)
+        if self._redis_available and self._redis is not None:
+            pipe = self._redis.pipeline()
+            pipe.delete(key)
+            pipe.rpush(key, *[json.dumps(value) for value in values])
+            pipe.expire(key, window_seconds)
+            pipe.execute()
+            return
+        self._shared_memory[key] = values
+
+
 class H5MemberAuthService:
     def __init__(self, *, session: Session, settings: Settings) -> None:
         self._session = session
@@ -63,7 +144,8 @@ class H5MemberAuthService:
         self._max_sessions_per_user = settings.h5_member_max_sessions_per_user
         self._lockout_threshold = settings.h5_member_login_lockout_threshold
         self._lockout_minutes = settings.h5_member_login_lockout_minutes
-        self._login_failures: dict[str, list[float]] = {}
+        self._ip_lockout_threshold = max(settings.h5_member_login_lockout_threshold * 2, 10)
+        self._failure_store = _SlidingWindowFailureStore(settings)
 
     async def register(
         self,
@@ -73,13 +155,15 @@ class H5MemberAuthService:
         user_agent: str | None,
     ) -> tuple[H5MemberContext, H5AuthTokens]:
         if payload.password != payload.confirm_password:
-            raise ValueError("Password and confirm_password do not match.")
+            raise H5AuthError(status_code=409, code="password_mismatch", message="Password and confirm password do not match.")
         self._validate_password_strength(payload.password)
+        display_name = self._validate_display_name(payload.display_name)
 
         site = self._require_site(payload.site_key)
-        phone = self._normalize_phone(payload.phone)
-        if self._find_phone_identity(phone) is not None:
-            raise ValueError(f"Phone '{phone}' is already registered.")
+        username = self._normalize_username(payload.username or payload.phone or "")
+        phone = self._normalize_phone(payload.phone or username) if self._is_phone_username(username) else None
+        if self._find_username_identity(username) is not None:
+            raise H5AuthError(status_code=409, code="username_taken", message="This account is already registered.")
 
         # ── 归属入口解析（spec 7.1-7.2） ──
         # entry_code 与 invite_code 互为别名，内部统一为 entry_code
@@ -108,11 +192,11 @@ class H5MemberAuthService:
             account_id=site.account_id,
             public_user_id=f"h5-user-{secrets.token_hex(12)}",
             registration_site_id=site.id,
-            display_name=(payload.display_name or "").strip() or f"Member {phone[-4:]}",
+            display_name=display_name or f"Member {username[-4:]}",
             language_code=payload.language_code,
             is_anonymous=False,
             lifecycle_status="active",
-            has_phone=True,
+            has_phone=phone is not None,
             has_email=False,
             has_whatsapp=False,
             is_invited_user=invite_code is not None,
@@ -128,12 +212,22 @@ class H5MemberAuthService:
         self._session.add(
             UserIdentity(
                 user_id=user.id,
-                identity_type="phone",
-                identity_value=phone,
+                identity_type=UserIdentityType.USERNAME.value,
+                identity_value=username,
                 is_verified=True,
                 is_primary=True,
             )
         )
+        if phone is not None:
+            self._session.add(
+                UserIdentity(
+                    user_id=user.id,
+                    identity_type=UserIdentityType.PHONE.value,
+                    identity_value=phone,
+                    is_verified=True,
+                    is_primary=False,
+                )
+            )
 
         member_profile = MemberProfile(
             account_id=site.account_id,
@@ -206,6 +300,7 @@ class H5MemberAuthService:
             member_profile=member_profile,
             user=user,
             site=site,
+            username=username,
             phone=phone,
             auth_session=auth_session,
         )
@@ -219,30 +314,29 @@ class H5MemberAuthService:
         user_agent: str | None,
     ) -> tuple[H5MemberContext, H5AuthTokens]:
         site = self._require_site(payload.site_key)
-        phone = self._normalize_phone(payload.phone)
+        username = self._normalize_username(payload.username or payload.phone or "")
+        self._check_login_guard(username=username, client_ip=client_ip)
 
-        lockout_key = f"login:{phone}:{client_ip or 'unknown'}"
-        self._check_login_lockout(lockout_key)
-
-        identity = self._find_phone_identity(phone)
+        identity = self._find_username_identity(username)
         if identity is None:
-            self._record_login_failure(lockout_key)
-            raise LookupError("Phone or password is invalid.")
+            self._record_login_failure(username=username, client_ip=client_ip)
+            raise H5AuthError(status_code=401, code="invalid_credentials", message="Account or password is invalid.")
 
         user = self._load_user(identity.user_id)
         if user.registration_site_id != site.id:
-            self._record_login_failure(lockout_key)
-            raise PermissionError(f"Phone '{phone}' does not belong to site '{site.site_key}'.")
+            self._record_login_failure(username=username, client_ip=client_ip)
+            raise H5AuthError(status_code=401, code="invalid_credentials", message="Account or password is invalid.")
         if user.account_id != site.account_id:
-            self._record_login_failure(lockout_key)
-            raise PermissionError("Phone account scope does not match the current H5 site.")
+            self._record_login_failure(username=username, client_ip=client_ip)
+            raise H5AuthError(status_code=401, code="invalid_credentials", message="Account or password is invalid.")
+        self._ensure_user_can_authenticate(user)
 
         member_profile = self._require_member_profile(user.id, user.account_id)
         if not self._verify_password(payload.password, member_profile.password_salt, member_profile.password_hash):
-            self._record_login_failure(lockout_key)
-            raise LookupError("Phone or password is invalid.")
+            self._record_login_failure(username=username, client_ip=client_ip)
+            raise H5AuthError(status_code=401, code="invalid_credentials", message="Account or password is invalid.")
 
-        self._clear_login_failures(lockout_key)
+        self._clear_login_failures(username=username, client_ip=client_ip)
 
         now = utc_now()
         user.last_active_at = now
@@ -262,7 +356,8 @@ class H5MemberAuthService:
             member_profile=member_profile,
             user=user,
             site=site,
-            phone=phone,
+            username=username,
+            phone=self._find_phone_for_user(user.id),
             auth_session=auth_session,
         )
         return context, tokens
@@ -285,11 +380,11 @@ class H5MemberAuthService:
     ) -> tuple[H5MemberContext, H5AuthTokens]:
         auth_session = self._find_auth_session(refresh_token=refresh_token)
         if auth_session is None:
-            raise LookupError("Refresh session is invalid.")
+            raise H5AuthError(status_code=401, code="session_revoked", message="Member session was not found.")
         if auth_session.status != "active" or auth_session.revoked_at is not None:
-            raise PermissionError("Refresh session is no longer active.")
+            raise H5AuthError(status_code=401, code="session_revoked", message="Member session is no longer active.")
         if auth_session.refresh_expires_at <= utc_now():
-            raise PermissionError("Refresh session has expired.")
+            raise H5AuthError(status_code=401, code="session_expired", message="Member session has expired.")
 
         # Auto-renewal: if within the last 25% of validity, extend expiry instead of rotating
         now = utc_now()
@@ -302,8 +397,10 @@ class H5MemberAuthService:
             self._session.commit()
             member_profile = self._require_member_profile_by_id(auth_session.member_profile_id)
             user = self._load_user(auth_session.user_id)
+            self._ensure_user_can_authenticate(user, revoke_sessions=False)
             site = self._require_user_site(user)
-            phone = self._require_primary_phone(user.id)
+            username = self._require_primary_username(user.id)
+            phone = self._find_phone_for_user(user.id)
             tokens = H5AuthTokens(
                 session_token="",
                 refresh_token="",
@@ -315,6 +412,7 @@ class H5MemberAuthService:
                 member_profile=member_profile,
                 user=user,
                 site=site,
+                username=username,
                 phone=phone,
                 auth_session=auth_session,
             )
@@ -326,8 +424,10 @@ class H5MemberAuthService:
 
         member_profile = self._require_member_profile_by_id(auth_session.member_profile_id)
         user = self._load_user(auth_session.user_id)
+        self._ensure_user_can_authenticate(user, revoke_sessions=False)
         site = self._require_user_site(user)
-        phone = self._require_primary_phone(user.id)
+        username = self._require_primary_username(user.id)
+        phone = self._find_phone_for_user(user.id)
         new_session, tokens = self._create_auth_session(
             member_profile=member_profile,
             user=user,
@@ -341,24 +441,29 @@ class H5MemberAuthService:
             member_profile=member_profile,
             user=user,
             site=site,
+            username=username,
             phone=phone,
             auth_session=new_session,
         )
         return context, tokens
 
     async def resolve_context(self, *, session_token: str | None) -> H5MemberContext:
+        if not session_token:
+            raise LookupError("H5 member authentication is required.")
         auth_session = self._find_auth_session(session_token=session_token)
         if auth_session is None:
-            raise LookupError("Member session was not found.")
+            raise H5AuthError(status_code=401, code="session_revoked", message="Member session was not found.")
         if auth_session.status != "active" or auth_session.revoked_at is not None:
-            raise PermissionError("Member session is no longer active.")
+            raise H5AuthError(status_code=401, code="session_revoked", message="Member session is no longer active.")
         if auth_session.expires_at <= utc_now():
-            raise PermissionError("Member session has expired.")
+            raise H5AuthError(status_code=401, code="session_expired", message="Member session has expired.")
 
         member_profile = self._require_member_profile_by_id(auth_session.member_profile_id)
         user = self._load_user(auth_session.user_id)
+        self._ensure_user_can_authenticate(user)
         site = self._require_user_site(user)
-        phone = self._require_primary_phone(user.id)
+        username = self._require_primary_username(user.id)
+        phone = self._find_phone_for_user(user.id)
 
         auth_session.last_seen_at = utc_now()
         self._ensure_member_invite_code(site_id=site.id, inviter_user_id=user.id)
@@ -368,6 +473,7 @@ class H5MemberAuthService:
             member_profile=member_profile,
             user=user,
             site=site,
+            username=username,
             phone=phone,
             auth_session=auth_session,
         )
@@ -451,11 +557,11 @@ class H5MemberAuthService:
             refresh_expires_at=refresh_expires_at,
         )
 
-    def _find_phone_identity(self, phone: str) -> UserIdentity | None:
+    def _find_username_identity(self, username: str) -> UserIdentity | None:
         return self._session.scalars(
             select(UserIdentity).where(
-                UserIdentity.identity_type == "phone",
-                UserIdentity.identity_value == phone,
+                UserIdentity.identity_type == UserIdentityType.USERNAME.value,
+                UserIdentity.identity_value == username,
             )
         ).first()
 
@@ -505,18 +611,29 @@ class H5MemberAuthService:
             raise LookupError(f"Member profile '{member_profile_id}' was not found.")
         return member_profile
 
-    def _require_primary_phone(self, user_id: str) -> str:
+    def _require_primary_username(self, user_id: str) -> str:
         identity = self._session.scalars(
             select(UserIdentity)
             .where(
                 UserIdentity.user_id == user_id,
-                UserIdentity.identity_type == "phone",
+                UserIdentity.identity_type == UserIdentityType.USERNAME.value,
             )
             .order_by(UserIdentity.is_primary.desc(), UserIdentity.created_at.asc())
         ).first()
         if identity is None:
-            raise LookupError(f"Phone identity for user '{user_id}' was not found.")
+            raise LookupError(f"Username identity for user '{user_id}' was not found.")
         return identity.identity_value
+
+    def _find_phone_for_user(self, user_id: str) -> str | None:
+        identity = self._session.scalars(
+            select(UserIdentity)
+            .where(
+                UserIdentity.user_id == user_id,
+                UserIdentity.identity_type == UserIdentityType.PHONE.value,
+            )
+            .order_by(UserIdentity.is_primary.desc(), UserIdentity.created_at.asc())
+        ).first()
+        return identity.identity_value if identity is not None else None
 
     def _require_site(self, site_key: str) -> H5Site:
         site = self._session.scalars(select(H5Site).where(H5Site.site_key == site_key)).first()
@@ -601,6 +718,28 @@ class H5MemberAuthService:
         return normalized
 
     @staticmethod
+    def _is_phone_username(username: str) -> bool:
+        return bool(re.fullmatch(r"\+?\d{6,32}", username))
+
+    @classmethod
+    def _normalize_username(cls, username: str) -> str:
+        normalized = username.strip()
+        if not normalized:
+            raise H5AuthError(status_code=422, code="username_required", message="Username is required.")
+        if cls._is_phone_username(normalized):
+            return cls._normalize_phone(normalized)
+        lowered = normalized.lower()
+        if not re.fullmatch(r"[a-z][a-z0-9_.-]{3,31}", lowered):
+            raise H5AuthError(
+                status_code=422,
+                code="username_invalid",
+                message="Username must be a phone number or a 4-32 character account starting with a letter.",
+            )
+        if any(token in lowered for token in ("<script", "select ", "drop ", "--", "/*", "*/")):
+            raise H5AuthError(status_code=422, code="username_invalid", message="Username contains unsafe characters.")
+        return lowered
+
+    @staticmethod
     def _mask_member_no(member_no: str) -> str:
         if len(member_no) <= 5:
             return member_no
@@ -631,13 +770,15 @@ class H5MemberAuthService:
         member_profile: MemberProfile,
         user: AppUser,
         site: H5Site,
-        phone: str,
+        username: str,
+        phone: str | None,
         auth_session: MemberAuthSession,
     ) -> H5MemberContext:
         return H5MemberContext(
             member_profile=member_profile,
             user=user,
             site=site,
+            username=username,
             phone=phone,
             auth_session=auth_session,
         )
@@ -672,6 +813,7 @@ class H5MemberAuthService:
             member_no=context.member_profile.member_no,
             account_id_masked=self._mask_member_no(context.member_profile.member_no),
             invite_code=invite_code,
+            username=context.username,
             phone=context.phone,
             display_name=context.user.display_name,
             language_code=context.user.language_code,
@@ -681,38 +823,102 @@ class H5MemberAuthService:
 
     @staticmethod
     def _validate_password_strength(password: str) -> None:
-        if len(password) < 8:
-            raise ValueError("Password must be at least 8 characters long.")
+        weak_passwords = {
+            "123456",
+            "12345678",
+            "password",
+            "password123",
+            "qwerty123",
+            "abc123456",
+            "111111",
+        }
+        if len(password) < 6 or len(password) > 64:
+            raise H5AuthError(status_code=422, code="password_invalid", message="Password must be 6-64 characters long.")
         if not re.search(r"[a-zA-Z]", password):
-            raise ValueError("Password must contain at least one letter.")
+            raise H5AuthError(status_code=422, code="password_invalid", message="Password must contain at least one letter.")
         if not re.search(r"[0-9]", password):
-            raise ValueError("Password must contain at least one number.")
+            raise H5AuthError(status_code=422, code="password_invalid", message="Password must contain at least one number.")
+        if password.lower() in weak_passwords:
+            raise H5AuthError(status_code=422, code="password_too_weak", message="Password is too weak.")
 
-    def _check_login_lockout(self, key: str) -> None:
-        now = time.time()
+    def _check_login_guard(self, *, username: str, client_ip: str | None) -> None:
         lockout_window = self._lockout_minutes * 60
-        timestamps = self._login_failures.get(key, [])
-        # Prune expired entries
-        timestamps = [ts for ts in timestamps if now - ts < lockout_window]
-        self._login_failures[key] = timestamps
-        if len(timestamps) >= self._lockout_threshold:
-            earliest = timestamps[0]
-            retry_after = int(lockout_window - (now - earliest))
-            raise PermissionError(
-                f"Account is temporarily locked due to too many failed login attempts. "
-                f"Try again in {max(1, retry_after)} seconds."
+        account_retry_after = self._failure_store.is_locked(
+            f"h5:login:account:{username}",
+            threshold=self._lockout_threshold,
+            window_seconds=lockout_window,
+        )
+        if account_retry_after is not None:
+            raise H5AuthError(
+                status_code=423,
+                code="account_locked",
+                message=f"Account is temporarily locked. Try again in {account_retry_after} seconds.",
+            )
+        ip_retry_after = self._failure_store.is_locked(
+            f"h5:login:ip:{client_ip or 'unknown'}",
+            threshold=self._ip_lockout_threshold,
+            window_seconds=lockout_window,
+        )
+        if ip_retry_after is not None:
+            raise H5AuthError(
+                status_code=429,
+                code="ip_rate_limited",
+                message=f"Too many failed login attempts from this IP. Try again in {ip_retry_after} seconds.",
             )
 
-    def _record_login_failure(self, key: str) -> None:
-        now = time.time()
+    def _record_login_failure(self, *, username: str, client_ip: str | None) -> None:
         lockout_window = self._lockout_minutes * 60
-        timestamps = self._login_failures.get(key, [])
-        timestamps = [ts for ts in timestamps if now - ts < lockout_window]
-        timestamps.append(now)
-        self._login_failures[key] = timestamps
+        self._failure_store.record_failure(
+            f"h5:login:account:{username}",
+            window_seconds=lockout_window,
+        )
+        self._failure_store.record_failure(
+            f"h5:login:ip:{client_ip or 'unknown'}",
+            window_seconds=lockout_window,
+        )
 
-    def _clear_login_failures(self, key: str) -> None:
-        self._login_failures.pop(key, None)
+    def _clear_login_failures(self, *, username: str, client_ip: str | None) -> None:
+        self._failure_store.clear(f"h5:login:account:{username}")
+        self._failure_store.clear(f"h5:login:ip:{client_ip or 'unknown'}")
+
+    @staticmethod
+    def _validate_display_name(display_name: str | None) -> str | None:
+        normalized = (display_name or "").strip()
+        if not normalized:
+            return None
+        lowered = normalized.lower()
+        if any(token in lowered for token in ("<script", "select ", "drop ", "--", "/*", "*/")):
+            raise H5AuthError(status_code=422, code="display_name_invalid", message="Display name contains unsafe characters.")
+        if any(token in lowered for token in ("admin", "system", "客服", "官方")):
+            raise H5AuthError(status_code=422, code="display_name_invalid", message="Display name contains restricted words.")
+        return normalized
+
+    def _ensure_user_can_authenticate(self, user: AppUser, *, revoke_sessions: bool = True) -> None:
+        if user.lifecycle_status == UserLifecycleStatus.ACTIVE.value:
+            return
+        if revoke_sessions:
+            self.revoke_user_sessions(user_id=user.id, reason=f"lifecycle:{user.lifecycle_status}")
+        if user.lifecycle_status == UserLifecycleStatus.FROZEN.value:
+            raise H5AuthError(status_code=403, code="account_frozen", message="Account has been frozen.")
+        if user.lifecycle_status == UserLifecycleStatus.BLACKLISTED.value:
+            raise H5AuthError(status_code=403, code="account_blacklisted", message="Account has been blacklisted.")
+        raise H5AuthError(status_code=403, code="account_disabled", message="Account is unavailable.")
+
+    def revoke_user_sessions(self, *, user_id: str, reason: str) -> int:
+        active_sessions = self._session.scalars(
+            select(MemberAuthSession).where(
+                MemberAuthSession.user_id == user_id,
+                MemberAuthSession.status == "active",
+                MemberAuthSession.revoked_at.is_(None),
+            )
+        ).all()
+        revoke_now = utc_now()
+        for auth_session in active_sessions:
+            auth_session.status = "revoked"
+            auth_session.revoked_at = revoke_now
+            auth_session.user_agent = f"{auth_session.user_agent or ''} [revoked:{reason}]".strip()
+            self._session.add(auth_session)
+        return len(active_sessions)
 
     def _enforce_max_sessions(self, user_id: str) -> None:
         active_sessions = self._session.scalars(

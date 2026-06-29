@@ -1,10 +1,29 @@
+from decimal import Decimal
 from typing import Any
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import AppUser, MemberWhatsAppBindingRequest, UserIdentity
-from tests.test_h5_member_auth import _create_site, _operator_headers, _register_member
+from app.db.models import (
+    AppUser,
+    MemberTaskBatch,
+    MemberTaskDayQuota,
+    MemberWhatsAppBindingRequest,
+    TaskPackageInstance,
+    TaskPackageTemplate,
+    TaskSystemConfig,
+    UserIdentity,
+    WalletAccount,
+    WalletLedgerEntry,
+)
+from tests.test_h5_member_auth import (
+    _create_site,
+    _operator_headers,
+    _register_member,
+    _seed_official_task_plan,
+    _seed_member_wallet,
+    _seed_task_system_config,
+)
 
 
 def _seed_member_whatsapp_binding_request(
@@ -148,6 +167,239 @@ def test_platform_member_whatsapp_binding_status_flow_updates_h5_binding_state_a
             UserIdentity.identity_value == "+86139000678903",
         ).one()
         assert whatsapp_identity.is_verified is True
+
+
+def test_platform_member_whatsapp_binding_bound_grants_configured_task_balance_reward(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site, auth_payload, created = _seed_member_whatsapp_binding_request(
+        client,
+        account_id="acct-platform-member-wa-reward",
+        site_key="platform-member-wa-reward",
+        phone="+86139000678905",
+        display_name="Member WA Reward",
+    )
+    public_user_id = auth_payload["member"]["publicUserId"]
+    _seed_task_system_config(
+        db_session_factory,
+        account_id="acct-platform-member-wa-reward",
+        site_id=site["id"],
+    )
+    _seed_member_wallet(
+        db_session_factory,
+        account_id="acct-platform-member-wa-reward",
+        public_user_id=public_user_id,
+        system_balance=Decimal("0.00"),
+        task_balance=Decimal("0.00"),
+    )
+
+    response = client.post(
+        f"/api/platform/member-whatsapp-bindings/{created['requestId']}/status",
+        json={"status": "bound", "note": "reward test"},
+        headers=_operator_headers("acct-platform-member-wa-reward"),
+    )
+    assert response.status_code == 200, response.text
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(AppUser.public_user_id == public_user_id).one()
+        wallet = session.query(WalletAccount).filter(WalletAccount.user_id == user.id).one()
+        assert wallet.task_balance == Decimal("20.00")
+
+        reward_entries = session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.wallet_account_id == wallet.id,
+            WalletLedgerEntry.transaction_type == "whatsapp_binding_reward",
+            WalletLedgerEntry.reference_type == "member_whatsapp_binding_request",
+            WalletLedgerEntry.reference_id == created["requestId"],
+        ).all()
+        assert len(reward_entries) == 1
+        assert reward_entries[0].amount == Decimal("20.00")
+        assert reward_entries[0].direction == "credit"
+        assert reward_entries[0].ledger_type == "task"
+        assert reward_entries[0].source_type == "whatsapp_binding_reward"
+        assert reward_entries[0].task_amount == Decimal("20.00")
+        assert reward_entries[0].idempotency_key is not None
+
+
+def test_platform_member_whatsapp_binding_uses_updated_reward_amount_for_new_bound_member(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site, auth_payload, created = _seed_member_whatsapp_binding_request(
+        client,
+        account_id="acct-platform-member-wa-reward-updated",
+        site_key="platform-member-wa-reward-updated",
+        phone="+86139000678915",
+        display_name="Member WA Reward Updated",
+    )
+    public_user_id = auth_payload["member"]["publicUserId"]
+    _seed_task_system_config(
+        db_session_factory,
+        account_id="acct-platform-member-wa-reward-updated",
+        site_id=site["id"],
+    )
+    with db_session_factory() as session:
+        request_config = session.query(TaskSystemConfig).filter(
+            TaskSystemConfig.account_id == "acct-platform-member-wa-reward-updated",
+            TaskSystemConfig.site_id == site["id"],
+        ).one()
+        request_config.whatsapp_binding_reward_amount = Decimal("30.00")
+        session.commit()
+    _seed_member_wallet(
+        db_session_factory,
+        account_id="acct-platform-member-wa-reward-updated",
+        public_user_id=public_user_id,
+        system_balance=Decimal("0.00"),
+        task_balance=Decimal("0.00"),
+    )
+
+    response = client.post(
+        f"/api/platform/member-whatsapp-bindings/{created['requestId']}/status",
+        json={"status": "bound", "note": "reward updated test"},
+        headers=_operator_headers("acct-platform-member-wa-reward-updated"),
+    )
+    assert response.status_code == 200, response.text
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(AppUser.public_user_id == public_user_id).one()
+        wallet = session.query(WalletAccount).filter(WalletAccount.user_id == user.id).one()
+        assert wallet.task_balance == Decimal("30.00")
+
+        reward_entries = session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.wallet_account_id == wallet.id,
+            WalletLedgerEntry.transaction_type == "whatsapp_binding_reward",
+            WalletLedgerEntry.reference_type == "member_whatsapp_binding_request",
+            WalletLedgerEntry.reference_id == created["requestId"],
+        ).all()
+        assert len(reward_entries) == 1
+        assert reward_entries[0].amount == Decimal("30.00")
+
+
+def test_platform_member_whatsapp_binding_bound_does_not_duplicate_reward_on_repeat_bound_update(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site, auth_payload, created = _seed_member_whatsapp_binding_request(
+        client,
+        account_id="acct-platform-member-wa-reward-dedupe",
+        site_key="platform-member-wa-reward-dedupe",
+        phone="+86139000678916",
+        display_name="Member WA Reward Dedupe",
+    )
+    public_user_id = auth_payload["member"]["publicUserId"]
+    _seed_task_system_config(
+        db_session_factory,
+        account_id="acct-platform-member-wa-reward-dedupe",
+        site_id=site["id"],
+    )
+    _seed_member_wallet(
+        db_session_factory,
+        account_id="acct-platform-member-wa-reward-dedupe",
+        public_user_id=public_user_id,
+        system_balance=Decimal("0.00"),
+        task_balance=Decimal("0.00"),
+    )
+
+    first = client.post(
+        f"/api/platform/member-whatsapp-bindings/{created['requestId']}/status",
+        json={"status": "bound", "note": "first bind"},
+        headers=_operator_headers("acct-platform-member-wa-reward-dedupe"),
+    )
+    assert first.status_code == 200, first.text
+
+    repeated = client.post(
+        f"/api/platform/member-whatsapp-bindings/{created['requestId']}/status",
+        json={"status": "bound", "note": "repeat bind"},
+        headers=_operator_headers("acct-platform-member-wa-reward-dedupe"),
+    )
+    assert repeated.status_code == 200, repeated.text
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(AppUser.public_user_id == public_user_id).one()
+        wallet = session.query(WalletAccount).filter(WalletAccount.user_id == user.id).one()
+        assert wallet.task_balance == Decimal("20.00")
+
+        reward_entries = session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.wallet_account_id == wallet.id,
+            WalletLedgerEntry.transaction_type == "whatsapp_binding_reward",
+            WalletLedgerEntry.reference_type == "member_whatsapp_binding_request",
+            WalletLedgerEntry.reference_id == created["requestId"],
+        ).all()
+        assert len(reward_entries) == 1
+
+
+def test_platform_member_whatsapp_binding_bound_bootstraps_newbie_task_batch(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site, auth_payload, created = _seed_member_whatsapp_binding_request(
+        client,
+        account_id="acct-platform-member-wa-newbie",
+        site_key="platform-member-wa-newbie",
+        phone="+86139000678906",
+        display_name="Member WA Newbie",
+    )
+    public_user_id = auth_payload["member"]["publicUserId"]
+    newbie_plan_id = _seed_official_task_plan(
+        db_session_factory,
+        account_id="acct-platform-member-wa-newbie",
+        site_id=site["id"],
+        plan_type="newbie",
+        claim_gate="whatsapp_bound",
+    )
+    _seed_task_system_config(
+        db_session_factory,
+        account_id="acct-platform-member-wa-newbie",
+        site_id=site["id"],
+        newbie_plan_id=newbie_plan_id,
+    )
+    _seed_member_wallet(
+        db_session_factory,
+        account_id="acct-platform-member-wa-newbie",
+        public_user_id=public_user_id,
+        system_balance=Decimal("0.00"),
+        task_balance=Decimal("0.00"),
+    )
+
+    response = client.post(
+        f"/api/platform/member-whatsapp-bindings/{created['requestId']}/status",
+        json={"status": "bound", "note": "bootstrap newbie task"},
+        headers=_operator_headers("acct-platform-member-wa-newbie"),
+    )
+    assert response.status_code == 200, response.text
+
+    entry_state_response = client.get("/api/h5/tasks/entry-state")
+    assert entry_state_response.status_code == 200, entry_state_response.text
+    entry_state = entry_state_response.json()
+    assert entry_state["state"] == "newbie_task_available"
+    assert entry_state["taskPackageId"]
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(AppUser.public_user_id == public_user_id).one()
+        quotas = session.query(MemberTaskDayQuota).filter(
+            MemberTaskDayQuota.account_id == "acct-platform-member-wa-newbie",
+            MemberTaskDayQuota.user_id == user.id,
+            MemberTaskDayQuota.plan_id == newbie_plan_id,
+        ).all()
+        assert len(quotas) == 1
+        assert quotas[0].day_no == 1
+        assert quotas[0].status == "locked"
+        assert quotas[0].issued_batch_id is not None
+        assert quotas[0].locked_at is not None
+
+        batch = session.query(MemberTaskBatch).filter(
+            MemberTaskBatch.quota_id == quotas[0].id,
+        ).one()
+        assert batch.products_generated is True
+
+        package = session.query(TaskPackageInstance).filter(
+            TaskPackageInstance.batch_id == batch.id,
+        ).first()
+        assert package is not None
+
+        template = session.get(TaskPackageTemplate, package.template_id)
+        assert template is not None
+        assert template.package_type == "rookie"
 
 
 def test_platform_member_whatsapp_binding_status_guards_and_audit_log(

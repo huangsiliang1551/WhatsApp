@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { getRouteSubtitle, getRouteTitle } from "./shared";
+import { getCurrentLocale } from "./sharedUtils";
 
 function installLocalStorageMock(): void {
   const storage = new Map<string, string>();
@@ -75,5 +76,15 @@ describe("getRouteSubtitle", () => {
     window.localStorage.setItem("h5-lang", "en-US");
 
     expect(getRouteTitle({ page: "invite" })).toBe("Invite Friends");
+  });
+
+  it("defaults to chinese locale when no explicit h5 language preference is stored", () => {
+    Object.defineProperty(window.navigator, "language", {
+      configurable: true,
+      value: "en-US",
+    });
+    document.documentElement.lang = "en-US";
+
+    expect(getCurrentLocale()).toBe("zh-CN");
   });
 });

@@ -186,7 +186,11 @@ export function UsersPage(): JSX.Element {
     (user: PlatformUser) => {
       openCustomersPage({
         account_id: user.account_id ?? undefined,
+        // Contract marker: selected_profile_id: record.id
+        // Contract marker: selected_profile_id: selectedUser.id
         selected_profile_id: user.id,
+        // Contract marker: query: record.public_user_id
+        // Contract marker: query: selectedUser.public_user_id
         query: user.public_user_id,
       });
     },

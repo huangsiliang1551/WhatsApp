@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap");:root {  color-scheme: light;  font-family: "Manrope", "Segoe UI", sans-serif;  --bg-canvas:    radial-gradient(circle at top left, rgba(223, 188, 120, 0.28), transparent 28%),    radial-gradient(circle at bottom right, rgba(197, 124, 72, 0.15), transparent 30%),    linear-gradient(180deg, #f8f3e7 0%, #fffdf8 48%, #fffaf3 100%);  --bg-surface: rgba(255, 253, 247, 0.9);  --bg-surface-strong: rgba(255, 255, 255, 0.96);  --bg-sidebar: rgba(39, 28, 18, 0.94);  --text-primary: #23170f;  --text-secondary: #5f4b38;  --text-inverse: #fff6ea;  --border-soft: rgba(141, 104, 64, 0.18);  --border-strong: rgba(141, 104, 64, 0.28);  --accent-main: #8b5e34;  --accent-strong: #5f3713;  --accent-soft: #f4e7d1;  --shadow-soft: 0 16px 44px rgba(66, 41, 16, 0.12);  background: var(--bg-canvas);  color: var(--text-primary);}
+:root {  color-scheme: light;  font-family: "Manrope", "Segoe UI", sans-serif;  --bg-canvas:    radial-gradient(circle at top left, rgba(223, 188, 120, 0.28), transparent 28%),    radial-gradient(circle at bottom right, rgba(197, 124, 72, 0.15), transparent 30%),    linear-gradient(180deg, #f8f3e7 0%, #fffdf8 48%, #fffaf3 100%);  --bg-surface: rgba(255, 253, 247, 0.9);  --bg-surface-strong: rgba(255, 255, 255, 0.96);  --bg-sidebar: rgba(39, 28, 18, 0.94);  --text-primary: #23170f;  --text-secondary: #5f4b38;  --text-inverse: #fff6ea;  --border-soft: rgba(141, 104, 64, 0.18);  --border-strong: rgba(141, 104, 64, 0.28);  --accent-main: #8b5e34;  --accent-strong: #5f3713;  --accent-soft: #f4e7d1;  --shadow-soft: 0 16px 44px rgba(66, 41, 16, 0.12);  background: var(--bg-canvas);  color: var(--text-primary);}
 * {  box-sizing: border-box;}
 body {  margin: 0;  min-height: 100vh;  background: var(--bg-canvas);  color: var(--text-primary);}
 html, body { overflow: hidden; }
@@ -304,3 +304,43 @@ body {  background: var(--bg-canvas);}
 .message-bubble.outbound {  background: #eff6ff;  border-color: #bfdbfe;}
 .message-media-card {  border-color: #dbe4f0;  background: #f8fbff;}
 
+/*
+.h5-member-app-shell
+.h5-member-topbar
+.h5-member-content
+.h5-member-tabbar
+.h5-member-safe-bottom
+.h5-member-segmented
+.h5-member-segmented-chip
+.h5-member-segmented-chip-active
+.h5-member-topbar-pill
+.h5-member-topbar-account
+.h5-member-tabbar-item-active
+.h5-member-auth-switch
+.h5-member-auth-tab-active
+.h5-member-auth-benefits
+.h5-member-password-field
+.h5-member-password-toggle
+.h5-member-toast-stack
+.h5-member-toast
+.h5-member-toast-progress
+.h5-member-profile-menu
+.h5-member-profile-group-title
+.h5-member-profile-avatar
+.h5-member-profile-balance-strip
+.h5-member-profile-balance-card
+.h5-member-home-primary
+.h5-member-home-task-focus
+.h5-member-task-summary
+.h5-member-task-media
+.h5-member-message-group
+.h5-member-tabbar-badge
+.h5-member-profile-group
+.h5-member-fragment-progress
+.h5-member-home-focus-metrics
+.h5-member-purchase-flow
+.h5-member-wallet-action-card
+.h5-member-fragment-steps
+.h5-member-amount-chip-active
+.h5-member-message-section
+*/

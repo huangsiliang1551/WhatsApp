@@ -29,6 +29,8 @@ from app.db.models import (
     MemberWhatsAppBindingRequest,
     PromotionTaskInstance,
     PromotionTaskTemplate,
+    MemberTaskBatch,
+    MemberTaskDayQuota,
     MemberVerificationDocument,
     MemberVerificationRequest,
     MetaBusinessPortfolio,
@@ -36,11 +38,17 @@ from app.db.models import (
     SupportKnowledgeEntry,
     SystemSetting,
     TaskInstance,
+    TaskIssuePlan,
+    TaskIssuePlanDayRule,
     TaskPackageInstance,
     TaskPackageInstanceItem,
     TaskPackageTemplate,
     TaskPackageTemplateItem,
+    TaskProductGenerationRun,
+    TaskProductPool,
+    TaskProductPoolItem,
     TaskProofFile,
+    TaskSystemConfig,
     TaskReviewDecision,
     TaskSubmission,
     TaskSubmissionProof,
@@ -157,6 +165,14 @@ def test_expected_tables_exist() -> None:
         "task_package_template_items",
         "task_package_instances",
         "task_package_instance_items",
+        "task_system_configs",
+        "task_issue_plans",
+        "task_issue_plan_day_rules",
+        "member_task_day_quotas",
+        "member_task_batches",
+        "task_product_pools",
+        "task_product_pool_items",
+        "task_product_generation_runs",
         "user_identities",
         "invite_codes",
         "user_tags",
@@ -187,6 +203,7 @@ def test_expected_tables_exist() -> None:
         "promotion_task_templates",
         "promotion_task_instances",
         "user_referrals",
+        "task_manual_add_item_logs",
     }
 
     assert expected_tables.issubset(Base.metadata.tables.keys())
@@ -289,7 +306,35 @@ def test_key_relationship_columns_exist() -> None:
     assert "reward_ratio" in TaskPackageTemplate.__table__.c
     assert "product_name" in TaskPackageTemplateItem.__table__.c
     assert "status" in TaskPackageInstance.__table__.c
+    assert "batch_id" in TaskPackageInstance.__table__.c
+    assert "planned_amount" in TaskPackageInstance.__table__.c
+    assert "visible_item_id" in TaskPackageInstance.__table__.c
     assert "order_id" in TaskPackageInstanceItem.__table__.c
+    assert "item_origin" in TaskPackageInstanceItem.__table__.c
+    assert "product_id" in TaskPackageInstanceItem.__table__.c
+    assert "price_snapshot" in TaskPackageInstanceItem.__table__.c
+    assert "notify_user" in Base.metadata.tables["task_manual_add_item_logs"].c
+    assert "user_notice_text" in Base.metadata.tables["task_manual_add_item_logs"].c
+    assert "user_notified_at" in Base.metadata.tables["task_manual_add_item_logs"].c
+    assert "whatsapp_binding_reward_amount" in TaskSystemConfig.__table__.c
+    assert "claim_gate" in TaskIssuePlan.__table__.c
+    assert "default_tolerance_amount" in TaskIssuePlan.__table__.c
+    assert "default_reward_ratio" in TaskIssuePlan.__table__.c
+    assert "day_no" in TaskIssuePlanDayRule.__table__.c
+    assert "issue_time_of_day" in TaskIssuePlanDayRule.__table__.c
+    assert "elapsed_delay_hours" in TaskIssuePlanDayRule.__table__.c
+    assert "package_amounts_json" in MemberTaskDayQuota.__table__.c
+    assert "quota_id" in MemberTaskBatch.__table__.c
+    assert "current_package_index" in MemberTaskBatch.__table__.c
+    assert "products_generated" in MemberTaskBatch.__table__.c
+    assert "pool_type" in TaskProductPool.__table__.c
+    assert "price_mode" in TaskProductPool.__table__.c
+    assert "allow_repeat_in_same_batch" in TaskProductPool.__table__.c
+    assert "product_id" in TaskProductPoolItem.__table__.c
+    assert "product_description" in TaskProductPoolItem.__table__.c
+    assert "weight" in TaskProductPoolItem.__table__.c
+    assert "selection_seed" in TaskProductGenerationRun.__table__.c
+    assert "idempotency_key" in TaskProductGenerationRun.__table__.c
     assert "identity_type" in UserIdentity.__table__.c
     assert "identity_value" in UserIdentity.__table__.c
     assert "tag_key" in UserTag.__table__.c

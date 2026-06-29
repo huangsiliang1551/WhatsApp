@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { sessionManager } from "../../services/h5SessionManager";
-import { buildH5Path } from "./sharedUtils";
+import { getCurrentMemberSession } from "../../services/h5Member";
+import { buildH5LoginRedirectPath } from "./sharedUtils";
 
 export type H5MemberInfo = {
   accountId: string;
@@ -19,12 +19,6 @@ type AuthGuardResult = {
   user: H5MemberInfo | null;
 };
 
-/**
- * 路由守卫 hook
- * @param redirectToLogin 是否在未认证时跳转登录页
- * @param currentPath 当前路径，用于 redirect 参数
- * @param onNavigate 导航回调，用于跳转登录页
- */
 export function useAuthGuard(
   redirectToLogin: boolean,
   currentPath: string,
@@ -35,26 +29,42 @@ export function useAuthGuard(
   const [user, setUser] = useState<H5MemberInfo | null>(null);
 
   useEffect(() => {
-    // 从 sessionManager 检查登录态
-    const auth = sessionManager.isAuthenticated();
-    const userInfo = sessionManager.getUserInfo();
+    let cancelled = false;
 
-    setIsAuthenticated(auth);
-    setUser(userInfo);
-    setIsLoading(false);
-
-    if (!auth && redirectToLogin && onNavigate) {
-      const currentUrl = new URL(currentPath, "http://localhost");
-      const siteKey = currentUrl.searchParams.get("site_key")?.trim();
-      if (siteKey) {
-        onNavigate(buildH5Path("/h5/login", siteKey, { redirect: currentPath }));
+    void (async () => {
+      const session = await getCurrentMemberSession();
+      if (cancelled) {
         return;
       }
 
-      const encodedPath = encodeURIComponent(currentPath);
-      onNavigate(`/h5/login?redirect=${encodedPath}`);
-    }
+      const auth = !!session;
+      setIsAuthenticated(auth);
+      setUser(
+        session
+          ? {
+              accountId: session.accountId,
+              phone: session.phone ?? session.username ?? "",
+              publicUserId: session.publicUserId,
+              displayName: session.displayName,
+              inviteCode: session.inviteCode,
+              avatarUrl: session.avatarUrl ?? null,
+            }
+          : null,
+      );
+      setIsLoading(false);
+
+      if (!auth && redirectToLogin && onNavigate) {
+        const currentUrl = new URL(currentPath, "http://localhost");
+        const siteKey = currentUrl.searchParams.get("site_key")?.trim();
+        onNavigate(buildH5LoginRedirectPath(currentPath, siteKey));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [redirectToLogin, currentPath, onNavigate]);
 
   return { isAuthenticated, isLoading, user };
 }
+

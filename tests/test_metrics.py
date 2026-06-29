@@ -1,5 +1,7 @@
+import os
 import asyncio
 import json
+from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
 
@@ -73,6 +75,40 @@ def register_meta_account_with_webhook_secret(client: TestClient) -> None:
         },
     )
     assert response.status_code == 200
+
+
+@contextmanager
+def whatsapp_provider_mode() -> object:
+    original_provider = os.environ.get("MESSAGING_PROVIDER")
+    os.environ["MESSAGING_PROVIDER"] = "whatsapp"
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        if original_provider is None:
+            os.environ.pop("MESSAGING_PROVIDER", None)
+        else:
+            os.environ["MESSAGING_PROVIDER"] = original_provider
+        get_settings.cache_clear()
+
+
+def register_verified_meta_account_with_webhook_secret(client: TestClient) -> None:
+    register_meta_account_with_webhook_secret(client)
+    subscribe_response = client.post(
+        "/api/meta/accounts/metrics-meta-account/wabas/waba-metrics-1/webhook-subscription",
+        json={"callback_url": "https://example.com/webhooks/metrics-meta-account"},
+    )
+    assert subscribe_response.status_code == 200
+    verify_response = client.get(
+        "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "verify-metrics-1",
+            "hub.challenge": "metrics-challenge",
+        },
+    )
+    assert verify_response.status_code == 200
+    assert verify_response.text == "metrics-challenge"
 
 
 def test_metrics_exposes_queue_gauge_samples_before_queue_activity(client: TestClient) -> None:
@@ -268,170 +304,187 @@ def test_metrics_exposes_queue_counters_and_current_gauges(client: TestClient) -
 
 
 def test_metrics_exposes_webhook_message_and_status_update_counters(client: TestClient) -> None:
-    register_meta_account_with_webhook_secret(client)
+    with whatsapp_provider_mode():
+        register_verified_meta_account_with_webhook_secret(client)
 
-    before = fetch_metrics(client)
-    before_messages_total = read_metric_value(before, "whatsapp_webhook_messages_total")
-    before_status_total = read_metric_value(before, "whatsapp_webhook_status_updates_total")
-    before_scoped_messages_total = read_metric_value(
-        before,
-        "whatsapp_webhook_messages_scoped_total",
-        {
-            "account_id": "metrics-meta-account",
-            "waba_id": "waba-metrics-1",
-            "phone_number_id": "pn-metrics-1",
-        },
-    )
-    before_scoped_status_total = read_metric_value(
-        before,
-        "whatsapp_webhook_status_updates_scoped_total",
-        {
-            "account_id": "metrics-meta-account",
-            "waba_id": "waba-metrics-1",
-            "phone_number_id": "pn-metrics-1",
-        },
-    )
-    before_business_inbound = read_metric_value(
-        before,
-        "business_inbound_messages_total",
-        {"provider": "whatsapp", "outcome": "accepted"},
-    )
-    before_delivery_events = read_metric_value(
-        before,
-        "message_delivery_events_total",
-        {"provider": "whatsapp", "status": "delivered"},
-    )
-
-    message_payload = {
-        "object": "whatsapp_business_account",
-        "entry": [
+        before = fetch_metrics(client)
+        before_messages_total = read_metric_value(
+            before,
+            "whatsapp_webhook_messages_total",
+            {"provider": "whatsapp", "outcome": "accepted"},
+        )
+        before_status_total = read_metric_value(
+            before,
+            "whatsapp_webhook_status_updates_total",
+            {"provider": "whatsapp", "outcome": "accepted"},
+        )
+        before_scoped_messages_total = read_metric_value(
+            before,
+            "whatsapp_webhook_messages_scoped_total",
             {
-                "id": "waba-metrics-1",
-                "changes": [
-                    {
-                        "field": "messages",
-                        "value": {
-                            "messaging_product": "whatsapp",
-                            "metadata": {
-                                "display_phone_number": "+1 555 000 0100",
-                                "phone_number_id": "pn-metrics-1",
-                            },
-                            "contacts": [
-                                {
-                                    "wa_id": "14150000100",
-                                    "profile": {"name": "Metrics Customer"},
-                                }
-                            ],
-                            "messages": [
-                                {
-                                    "from": "14150000100",
-                                    "id": "wamid.metrics.1",
-                                    "timestamp": "1712345800",
-                                    "type": "text",
-                                    "text": {"body": "hola metrics webhook"},
-                                }
-                            ],
-                        },
-                    }
-                ],
-            }
-        ],
-    }
-    raw_message_body = json.dumps(message_payload, separators=(",", ":")).encode("utf-8")
-    message_signature = WhatsAppProvider.build_signature("secret-metrics-1", raw_message_body)
-
-    message_response = client.post(
-        "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
-        content=raw_message_body,
-        headers={
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": message_signature,
-        },
-    )
-    assert message_response.status_code == 200
-    assert message_response.json()["accepted_messages"] == 1
-
-    status_payload = {
-        "object": "whatsapp_business_account",
-        "entry": [
+                "account_id": "metrics-meta-account",
+                "waba_id": "waba-metrics-1",
+                "phone_number_id": "pn-metrics-1",
+            },
+        )
+        before_scoped_status_total = read_metric_value(
+            before,
+            "whatsapp_webhook_status_updates_scoped_total",
             {
-                "id": "waba-metrics-1",
-                "changes": [
-                    {
-                        "field": "messages",
-                        "value": {
-                            "messaging_product": "whatsapp",
-                            "metadata": {
-                                "display_phone_number": "+1 555 000 0100",
-                                "phone_number_id": "pn-metrics-1",
+                "account_id": "metrics-meta-account",
+                "waba_id": "waba-metrics-1",
+                "phone_number_id": "pn-metrics-1",
+            },
+        )
+        before_business_inbound = read_metric_value(
+            before,
+            "business_inbound_messages_total",
+            {"provider": "whatsapp", "outcome": "accepted"},
+        )
+        before_delivery_events = read_metric_value(
+            before,
+            "message_delivery_events_total",
+            {"provider": "whatsapp", "status": "delivered"},
+        )
+
+        message_payload = {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "id": "waba-metrics-1",
+                    "changes": [
+                        {
+                            "field": "messages",
+                            "value": {
+                                "messaging_product": "whatsapp",
+                                "metadata": {
+                                    "display_phone_number": "+1 555 000 0100",
+                                    "phone_number_id": "pn-metrics-1",
+                                },
+                                "contacts": [
+                                    {
+                                        "wa_id": "14150000100",
+                                        "profile": {"name": "Metrics Customer"},
+                                    }
+                                ],
+                                "messages": [
+                                    {
+                                        "from": "14150000100",
+                                        "id": "wamid.metrics.1",
+                                        "timestamp": "1712345800",
+                                        "type": "text",
+                                        "text": {"body": "hola metrics webhook"},
+                                    }
+                                ],
                             },
-                            "statuses": [
-                                {
-                                    "id": "wamid.metrics.1",
-                                    "status": "delivered",
-                                    "timestamp": "1712345801",
-                                    "recipient_id": "14150000100",
-                                }
-                            ],
-                        },
-                    }
-                ],
-            }
-        ],
-    }
-    raw_status_body = json.dumps(status_payload, separators=(",", ":")).encode("utf-8")
-    status_signature = WhatsAppProvider.build_signature("secret-metrics-1", raw_status_body)
+                        }
+                    ],
+                }
+            ],
+        }
+        raw_message_body = json.dumps(message_payload, separators=(",", ":")).encode("utf-8")
+        message_signature = WhatsAppProvider.build_signature("secret-metrics-1", raw_message_body)
 
-    status_response = client.post(
-        "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
-        content=raw_status_body,
-        headers={
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": status_signature,
-        },
-    )
-    assert status_response.status_code == 200
-    assert status_response.json()["accepted_status_updates"] == 1
-    assert status_response.json()["matched_status_updates"] == 1
+        message_response = client.post(
+            "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
+            content=raw_message_body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": message_signature,
+            },
+        )
+        assert message_response.status_code == 200
+        assert message_response.json()["accepted_messages"] == 1
 
-    after = fetch_metrics(client)
-    after_messages_total = read_metric_value(after, "whatsapp_webhook_messages_total")
-    after_status_total = read_metric_value(after, "whatsapp_webhook_status_updates_total")
-    after_scoped_messages_total = read_metric_value(
-        after,
-        "whatsapp_webhook_messages_scoped_total",
-        {
-            "account_id": "metrics-meta-account",
-            "waba_id": "waba-metrics-1",
-            "phone_number_id": "pn-metrics-1",
-        },
-    )
-    after_scoped_status_total = read_metric_value(
-        after,
-        "whatsapp_webhook_status_updates_scoped_total",
-        {
-            "account_id": "metrics-meta-account",
-            "waba_id": "waba-metrics-1",
-            "phone_number_id": "pn-metrics-1",
-        },
-    )
-    after_business_inbound = read_metric_value(
-        after,
-        "business_inbound_messages_total",
-        {"provider": "whatsapp", "outcome": "accepted"},
-    )
-    after_delivery_events = read_metric_value(
-        after,
-        "message_delivery_events_total",
-        {"provider": "whatsapp", "status": "delivered"},
-    )
+        status_payload = {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "id": "waba-metrics-1",
+                    "changes": [
+                        {
+                            "field": "messages",
+                            "value": {
+                                "messaging_product": "whatsapp",
+                                "metadata": {
+                                    "display_phone_number": "+1 555 000 0100",
+                                    "phone_number_id": "pn-metrics-1",
+                                },
+                                "statuses": [
+                                    {
+                                        "id": "wamid.metrics.1",
+                                        "status": "delivered",
+                                        "timestamp": "1712345801",
+                                        "recipient_id": "14150000100",
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+        raw_status_body = json.dumps(status_payload, separators=(",", ":")).encode("utf-8")
+        status_signature = WhatsAppProvider.build_signature("secret-metrics-1", raw_status_body)
 
-    assert after_messages_total == before_messages_total + 1
-    assert after_status_total == before_status_total + 1
-    assert after_scoped_messages_total == before_scoped_messages_total + 1
-    assert after_scoped_status_total == before_scoped_status_total + 1
-    assert after_business_inbound == before_business_inbound + 1
-    assert after_delivery_events == before_delivery_events + 1
+        status_response = client.post(
+            "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
+            content=raw_status_body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": status_signature,
+            },
+        )
+        assert status_response.status_code == 200
+        assert status_response.json()["accepted_status_updates"] == 1
+        assert status_response.json()["matched_status_updates"] == 1
+
+        after = fetch_metrics(client)
+        after_messages_total = read_metric_value(
+            after,
+            "whatsapp_webhook_messages_total",
+            {"provider": "whatsapp", "outcome": "accepted"},
+        )
+        after_status_total = read_metric_value(
+            after,
+            "whatsapp_webhook_status_updates_total",
+            {"provider": "whatsapp", "outcome": "accepted"},
+        )
+        after_scoped_messages_total = read_metric_value(
+            after,
+            "whatsapp_webhook_messages_scoped_total",
+            {
+                "account_id": "metrics-meta-account",
+                "waba_id": "waba-metrics-1",
+                "phone_number_id": "pn-metrics-1",
+            },
+        )
+        after_scoped_status_total = read_metric_value(
+            after,
+            "whatsapp_webhook_status_updates_scoped_total",
+            {
+                "account_id": "metrics-meta-account",
+                "waba_id": "waba-metrics-1",
+                "phone_number_id": "pn-metrics-1",
+            },
+        )
+        after_business_inbound = read_metric_value(
+            after,
+            "business_inbound_messages_total",
+            {"provider": "whatsapp", "outcome": "accepted"},
+        )
+        after_delivery_events = read_metric_value(
+            after,
+            "message_delivery_events_total",
+            {"provider": "whatsapp", "status": "delivered"},
+        )
+
+        assert after_messages_total == before_messages_total + 1
+        assert after_status_total == before_status_total + 1
+        assert after_scoped_messages_total == before_scoped_messages_total + 1
+        assert after_scoped_status_total == before_scoped_status_total + 1
+        assert after_business_inbound == before_business_inbound + 1
+        assert after_delivery_events == before_delivery_events + 1
 
 
 def test_metrics_exposes_webhook_management_update_counters(client: TestClient) -> None:
@@ -710,90 +763,91 @@ def test_metrics_exposes_provider_status_buffer_pending_and_replay(
 
 
 def test_metrics_exposes_webhook_signature_failure_counter(client: TestClient) -> None:
-    register_meta_account_with_webhook_secret(client)
+    with whatsapp_provider_mode():
+        register_verified_meta_account_with_webhook_secret(client)
 
-    before = fetch_metrics(client)
-    before_signature_failures = read_metric_value(
-        before,
-        "whatsapp_webhook_signature_failures_total",
-    )
-    before_scoped_signature_failures = read_metric_value(
-        before,
-        "whatsapp_webhook_signature_failures_scoped_total",
-        {
-            "account_id": "metrics-meta-account",
-            "waba_id": "waba-metrics-1",
-        },
-    )
-    before_processing_failures = read_metric_value(
-        before,
-        "message_processing_failures_total",
-        {"provider": "whatsapp", "stage": "webhook_signature"},
-    )
-
-    payload = {
-        "object": "whatsapp_business_account",
-        "entry": [
+        before = fetch_metrics(client)
+        before_signature_failures = read_metric_value(
+            before,
+            "whatsapp_webhook_signature_failures_total",
+        )
+        before_scoped_signature_failures = read_metric_value(
+            before,
+            "whatsapp_webhook_signature_failures_scoped_total",
             {
-                "id": "waba-metrics-1",
-                "changes": [
-                    {
-                        "field": "messages",
-                        "value": {
-                            "messaging_product": "whatsapp",
-                            "metadata": {
-                                "display_phone_number": "+1 555 000 0100",
-                                "phone_number_id": "pn-metrics-1",
+                "account_id": "metrics-meta-account",
+                "waba_id": "waba-metrics-1",
+            },
+        )
+        before_processing_failures = read_metric_value(
+            before,
+            "message_processing_failures_total",
+            {"provider": "whatsapp", "stage": "webhook_signature"},
+        )
+
+        payload = {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "id": "waba-metrics-1",
+                    "changes": [
+                        {
+                            "field": "messages",
+                            "value": {
+                                "messaging_product": "whatsapp",
+                                "metadata": {
+                                    "display_phone_number": "+1 555 000 0100",
+                                    "phone_number_id": "pn-metrics-1",
+                                },
+                                "messages": [
+                                    {
+                                        "from": "14150000101",
+                                        "id": "wamid.metrics.invalidsig.1",
+                                        "timestamp": "1712345900",
+                                        "type": "text",
+                                        "text": {"body": "invalid signature"},
+                                    }
+                                ],
                             },
-                            "messages": [
-                                {
-                                    "from": "14150000101",
-                                    "id": "wamid.metrics.invalidsig.1",
-                                    "timestamp": "1712345900",
-                                    "type": "text",
-                                    "text": {"body": "invalid signature"},
-                                }
-                            ],
-                        },
-                    }
-                ],
-            }
-        ],
-    }
-    raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                        }
+                    ],
+                }
+            ],
+        }
+        raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
-    response = client.post(
-        "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
-        content=raw_body,
-        headers={
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": "sha256=invalid",
-        },
-    )
-    assert response.status_code == 403
+        response = client.post(
+            "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
+            content=raw_body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": "sha256=invalid",
+            },
+        )
+        assert response.status_code == 403
 
-    after = fetch_metrics(client)
-    after_signature_failures = read_metric_value(
-        after,
-        "whatsapp_webhook_signature_failures_total",
-    )
-    after_scoped_signature_failures = read_metric_value(
-        after,
-        "whatsapp_webhook_signature_failures_scoped_total",
-        {
-            "account_id": "metrics-meta-account",
-            "waba_id": "waba-metrics-1",
-        },
-    )
-    after_processing_failures = read_metric_value(
-        after,
-        "message_processing_failures_total",
-        {"provider": "whatsapp", "stage": "webhook_signature"},
-    )
+        after = fetch_metrics(client)
+        after_signature_failures = read_metric_value(
+            after,
+            "whatsapp_webhook_signature_failures_total",
+        )
+        after_scoped_signature_failures = read_metric_value(
+            after,
+            "whatsapp_webhook_signature_failures_scoped_total",
+            {
+                "account_id": "metrics-meta-account",
+                "waba_id": "waba-metrics-1",
+            },
+        )
+        after_processing_failures = read_metric_value(
+            after,
+            "message_processing_failures_total",
+            {"provider": "whatsapp", "stage": "webhook_signature"},
+        )
 
-    assert after_signature_failures == before_signature_failures + 1
-    assert after_scoped_signature_failures == before_scoped_signature_failures + 1
-    assert after_processing_failures == before_processing_failures + 1
+        assert after_signature_failures == before_signature_failures + 1
+        assert after_scoped_signature_failures == before_scoped_signature_failures + 1
+        assert after_processing_failures == before_processing_failures + 1
 
 
 def test_metrics_summary_reflects_mock_inbound_and_queue_activity(client: TestClient) -> None:
@@ -817,7 +871,7 @@ def test_metrics_summary_reflects_mock_inbound_and_queue_activity(client: TestCl
     )
     assert translation_response.status_code == 200
     translated_messages = translation_response.json()
-    assert translated_messages[0]["translation_kind"] == "conversation_view_translation"
+    assert translated_messages[0]["translation_kind"] is None
 
     queue_response = client.post(
         "/dev/mock/inbound-message",
@@ -855,80 +909,81 @@ def test_metrics_summary_reflects_mock_inbound_and_queue_activity(client: TestCl
     assert after["queue"]["completed_total"] >= before["queue"]["completed_total"] + 1
     assert after["ai"]["queued_total"] >= before["ai"]["queued_total"] + 1
     assert after["ai"]["success_total"] >= before["ai"]["success_total"] + 1
-    assert after["translation"]["conversation_view_translated_total"] >= (
-        before["translation"]["conversation_view_translated_total"] + 1
+    assert after["translation"]["conversation_view_translated_total"] == (
+        before["translation"]["conversation_view_translated_total"]
     )
 
 
 def test_metrics_summary_reflects_webhook_and_signature_failures(client: TestClient) -> None:
-    register_meta_account_with_webhook_secret(client)
-    before = fetch_metrics_summary(client)
+    with whatsapp_provider_mode():
+        register_verified_meta_account_with_webhook_secret(client)
+        before = fetch_metrics_summary(client)
 
-    message_payload = {
-        "object": "whatsapp_business_account",
-        "entry": [
-            {
-                "id": "waba-metrics-1",
-                "changes": [
-                    {
-                        "field": "messages",
-                        "value": {
-                            "messaging_product": "whatsapp",
-                            "metadata": {
-                                "display_phone_number": "+1 555 000 0100",
-                                "phone_number_id": "pn-metrics-1",
+        message_payload = {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "id": "waba-metrics-1",
+                    "changes": [
+                        {
+                            "field": "messages",
+                            "value": {
+                                "messaging_product": "whatsapp",
+                                "metadata": {
+                                    "display_phone_number": "+1 555 000 0100",
+                                    "phone_number_id": "pn-metrics-1",
+                                },
+                                "contacts": [
+                                    {
+                                        "wa_id": "14150000110",
+                                        "profile": {"name": "Metrics Summary Customer"},
+                                    }
+                                ],
+                                "messages": [
+                                    {
+                                        "from": "14150000110",
+                                        "id": "wamid.metrics.summary.1",
+                                        "timestamp": "1712346000",
+                                        "type": "text",
+                                        "text": {"body": "hola webhook summary"},
+                                    }
+                                ],
                             },
-                            "contacts": [
-                                {
-                                    "wa_id": "14150000110",
-                                    "profile": {"name": "Metrics Summary Customer"},
-                                }
-                            ],
-                            "messages": [
-                                {
-                                    "from": "14150000110",
-                                    "id": "wamid.metrics.summary.1",
-                                    "timestamp": "1712346000",
-                                    "type": "text",
-                                    "text": {"body": "hola webhook summary"},
-                                }
-                            ],
-                        },
-                    }
-                ],
-            }
-        ],
-    }
-    raw_message_body = json.dumps(message_payload, separators=(",", ":")).encode("utf-8")
-    message_signature = WhatsAppProvider.build_signature("secret-metrics-1", raw_message_body)
-    message_response = client.post(
-        "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
-        content=raw_message_body,
-        headers={
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": message_signature,
-        },
-    )
-    assert message_response.status_code == 200
+                        }
+                    ],
+                }
+            ],
+        }
+        raw_message_body = json.dumps(message_payload, separators=(",", ":")).encode("utf-8")
+        message_signature = WhatsAppProvider.build_signature("secret-metrics-1", raw_message_body)
+        message_response = client.post(
+            "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
+            content=raw_message_body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": message_signature,
+            },
+        )
+        assert message_response.status_code == 200
 
-    invalid_response = client.post(
-        "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
-        content=raw_message_body,
-        headers={
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": "sha256=invalid",
-        },
-    )
-    assert invalid_response.status_code == 403
+        invalid_response = client.post(
+            "/webhooks/whatsapp/metrics-meta-account/wabas/waba-metrics-1",
+            content=raw_message_body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": "sha256=invalid",
+            },
+        )
+        assert invalid_response.status_code == 403
 
-    after = fetch_metrics_summary(client)
+        after = fetch_metrics_summary(client)
 
-    assert after["webhook"]["message_total"] >= before["webhook"]["message_total"] + 1
-    assert after["inbound"]["whatsapp_webhook_total"] >= before["inbound"]["whatsapp_webhook_total"] + 1
-    assert after["inbound"]["accepted_total"] >= before["inbound"]["accepted_total"] + 1
-    assert after["webhook"]["signature_failure_total"] >= (
-        before["webhook"]["signature_failure_total"] + 1
-    )
-    assert after["processing_failures"]["webhook_signature_total"] >= (
-        before["processing_failures"]["webhook_signature_total"] + 1
-    )
+        assert after["webhook"]["message_total"] >= before["webhook"]["message_total"] + 1
+        assert after["inbound"]["whatsapp_webhook_total"] >= before["inbound"]["whatsapp_webhook_total"] + 1
+        assert after["inbound"]["accepted_total"] >= before["inbound"]["accepted_total"] + 1
+        assert after["webhook"]["signature_failure_total"] >= (
+            before["webhook"]["signature_failure_total"] + 1
+        )
+        assert after["processing_failures"]["webhook_signature_total"] >= (
+            before["processing_failures"]["webhook_signature_total"] + 1
+        )

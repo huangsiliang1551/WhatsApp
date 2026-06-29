@@ -226,37 +226,27 @@ def delete_template_detail_aggregate_rows(
     account_id: str,
     template_id: str,
 ) -> list[str]:
-    inspector = inspect(session.get_bind())
     deleted_tables: list[str] = []
-    for table_name in inspector.get_table_names():
-        columns = {column["name"] for column in inspector.get_columns(table_name)}
-        if not {"account_id", "template_id"}.issubset(columns):
-            continue
-        if "hour_bucket" in columns and {"send_count", "delivered_count", "read_count", "failed_count"} & columns:
-            session.execute(
-                text(
-                    f'DELETE FROM "{table_name}" '
-                    "WHERE account_id = :account_id AND template_id = :template_id"
-                ),
-                {
-                    "account_id": account_id,
-                    "template_id": template_id,
-                },
-            )
-            deleted_tables.append(table_name)
-            continue
-        if "error_code" in columns and {"failed_count", "failure_count"} & columns:
-            session.execute(
-                text(
-                    f'DELETE FROM "{table_name}" '
-                    "WHERE account_id = :account_id AND template_id = :template_id"
-                ),
-                {
-                    "account_id": account_id,
-                    "template_id": template_id,
-                },
-            )
-            deleted_tables.append(table_name)
+    deleted_hourly = (
+        session.query(TemplateHourlyStat)
+        .filter(
+            TemplateHourlyStat.account_id == account_id,
+            TemplateHourlyStat.template_id == template_id,
+        )
+        .delete(synchronize_session=False)
+    )
+    if deleted_hourly:
+        deleted_tables.append(TemplateHourlyStat.__tablename__)
+    deleted_failures = (
+        session.query(TemplateFailureStat)
+        .filter(
+            TemplateFailureStat.account_id == account_id,
+            TemplateFailureStat.template_id == template_id,
+        )
+        .delete(synchronize_session=False)
+    )
+    if deleted_failures:
+        deleted_tables.append(TemplateFailureStat.__tablename__)
     session.commit()
     return deleted_tables
 

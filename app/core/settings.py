@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     h5_member_login_lockout_minutes: int = Field(default=15, alias="H5_MEMBER_LOGIN_LOCKOUT_MINUTES")
     h5_member_order_cache_ttl_seconds: int = Field(default=300, alias="H5_MEMBER_ORDER_CACHE_TTL_SECONDS")
     h5_member_logistics_cache_ttl_seconds: int = Field(default=600, alias="H5_MEMBER_LOGISTICS_CACHE_TTL_SECONDS")
+    whatsapp_auth_session_ttl_minutes: int = Field(default=15, alias="WHATSAPP_AUTH_SESSION_TTL_MINUTES")
+    whatsapp_auto_bind_invite_ttl_minutes: int = Field(default=30, alias="WHATSAPP_AUTO_BIND_INVITE_TTL_MINUTES")
+    whatsapp_phone_pool_rebalance_enabled: bool = Field(default=True, alias="WHATSAPP_PHONE_POOL_REBALANCE_ENABLED")
+    whatsapp_unbound_message_reply_text: str = Field(
+        default="Please complete WhatsApp binding before continuing.",
+        alias="WHATSAPP_UNBOUND_MESSAGE_REPLY_TEXT",
+    )
 
     database_url: str = Field(default="postgresql://whatsapp_user:secure_password@localhost:5432/whatsapp_bot", alias="DATABASE_URL")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
@@ -91,6 +98,10 @@ class Settings(BaseSettings):
     auto_translate_on_conversation_open: bool = Field(default=False, alias="AUTO_TRANSLATE_ON_CONVERSATION_OPEN")
     auto_translate_operator_outbound: bool = Field(default=True, alias="AUTO_TRANSLATE_OPERATOR_OUTBOUND")
     llm_request_timeout_seconds: int = Field(default=30, alias="LLM_REQUEST_TIMEOUT_SECONDS")
+    production_guard_strict: bool = Field(default=False, alias="PRODUCTION_GUARD_STRICT")
+    secret_encryption_key: str = Field(default="", alias="SECRET_ENCRYPTION_KEY")
+    generic_hmac_payment_secret: str = Field(default="", alias="GENERIC_HMAC_PAYMENT_SECRET")
+    generic_hmac_payment_window_seconds: int = Field(default=300, alias="GENERIC_HMAC_PAYMENT_WINDOW_SECONDS")
 
     # AI quality check settings
     ai_quality_check_enabled: bool = Field(default=True, alias="AI_QUALITY_CHECK_ENABLED")
@@ -125,6 +136,16 @@ class Settings(BaseSettings):
 
     # Database backups
     backup_dir: str = Field(default="/opt/whatsapp/backups", alias="BACKUP_DIR")
+    h5_gateway_dry_run: bool = Field(default=True, alias="H5_GATEWAY_DRY_RUN")
+    h5_gateway_agent_shared_secret: str = Field(default="", alias="H5_GATEWAY_AGENT_SHARED_SECRET")
+    h5_gateway_allowed_job_types: str = Field(
+        default="test_ssh,bootstrap,install_agent,deploy_frontend,sync_config,issue_cert,renew_cert,reload_nginx,security_hardening,block_domain,unblock_domain,health_check,rollback",
+        alias="H5_GATEWAY_ALLOWED_JOB_TYPES",
+    )
+    h5_gateway_script_root: str = Field(default="deploy/h5-gateway/scripts", alias="H5_GATEWAY_SCRIPT_ROOT")
+    h5_gateway_pull_interval_seconds: int = Field(default=15, alias="H5_GATEWAY_PULL_INTERVAL_SECONDS")
+    dns_provider: str = Field(default="dry_run", alias="DNS_PROVIDER")
+    cdn_provider: str = Field(default="dry_run", alias="CDN_PROVIDER")
 
     # CORS
     cors_origins: str = Field(default="http://localhost:5173,http://localhost:3000", alias="CORS_ORIGINS")

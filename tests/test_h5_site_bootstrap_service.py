@@ -25,6 +25,7 @@ def test_h5_site_bootstrap_seeds_default_sites_and_accounts(
     assert [site.site_key for site in sites] == sorted(
         definition.site_key for definition in DEFAULT_H5_SITE_DEFINITIONS
     )
+    assert all(site.default_language == "zh-CN" for site in sites)
     assert [account.account_id for account in accounts] == sorted(
         definition.account_id for definition in DEFAULT_H5_SITE_DEFINITIONS
     )

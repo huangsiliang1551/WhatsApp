@@ -5,14 +5,18 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.auth import RequestActor
 from app.db.models import (
     AppUser,
+    MemberProfile,
     RechargeRecord,
     RechargeRepairOrder,
     WalletAccount,
     WalletRechargeOrder,
     utc_now,
 )
+from app.services.data_scope_filter_service import DataScopeFilterService
+from app.services.member_auto_certification_service import MemberAutoCertificationService
 from app.services.wallet_ledger_service import WalletLedgerService
 
 
@@ -62,6 +66,18 @@ class RechargeRepairService:
             return repair
         if repair.status != "pending":
             raise ValueError(f"Recharge repair '{repair.id}' cannot be approved from '{repair.status}'.")
+
+        if repair.channel_order_no:
+            existing_recharge = self._session.scalars(
+                select(RechargeRecord).where(
+                    RechargeRecord.agency_id == repair.account_id,
+                    RechargeRecord.channel_id == repair.channel_id,
+                    RechargeRecord.channel_order_id == repair.channel_order_no,
+                    RechargeRecord.status == "completed",
+                )
+            ).first()
+            if existing_recharge is not None:
+                raise ValueError("Recharge already exists for this channel order.")
 
         if repair.channel_order_no:
             existing = self._session.scalars(
@@ -128,6 +144,21 @@ class RechargeRepairService:
         repair.recharge_record_id = recharge_record.id
         repair.ledger_id = ledger.id
         self._session.add(repair)
+        member_profile = self._session.scalars(
+            select(MemberProfile).where(
+                MemberProfile.account_id == repair.account_id,
+                MemberProfile.user_id == repair.user_id,
+            )
+        ).first()
+        if member_profile is not None:
+            user = self._require_user(user_id=repair.user_id, account_id=repair.account_id)
+            MemberAutoCertificationService(session=self._session).auto_certify_after_real_recharge(
+                account_id=repair.account_id,
+                site_id=user.registration_site_id,
+                member_profile_id=member_profile.id,
+                user_id=repair.user_id,
+                trigger_source="recharge_repair",
+            )
         self._session.commit()
         return repair
 
@@ -146,13 +177,20 @@ class RechargeRepairService:
         self._session.commit()
         return repair
 
-    def list_repairs(self, *, account_id: str | None = None) -> list[RechargeRepairOrder]:
+    def list_repairs(
+        self,
+        *,
+        account_id: str | None = None,
+        scope_actor: RequestActor | None = None,
+    ) -> list[RechargeRepairOrder]:
         query = select(RechargeRepairOrder).order_by(
             RechargeRepairOrder.created_at.desc(),
             RechargeRepairOrder.id.desc(),
         )
         if account_id is not None:
             query = query.where(RechargeRepairOrder.account_id == account_id)
+        if scope_actor is not None:
+            query = DataScopeFilterService(self._session).filter_recharge_repairs(query, scope_actor, mode="current")
         return self._session.scalars(query).all()
 
     def _require_user(self, *, user_id: str, account_id: str) -> AppUser:

@@ -64,7 +64,8 @@ class DeepSeekProvider(AIProvider):
         message = response.choices[0].message if response.choices else None
         if message is None:
             raise RuntimeError(f"{self.provider_name} provider returned an empty response.")
-        if message.tool_calls:
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
             # 将 tool_calls 编码到回复文本中，供上层 AIToolExecutor 处理
             import json as _json
 
@@ -77,7 +78,7 @@ class DeepSeekProvider(AIProvider):
                         "arguments": tc.function.arguments,
                     },
                 }
-                for tc in message.tool_calls
+                for tc in tool_calls
             ]
             return _json.dumps({"__tool_calls__": tool_calls_data})
 

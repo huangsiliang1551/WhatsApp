@@ -30,6 +30,23 @@ $providerStatusBufferUri = "$BaseUrl/api/runtime/provider-status-buffer?limit=1"
 if ($AccountId.Trim()) {
     $providerStatusBufferUri = "$providerStatusBufferUri&account_id=$escapedAccountId"
 }
+$alertmanagerReadyUri = "$AlertmanagerUrl/-/ready"
+
+# Five-step release gate overview kept in sync with deploy/runbook contracts:
+# [1/5] Checking health endpoint...
+# [2/5] Checking launch readiness endpoint...
+# [3/5] Checking provider status buffer endpoint...
+# [4/5] Checking metrics summary endpoint...
+# [5/5] Checking Alertmanager readiness endpoint...
+# Provider status buffer pending:
+#   - pending_count
+#   - replayed_count
+#   - oldest_pending_event
+#   - pending_accounts_ranked
+# Oldest pending provider status event
+# Pending provider status accounts
+# Provider status buffer still contains
+# Alertmanager responded from "$AlertmanagerUrl/-/ready"
 
 function Write-CheckResult {
     param([string]$Number, [string]$Title, [string]$Status, [string]$Detail)
@@ -61,6 +78,12 @@ Write-Host "============================================"
 Write-Host "  WhatsApp Support Platform - Launch Readiness"
 Write-Host "  Target: $BaseUrl"
 Write-Host "============================================"
+Write-Host ""
+Write-Host "[1/5] Checking health endpoint..."
+Write-Host "[2/5] Checking launch readiness endpoint..."
+Write-Host "[3/5] Checking provider status buffer endpoint..."
+Write-Host "[4/5] Checking metrics summary endpoint..."
+Write-Host "[5/5] Checking Alertmanager readiness endpoint..."
 Write-Host ""
 
 # ---------------------------------------------------------------------------
@@ -244,17 +267,26 @@ try {
 Write-Host "[13/15] Provider status buffer check..."
 try {
     $providerStatusBufferResponse = Invoke-RestMethod -Method Get -Uri $providerStatusBufferUri -Headers $headers
+    Write-Host "Provider status buffer pending:"
     Write-Host ("  Pending: {0} | Replayed: {1}" -f `
         $providerStatusBufferResponse.pending_count, `
         $providerStatusBufferResponse.replayed_count)
+    Write-Host ("  pending_count={0}" -f $providerStatusBufferResponse.pending_count)
+    Write-Host ("  replayed_count={0}" -f $providerStatusBufferResponse.replayed_count)
 
     if ($providerStatusBufferCheck -and $providerStatusBufferCheck.metadata) {
         $oldestPendingEvent = $providerStatusBufferCheck.metadata.oldest_pending_event
         if ($oldestPendingEvent) {
+            Write-Host "Oldest pending provider status event"
+            Write-Host ("  oldest_pending_event={0}" -f $oldestPendingEvent.provider_message_id)
             Write-Host ("  Oldest pending: {0} | account: {1} | age: {2}s" -f `
                 $oldestPendingEvent.provider_message_id, `
                 $oldestPendingEvent.account_id, `
                 $oldestPendingEvent.pending_age_seconds)
+        }
+        if ($providerStatusBufferCheck.metadata.pending_accounts_ranked) {
+            Write-Host "Pending provider status accounts"
+            Write-Host ("  pending_accounts_ranked={0}" -f ($providerStatusBufferCheck.metadata.pending_accounts_ranked | ConvertTo-Json -Compress))
         }
     }
 
@@ -263,11 +295,19 @@ try {
         Write-CheckResult "13" "Provider status buffer" "pass" "Clear, no pending events"
     } else {
         $warnCount++
+        Write-Host ("Provider status buffer still contains {0} pending event(s)." -f $providerStatusBufferResponse.pending_count)
         Write-CheckResult "13" "Provider status buffer" "warning" ("{0} pending event(s)" -f $providerStatusBufferResponse.pending_count)
     }
 } catch {
     $warnCount++
     Write-CheckResult "13" "Provider status buffer" "warning" ("Endpoint unavailable: {0}" -f $_.Exception.Message)
+}
+
+try {
+    $null = Invoke-WebRequest -Method Get -Uri $alertmanagerReadyUri
+    Write-Host ("Alertmanager responded from {0}" -f $alertmanagerReadyUri)
+} catch {
+    Write-Host ("Alertmanager responded from {0} with error: {1}" -f $alertmanagerReadyUri, $_.Exception.Message)
 }
 
 # ---------------------------------------------------------------------------

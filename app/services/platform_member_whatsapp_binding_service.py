@@ -1,19 +1,29 @@
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
     AppUser,
     H5Site,
+    MemberTaskDayQuota,
     MemberNotification,
     MemberProfile,
     MemberWhatsAppBindingRequest,
+    TaskSystemConfig,
     UserIdentity,
+    WalletAccount,
+    WalletLedgerEntry,
     utc_now,
 )
 from app.schemas.platform_member_whatsapp_bindings import (
     PlatformMemberWhatsAppBindingResponse,
     PlatformMemberWhatsAppBindingStatus,
 )
+from app.schemas.member_task_quota import MemberTaskQuotaPlanIssueRequest
+from app.services.member_task_quota_service import MemberTaskQuotaService
+from app.services.task_product_generation_service import TaskProductGenerationService
+from app.services.wallet_ledger_service import WalletLedgerService
 
 TERMINAL_MEMBER_WHATSAPP_BINDING_STATUSES = {"bound"}
 MEMBER_WHATSAPP_BINDING_TRANSITIONS: dict[str, set[str]] = {
@@ -26,6 +36,7 @@ MEMBER_WHATSAPP_BINDING_TRANSITIONS: dict[str, set[str]] = {
 class PlatformMemberWhatsAppBindingService:
     def __init__(self, *, session: Session) -> None:
         self._session = session
+        self._wallet_ledger_service = WalletLedgerService(session=session)
 
     async def list_requests(
         self,
@@ -86,6 +97,8 @@ class PlatformMemberWhatsAppBindingService:
         if status == "bound":
             request.bound_at = request.bound_at or utc_now()
             self._mark_user_bound(request=request)
+            self._grant_binding_reward(request=request)
+            self._bootstrap_newbie_task_batch(request=request)
         else:
             request.bound_at = None
             if status == "pending":
@@ -149,6 +162,127 @@ class PlatformMemberWhatsAppBindingService:
         user.has_whatsapp = False
         self._session.add(user)
 
+    def _grant_binding_reward(
+        self,
+        *,
+        request: MemberWhatsAppBindingRequest,
+    ) -> None:
+        config = self._resolve_task_system_config(account_id=request.account_id, site_id=request.site_id)
+        if config is None or not config.whatsapp_binding_reward_enabled:
+            return
+
+        reward_amount = Decimal(config.whatsapp_binding_reward_amount or Decimal("0.00"))
+        if reward_amount <= Decimal("0.00"):
+            return
+
+        existing_reward = self._session.scalars(
+            select(WalletLedgerEntry).where(
+                WalletLedgerEntry.account_id == request.account_id,
+                WalletLedgerEntry.user_id == request.user_id,
+                WalletLedgerEntry.transaction_type == "whatsapp_binding_reward",
+                WalletLedgerEntry.reference_type == "member_whatsapp_binding_request",
+                WalletLedgerEntry.reference_id == request.id,
+            )
+        ).first()
+        if existing_reward is not None:
+            return
+
+        wallet = self._get_or_create_wallet(
+            account_id=request.account_id,
+            user_id=request.user_id,
+            currency=config.whatsapp_binding_reward_currency or "USD",
+        )
+        self._wallet_ledger_service.credit_task_balance(
+            wallet=wallet,
+            account_id=request.account_id,
+            user_id=request.user_id,
+            amount=reward_amount,
+            currency=wallet.currency,
+            transaction_type="whatsapp_binding_reward",
+            source_type="whatsapp_binding_reward",
+            note="WhatsApp binding reward credited",
+            reference_type="member_whatsapp_binding_request",
+            reference_id=request.id,
+        )
+        self._session.add(
+            MemberNotification(
+                account_id=request.account_id,
+                user_id=request.user_id,
+                member_profile_id=request.member_profile_id,
+                site_id=request.site_id,
+                category="task",
+                title="WhatsApp binding reward credited",
+                body_text=(
+                    f"Your WhatsApp binding reward of {reward_amount:.2f} {wallet.currency} "
+                    "was credited to task balance."
+                ),
+                is_read=False,
+                reference_type="member_whatsapp_binding_request",
+                reference_id=request.id,
+                metadata_json={
+                    "transaction_type": "whatsapp_binding_reward",
+                    "amount": float(reward_amount),
+                    "currency": wallet.currency,
+                },
+            )
+        )
+
+    def _bootstrap_newbie_task_batch(
+        self,
+        *,
+        request: MemberWhatsAppBindingRequest,
+    ) -> None:
+        config = self._resolve_task_system_config(account_id=request.account_id, site_id=request.site_id)
+        if config is None or not config.newbie_plan_id:
+            return
+
+        existing_quota = self._session.scalars(
+            select(MemberTaskDayQuota).where(
+                MemberTaskDayQuota.account_id == request.account_id,
+                MemberTaskDayQuota.user_id == request.user_id,
+                MemberTaskDayQuota.plan_id == config.newbie_plan_id,
+            )
+        ).first()
+
+        quota = existing_quota
+        if quota is None:
+            quota_service = MemberTaskQuotaService(self._session)
+            try:
+                created = quota_service.issue_quota_from_plan(
+                    MemberTaskQuotaPlanIssueRequest(
+                        plan_id=config.newbie_plan_id,
+                        user_id=request.user_id,
+                        day_no=1,
+                        created_by="platform_member_whatsapp_binding",
+                        metadata_json={
+                            "source": "platform_member_whatsapp_binding",
+                            "binding_request_id": request.id,
+                        },
+                    )
+                )
+                quota = self._session.get(MemberTaskDayQuota, created.id)
+            except ValueError as exc:
+                if "already exists" not in str(exc):
+                    raise
+                quota = self._session.scalars(
+                    select(MemberTaskDayQuota).where(
+                        MemberTaskDayQuota.account_id == request.account_id,
+                        MemberTaskDayQuota.user_id == request.user_id,
+                        MemberTaskDayQuota.plan_id == config.newbie_plan_id,
+                        MemberTaskDayQuota.day_no == 1,
+                    )
+                ).first()
+            except LookupError:
+                return
+
+        if quota is None:
+            return
+
+        TaskProductGenerationService(self._session).generate_for_quota(
+            quota_id=quota.id,
+            generated_by="platform_member_whatsapp_binding",
+        )
+
     def _create_member_notification(
         self,
         *,
@@ -207,6 +341,55 @@ class PlatformMemberWhatsAppBindingService:
         if user is None:
             raise LookupError(f"User '{user_id}' was not found.")
         return user
+
+    def _resolve_task_system_config(
+        self,
+        *,
+        account_id: str,
+        site_id: str | None,
+    ) -> TaskSystemConfig | None:
+        if site_id is not None:
+            scoped = self._session.scalars(
+                select(TaskSystemConfig).where(
+                    TaskSystemConfig.account_id == account_id,
+                    TaskSystemConfig.site_id == site_id,
+                )
+            ).first()
+            if scoped is not None:
+                return scoped
+        return self._session.scalars(
+            select(TaskSystemConfig).where(
+                TaskSystemConfig.account_id == account_id,
+                TaskSystemConfig.site_id.is_(None),
+            )
+        ).first()
+
+    def _get_or_create_wallet(
+        self,
+        *,
+        account_id: str,
+        user_id: str,
+        currency: str,
+    ) -> WalletAccount:
+        wallet = self._session.scalars(
+            select(WalletAccount).where(
+                WalletAccount.account_id == account_id,
+                WalletAccount.user_id == user_id,
+            )
+        ).first()
+        if wallet is not None:
+            return wallet
+        wallet = WalletAccount(
+            account_id=account_id,
+            user_id=user_id,
+            currency=currency,
+            system_balance=Decimal("0.00"),
+            task_balance=Decimal("0.00"),
+            withdraw_threshold=Decimal("100.00"),
+        )
+        self._session.add(wallet)
+        self._session.flush()
+        return wallet
 
     @staticmethod
     def _build_notification_copy(*, status: str) -> tuple[str, str]:

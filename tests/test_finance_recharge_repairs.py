@@ -3,8 +3,16 @@ from decimal import Decimal
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import AppUser, RechargeRecord, RechargeRepairOrder, WalletAccount, WalletLedgerEntry
-from tests.test_h5_member_auth import _create_site, _register_member
+from app.db.models import (
+    AppUser,
+    MemberProfile,
+    MemberVerificationRequest,
+    RechargeRecord,
+    RechargeRepairOrder,
+    WalletAccount,
+    WalletLedgerEntry,
+)
+from tests.test_h5_member_auth import _create_site, _register_member, _seed_task_system_config
 from tests.test_h5_task_packages_wallet import _seed_task_package_scope
 
 
@@ -117,3 +125,57 @@ def test_recharge_repair_create_approve_and_reject_flow(
         assert ledgers[0].cash_amount == Decimal("120")
         assert ledgers[0].is_real_recharge is True
         assert ledgers[0].idempotency_key is not None
+
+
+def test_recharge_repair_auto_certifies_member_when_threshold_is_reached(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-recharge-repairs-certify", site_key="recharge-repairs-certify")
+    auth_payload = _register_member(
+        client,
+        site_key="recharge-repairs-certify",
+        phone="+8613900087202",
+        display_name="Recharge Repair Certify Member",
+    )
+    _seed_task_system_config(
+        db_session_factory,
+        account_id="acct-recharge-repairs-certify",
+        site_id=site["id"],
+        certified_recharge_threshold=Decimal("100.00"),
+        auto_certify_on_recharge=True,
+    )
+
+    create_response = client.post(
+        "/api/finance/recharge-repairs",
+        headers=_super_admin_headers("acct-recharge-repairs-certify"),
+        json={
+            "account_id": "acct-recharge-repairs-certify",
+            "user_id": auth_payload["member"]["publicUserId"],
+            "amount": 100,
+            "currency": "USD",
+            "repair_type": "callback_missing",
+            "reason": "Missing callback",
+            "channel_id": "ch-auto-certify",
+            "channel_order_no": "order-auto-certify",
+        },
+    )
+    assert create_response.status_code == 200, create_response.text
+    created = create_response.json()
+
+    approve_response = client.post(
+        f"/api/finance/recharge-repairs/{created['id']}/approve",
+        headers=_super_admin_headers("acct-recharge-repairs-certify"),
+    )
+    assert approve_response.status_code == 200, approve_response.text
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(AppUser.public_user_id == auth_payload["member"]["publicUserId"]).one()
+        member_profile = session.query(MemberProfile).filter(MemberProfile.user_id == user.id).one()
+        request = session.query(MemberVerificationRequest).filter(
+            MemberVerificationRequest.account_id == "acct-recharge-repairs-certify",
+            MemberVerificationRequest.member_profile_id == member_profile.id,
+        ).one()
+        assert request.status == "approved"
+        assert request.review_note is not None
+        assert "auto" in request.review_note.lower()

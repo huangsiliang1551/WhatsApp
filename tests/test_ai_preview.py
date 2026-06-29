@@ -46,6 +46,13 @@ class TestAiReplyPreview:
 
     def test_ai_preview_empty_conversation(self, client: TestClient) -> None:
         account_id = _setup_account(client)
+        _post_mock_inbound_message(
+            client,
+            account_id=account_id,
+            conversation_id="conv-ai-preview-empty",
+            user_id="user-ai-preview-empty",
+            text="hello",
+        )
         resp = client.post(
             f"/api/conversations/{account_id}/conv-ai-preview-empty/ai-preview",
         )

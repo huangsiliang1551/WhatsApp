@@ -1251,6 +1251,12 @@ class LaunchReadinessService:
             return "blocker" if live_launch_mode else "warning"
         if account.webhook_last_event_received_at is None:
             return "blocker" if live_launch_mode else "warning"
+        if (
+            account.webhook_last_message_received_at is None
+            and account.webhook_last_status_update_at is None
+            and account.webhook_last_management_event_at is None
+        ):
+            return "blocker" if live_launch_mode else "warning"
         return "pass"
 
     @staticmethod

@@ -2,12 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from pydantic import BaseModel
 
-from app.api.deps import get_platform_service, get_runtime_state_service, require_permission
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_db_session, get_platform_service, get_runtime_state_service, require_permission
 from app.constants.h5_templates import CHANGE_TEMPLATE_DISABLED_ERROR, DEFAULT_H5_TEMPLATE_ID
 from app.core.auth import RequestActor
+from app.db.models import AppUser
 from app.schemas.platform import (
     AudienceRuleSetCreateRequest,
     AudienceRuleSetUpdateRequest,
+    H5SiteResponse,
     H5SiteConfigUpdateRequest,
     H5SiteCreateRequest,
     H5SiteUpdateRequest,
@@ -20,6 +24,30 @@ from app.services.platform_service import PlatformService
 from app.services.runtime_state import RuntimeStateStore
 
 router = APIRouter(prefix="/api/platform", tags=["platform"])
+
+
+async def _get_accessible_site_or_404(
+    platform_service: PlatformService,
+    actor: RequestActor,
+    site_id: str,
+) -> H5SiteResponse:
+    site = await platform_service.get_site(site_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found.")
+    actor.require_account_access(site.account_id)
+    return site
+
+
+def _resolve_actor_site_account_id(actor: RequestActor) -> str:
+    unique_account_ids = list(dict.fromkeys(actor.account_ids))
+    if len(unique_account_ids) == 1:
+        return unique_account_ids[0]
+    if not unique_account_ids:
+        raise HTTPException(status_code=403, detail="Actor has no accessible account scope for site import.")
+    raise HTTPException(
+        status_code=409,
+        detail="Site import requires a single resolved account scope.",
+    )
 
 
 @router.get(
@@ -83,6 +111,7 @@ async def update_site(
     runtime_state: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("sites.edit")),
 ) -> dict[str, object]:
+    await _get_accessible_site_or_404(platform_service, actor, site_id)
     try:
         site = await platform_service.update_site(site_id, payload)
     except ValueError as exc:
@@ -115,6 +144,7 @@ async def delete_site(
     runtime_state: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("sites.delete")),
 ) -> dict[str, str | None]:
+    await _get_accessible_site_or_404(platform_service, actor, site_id)
     try:
         account_id = await platform_service.delete_site(site_id)
     except ValueError as exc:
@@ -164,11 +194,7 @@ async def get_site_preview(
     platform_service: PlatformService = Depends(get_platform_service),
     actor: RequestActor = Depends(require_permission("sites.view")),
 ) -> dict[str, str]:
-    site = await platform_service.get_site(site_id)
-    if site is None:
-        raise HTTPException(status_code=404, detail="Site not found.")
-
-    actor.require_account_access(site.account_id)
+    site = await _get_accessible_site_or_404(platform_service, actor, site_id)
     return {
         "site_id": site.id,
         "site_key": site.site_key,
@@ -187,8 +213,9 @@ async def get_site_preview(
 async def get_site_config(
     site_id: str,
     platform_service: PlatformService = Depends(get_platform_service),
-    _actor: RequestActor = Depends(require_permission("sites.brand_config")),
+    actor: RequestActor = Depends(require_permission("sites.brand_config")),
 ) -> dict[str, object]:
+    await _get_accessible_site_or_404(platform_service, actor, site_id)
     config = await platform_service.get_site_config(site_id)
     if config is None:
         return {"id": None, "site_id": site_id}
@@ -208,9 +235,11 @@ async def update_site_config(
     runtime_state: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("sites.brand_config")),
 ) -> dict[str, object]:
+    site = await _get_accessible_site_or_404(platform_service, actor, site_id)
     config = await platform_service.update_site_config(site_id, payload)
 
     runtime_state.add_audit_log(
+        account_id=site.account_id,
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
         action="platform_site_config_updated",
@@ -259,6 +288,7 @@ async def list_users(
         lifecycle_status=lifecycle_status,
         is_anonymous=is_anonymous,
         allowed_account_ids=allowed_account_ids,
+        scope_actor=actor,
     )
     return result
 
@@ -316,17 +346,22 @@ async def create_user(
 )
 async def delete_platform_user(
     user_id: str,
+    db_session: Session = Depends(get_db_session),
     platform_service: PlatformService = Depends(get_platform_service),
     runtime_state: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("users.delete")),
 ) -> Response:
+    user = db_session.get(AppUser, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' was not found.")
+    actor.require_account_access(user.account_id)
     try:
         await platform_service.delete_user(user_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     runtime_state.add_audit_log(
-        account_id=None,
+        account_id=user.account_id,
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
         action="platform_user_deleted",
@@ -524,6 +559,7 @@ async def clone_site(
     runtime_state: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("sites.clone")),
 ) -> dict:
+    await _get_accessible_site_or_404(platform_service, actor, site_id)
     try:
         site = await platform_service.clone_site(
             source_site_id=site_id,
@@ -566,8 +602,9 @@ async def clone_site(
 async def export_site_config(
     site_id: str,
     platform_service: PlatformService = Depends(get_platform_service),
-    _actor: RequestActor = Depends(require_permission("sites.deploy")),
+    actor: RequestActor = Depends(require_permission("sites.deploy")),
 ) -> dict:
+    await _get_accessible_site_or_404(platform_service, actor, site_id)
     try:
         return await platform_service.export_config(site_id)
     except LookupError as exc:
@@ -594,10 +631,11 @@ async def import_site_config(
     runtime_state: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("sites.deploy")),
 ) -> dict:
+    account_id = _resolve_actor_site_account_id(actor)
     try:
         site = await platform_service.import_config(
             payload=payload.model_dump(mode="json"),
-            account_id=actor.actor_id,
+            account_id=account_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -638,6 +676,8 @@ async def batch_update_sites(
     runtime_state: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("sites.edit")),
 ) -> dict:
+    for site_id in payload.site_ids:
+        await _get_accessible_site_or_404(platform_service, actor, site_id)
     result = await platform_service.batch_update(
         site_ids=payload.site_ids,
         action=payload.action,

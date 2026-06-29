@@ -202,6 +202,36 @@ def test_alembic_upgrade_head_on_sqlite() -> None:
             task_package_instance_item_columns = {
                 column["name"] for column in inspector.get_columns("task_package_instance_items")
             }
+            task_system_config_columns = {
+                column["name"] for column in inspector.get_columns("task_system_configs")
+            }
+            task_issue_plan_columns = {
+                column["name"] for column in inspector.get_columns("task_issue_plans")
+            }
+            task_issue_plan_day_rule_columns = {
+                column["name"] for column in inspector.get_columns("task_issue_plan_day_rules")
+            }
+            member_task_day_quota_columns = {
+                column["name"] for column in inspector.get_columns("member_task_day_quotas")
+            }
+            member_task_batch_columns = {
+                column["name"] for column in inspector.get_columns("member_task_batches")
+            }
+            task_product_pool_columns = {
+                column["name"] for column in inspector.get_columns("task_product_pools")
+            }
+            task_product_pool_item_columns = {
+                column["name"] for column in inspector.get_columns("task_product_pool_items")
+            }
+            task_product_generation_run_columns = {
+                column["name"] for column in inspector.get_columns("task_product_generation_runs")
+            }
+            task_manual_add_log_columns = {
+                column["name"] for column in inspector.get_columns("task_manual_add_item_logs")
+            }
+            task_system_config_indexes = {
+                index["name"]: index for index in inspector.get_indexes("task_system_configs")
+            }
             wallet_account_columns = {
                 column["name"] for column in inspector.get_columns("wallet_accounts")
             }
@@ -390,6 +420,13 @@ def test_alembic_upgrade_head_on_sqlite() -> None:
             assert "task_package_template_items" in table_names
             assert "task_package_instances" in table_names
             assert "task_package_instance_items" in table_names
+            assert "task_system_configs" in table_names
+            assert "task_issue_plans" in table_names
+            assert "task_issue_plan_day_rules" in table_names
+            assert "member_task_day_quotas" in table_names
+            assert "member_task_batches" in table_names
+            assert "task_product_pools" in table_names
+            assert "task_product_pool_items" in table_names
             assert "user_identities" in table_names
             assert "invite_codes" in table_names
             assert "user_tags" in table_names
@@ -405,8 +442,10 @@ def test_alembic_upgrade_head_on_sqlite() -> None:
             assert "ticket_messages" in table_names
             assert "wallet_accounts" in table_names
             assert "wallet_ledger_entries" in table_names
+            assert "wallet_bonus_grant_records" in table_names
             assert "wallet_transfer_requests" in table_names
             assert "wallet_recharge_orders" in table_names
+            assert "recharge_repair_orders" in table_names
             assert "withdrawal_requests" in table_names
             assert "withdrawal_audit_logs" in table_names
             assert "fragment_definitions" in table_names
@@ -420,6 +459,8 @@ def test_alembic_upgrade_head_on_sqlite() -> None:
             assert "promotion_task_templates" in table_names
             assert "promotion_task_instances" in table_names
             assert "user_referrals" in table_names
+            assert "task_product_generation_runs" in table_names
+            assert "task_manual_add_item_logs" in table_names
             assert "account_id" in meta_business_portfolio_columns
             assert "webhook_last_management_event_at" in whatsapp_business_account_columns
             assert "header_media_provider_media_id" in template_send_log_columns
@@ -448,7 +489,36 @@ def test_alembic_upgrade_head_on_sqlite() -> None:
             assert "reward_ratio" in task_package_template_columns
             assert "product_name" in task_package_template_item_columns
             assert "status" in task_package_instance_columns
+            assert "batch_id" in task_package_instance_columns
+            assert "planned_amount" in task_package_instance_columns
+            assert "visible_item_id" in task_package_instance_columns
             assert "order_id" in task_package_instance_item_columns
+            assert "item_origin" in task_package_instance_item_columns
+            assert "product_id" in task_package_instance_item_columns
+            assert "price_snapshot" in task_package_instance_item_columns
+            assert "whatsapp_binding_reward_amount" in task_system_config_columns
+            assert "claim_gate" in task_issue_plan_columns
+            assert "default_tolerance_amount" in task_issue_plan_columns
+            assert "default_reward_ratio" in task_issue_plan_columns
+            assert "day_no" in task_issue_plan_day_rule_columns
+            assert "issue_time_of_day" in task_issue_plan_day_rule_columns
+            assert "elapsed_delay_hours" in task_issue_plan_day_rule_columns
+            assert "package_amounts_json" in member_task_day_quota_columns
+            assert "quota_id" in member_task_batch_columns
+            assert "current_package_index" in member_task_batch_columns
+            assert "products_generated" in member_task_batch_columns
+            assert "pool_type" in task_product_pool_columns
+            assert "price_mode" in task_product_pool_columns
+            assert "allow_repeat_in_same_batch" in task_product_pool_columns
+            assert "product_id" in task_product_pool_item_columns
+            assert "product_description" in task_product_pool_item_columns
+            assert "weight" in task_product_pool_item_columns
+            assert "selection_seed" in task_product_generation_run_columns
+            assert "idempotency_key" in task_product_generation_run_columns
+            assert "notify_user" in task_manual_add_log_columns
+            assert "user_notice_text" in task_manual_add_log_columns
+            assert "user_notified_at" in task_manual_add_log_columns
+            assert "ux_task_system_configs_account_default_scope" in task_system_config_indexes
             assert "system_balance" in wallet_account_columns
             assert "frozen_balance" in wallet_account_columns
             assert "system_cash_balance" in wallet_account_columns
@@ -462,8 +532,20 @@ def test_alembic_upgrade_head_on_sqlite() -> None:
             assert "cash_balance_after" in wallet_ledger_entry_columns
             assert "bonus_balance_before" in wallet_ledger_entry_columns
             assert "bonus_balance_after" in wallet_ledger_entry_columns
+            bonus_grant_columns = {
+                column["name"] for column in inspector.get_columns("wallet_bonus_grant_records")
+            }
+            assert "grant_no" in bonus_grant_columns
+            assert "source_type" in bonus_grant_columns
+            assert "ledger_id" in bonus_grant_columns
             assert "wallet_account_id" in wallet_transfer_request_columns
             assert "credited_at" in wallet_recharge_order_columns
+            recharge_repair_columns = {
+                column["name"] for column in inspector.get_columns("recharge_repair_orders")
+            }
+            assert "repair_no" in recharge_repair_columns
+            assert "channel_order_no" in recharge_repair_columns
+            assert "recharge_record_id" in recharge_repair_columns
             assert "request_no" in withdrawal_request_columns
             assert "cash_amount" in withdrawal_request_columns
             assert "bonus_amount" in withdrawal_request_columns
@@ -2311,6 +2393,75 @@ def test_alembic_wallet_ledger_entries_keep_idempotent_reward_unique_constraint(
                 ]
                 for constraint in wallet_ledger_uniques
             )
+        finally:
+            engine.dispose()
+
+
+def test_alembic_task_system_config_default_scope_unique_index_blocks_duplicate_account_defaults() -> None:
+    with TemporaryDirectory() as temp_dir:
+        database_path = Path(temp_dir) / "alembic_task_system_config_default_scope.db"
+        config = Config("alembic.ini")
+        database_url = f"sqlite:///{database_path.as_posix()}"
+        config.set_main_option("sqlalchemy.url", database_url)
+
+        command.upgrade(config, "head")
+
+        engine = create_engine(database_url)
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO accounts (
+                            account_id, display_name, provider_type, is_active, ai_enabled, created_at, updated_at
+                        ) VALUES (
+                            'acct-task-config-unique', 'Task Config Unique', 'whatsapp', 1, 1,
+                            '2026-06-26 00:00:00', '2026-06-26 00:00:00'
+                        )
+                        """
+                    )
+                )
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO task_system_configs (
+                            id, account_id, site_id, status, whatsapp_binding_reward_enabled,
+                            whatsapp_binding_reward_amount, whatsapp_binding_reward_wallet_type,
+                            whatsapp_binding_reward_currency, certified_member_enabled,
+                            certified_recharge_threshold, certified_recharge_scope, auto_certify_on_recharge,
+                            newbie_task_enabled, newbie_auto_popup, show_task_balance_transfer_prompt,
+                            min_task_balance_transfer_prompt_amount, max_active_batches_per_user,
+                            max_active_packages_per_user, metadata_json, created_at, updated_at
+                        ) VALUES (
+                            'task-config-default-1', 'acct-task-config-unique', NULL, 'active', 1,
+                            20.00, 'task_balance', 'USD', 1, 50.00, 'real_recharge', 1,
+                            1, 1, 1, 0.01, 1, 1, NULL, '2026-06-26 00:00:00', '2026-06-26 00:00:00'
+                        )
+                        """
+                    )
+                )
+
+            with pytest.raises(IntegrityError):
+                with engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            """
+                            INSERT INTO task_system_configs (
+                                id, account_id, site_id, status, whatsapp_binding_reward_enabled,
+                                whatsapp_binding_reward_amount, whatsapp_binding_reward_wallet_type,
+                                whatsapp_binding_reward_currency, certified_member_enabled,
+                                certified_recharge_threshold, certified_recharge_scope, auto_certify_on_recharge,
+                                newbie_task_enabled, newbie_auto_popup, show_task_balance_transfer_prompt,
+                                min_task_balance_transfer_prompt_amount, max_active_batches_per_user,
+                                max_active_packages_per_user, metadata_json, created_at, updated_at
+                            ) VALUES (
+                                'task-config-default-2', 'acct-task-config-unique', NULL, 'active', 1,
+                                21.00, 'task_balance', 'USD', 1, 55.00, 'real_recharge', 1,
+                                1, 1, 1, 0.01, 1, 1, NULL, '2026-06-26 00:00:00', '2026-06-26 00:00:00'
+                            )
+                            """
+                        )
+                    )
         finally:
             engine.dispose()
 

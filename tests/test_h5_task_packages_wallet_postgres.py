@@ -5,8 +5,8 @@ from decimal import Decimal
 from threading import Barrier, BrokenBarrierError, Thread
 from uuid import uuid4
 
-import psycopg
 import pytest
+psycopg = pytest.importorskip("psycopg", exc_type=ImportError)
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session, sessionmaker
@@ -18,6 +18,7 @@ from app.db.models import (
     H5Site,
     InviteCode,
     MemberAuthSession,
+    MemberTaskBatch,
     MemberProfile,
     PromotionTaskInstance,
     PromotionTaskTemplate,
@@ -25,15 +26,20 @@ from app.db.models import (
     TaskPackageInstanceItem,
     TaskPackageTemplate,
     TaskPackageTemplateItem,
+    TaskProductPool,
+    TaskProductPoolItem,
     UserReferral,
     WalletAccount,
     WalletLedgerEntry,
     WithdrawalRequest,
+    UserIdentity,
     utc_now,
 )
 from app.db.session import build_sync_database_url
+from app.core.platform_enums import UserIdentityType
 from app.services.h5_member_auth_service import H5MemberContext
 from app.services.h5_member_commerce_service import H5MemberCommerceService
+from app.services.task_manual_add_service import TaskManualAddService
 
 
 def _build_postgres_test_url() -> URL:
@@ -284,6 +290,15 @@ def _build_context(
     user = session.query(AppUser).filter(AppUser.public_user_id == public_user_id).one()
     member_profile = session.query(MemberProfile).filter(MemberProfile.id == member_profile_id).one()
     site = session.query(H5Site).filter(H5Site.id == site_id).one()
+    username_identity = (
+        session.query(UserIdentity)
+        .filter(
+            UserIdentity.user_id == user.id,
+            UserIdentity.identity_type == UserIdentityType.USERNAME.value,
+        )
+        .order_by(UserIdentity.is_primary.desc(), UserIdentity.created_at.asc(), UserIdentity.id.asc())
+        .first()
+    )
     auth_session = MemberAuthSession(
         account_id=account_id,
         user_id=user.id,
@@ -298,6 +313,7 @@ def _build_context(
         member_profile=member_profile,
         user=user,
         site=site,
+        username=username_identity.identity_value if username_identity is not None else "+8613900099999",
         phone="+8613900099999",
         auth_session=auth_session,
     )
@@ -374,6 +390,220 @@ def _seed_postgres_withdrawal_scope(
             "public_user_id": public_user_id,
             "user_id": user.id,
             "member_profile_id": member_profile.id,
+        }
+
+
+def _seed_postgres_manual_add_purchase_race_scope(
+    db_session_factory: sessionmaker[Session],
+) -> dict[str, str]:
+    now = utc_now()
+    account_id = "acct-h5-manual-add-race-postgres"
+    public_user_id = "h5-manual-add-race-postgres-member"
+
+    with db_session_factory() as session:
+        account = Account(
+            account_id=account_id,
+            display_name="H5 Manual Add Race Postgres",
+            provider_type="whatsapp",
+            is_active=True,
+            ai_enabled=True,
+        )
+        site = H5Site(
+            account_id=account_id,
+            site_key="h5-manual-add-race-postgres",
+            domain="h5-manual-add-race-postgres.example.com",
+            brand_name="H5 Manual Add Race Postgres",
+            default_language="zh-CN",
+            status="active",
+        )
+        session.add_all([account, site])
+        session.flush()
+
+        user = AppUser(
+            account_id=account_id,
+            public_user_id=public_user_id,
+            registration_site_id=site.id,
+            display_name="Postgres Manual Add Race Member",
+            language_code="zh-CN",
+            is_anonymous=False,
+            lifecycle_status="active",
+            has_phone=True,
+            has_email=False,
+            has_whatsapp=True,
+            is_invited_user=False,
+            is_new_user=False,
+            restrict_task_claim=False,
+            last_active_at=now,
+        )
+        session.add(user)
+        session.flush()
+
+        member_profile = MemberProfile(
+            account_id=account_id,
+            user_id=user.id,
+            member_no="55667788",
+            password_hash="seeded-password-hash",
+            password_salt="seeded-password-salt",
+            password_updated_at=now,
+            last_login_at=now,
+        )
+        wallet = WalletAccount(
+            account_id=account_id,
+            user_id=user.id,
+            system_balance=Decimal("200"),
+            task_balance=Decimal("0"),
+            currency="USD",
+            withdraw_threshold=Decimal("100"),
+        )
+        session.add_all([member_profile, wallet])
+        session.flush()
+
+        pool = TaskProductPool(
+            account_id=account_id,
+            site_id=site.id,
+            name="Race Pool",
+            pool_type="general",
+            price_mode="task_price_snapshot",
+            allow_repeat_in_same_batch=False,
+            allow_repeat_in_same_package=False,
+            status="active",
+            currency="USD",
+        )
+        session.add(pool)
+        session.flush()
+
+        base_item = TaskProductPoolItem(
+            account_id=account_id,
+            pool_id=pool.id,
+            product_id="race-product-1",
+            product_name="Race Product 1",
+            image_url="https://example.com/race-1.png",
+            price=Decimal("50"),
+            currency="USD",
+            weight=100,
+            status="active",
+            sort_order=1,
+        )
+        add_item = TaskProductPoolItem(
+            account_id=account_id,
+            pool_id=pool.id,
+            product_id="race-product-2",
+            product_name="Race Product 2",
+            image_url="https://example.com/race-2.png",
+            price=Decimal("30"),
+            currency="USD",
+            weight=100,
+            status="active",
+            sort_order=2,
+        )
+        session.add_all([base_item, add_item])
+        session.flush()
+
+        template = TaskPackageTemplate(
+            account_id=account_id,
+            name="Manual Add Race Package",
+            title="Manual Add Race Package",
+            description="Concurrent manual add and purchase race",
+            package_type="official",
+            reward_ratio=Decimal("0.10"),
+            completion_window_hours=24,
+            status="active",
+        )
+        session.add(template)
+        session.flush()
+
+        template_item = TaskPackageTemplateItem(
+            account_id=account_id,
+            template_id=template.id,
+            sort_order=1,
+            product_name=base_item.product_name,
+            image_url=base_item.image_url,
+            price=base_item.price,
+            currency="USD",
+        )
+        session.add(template_item)
+        session.flush()
+
+        batch = MemberTaskBatch(
+            account_id=account_id,
+            site_id=site.id,
+            user_id=user.id,
+            day_no=1,
+            package_count=1,
+            current_package_index=1,
+            completed_package_count=0,
+            planned_amount=Decimal("50"),
+            system_generated_amount=Decimal("50"),
+            manual_added_amount=Decimal("0"),
+            effective_day_amount=Decimal("50"),
+            reward_ratio_snapshot=Decimal("0.10"),
+            status="active",
+            products_generated=True,
+            claimed_at=now,
+        )
+        session.add(batch)
+        session.flush()
+
+        package = TaskPackageInstance(
+            account_id=account_id,
+            template_id=template.id,
+            user_id=user.id,
+            site_id=site.id,
+            batch_id=batch.id,
+            batch_day_no=1,
+            batch_index=1,
+            batch_total=1,
+            planned_amount=Decimal("50"),
+            system_generated_amount=Decimal("50"),
+            manual_added_amount=Decimal("0"),
+            effective_amount=Decimal("50"),
+            status="active",
+            reward_ratio_snapshot=Decimal("0.10"),
+            current_item_index=1,
+            visible_item_id=None,
+            required_item_count=1,
+            completed_required_item_count=0,
+            completion_window_hours_snapshot=24,
+            claimed_at=now,
+        )
+        session.add(package)
+        session.flush()
+
+        package_item = TaskPackageInstanceItem(
+            account_id=account_id,
+            batch_id=batch.id,
+            package_instance_id=package.id,
+            template_item_id=template_item.id,
+            item_origin="system_generated",
+            is_required=True,
+            product_pool_id=pool.id,
+            pool_item_id=base_item.id,
+            product_id=base_item.product_id,
+            product_name_snapshot=base_item.product_name,
+            product_image_url_snapshot=base_item.image_url,
+            product_description_snapshot=None,
+            price_snapshot=base_item.price,
+            sort_order=1,
+            product_name=base_item.product_name,
+            image_url=base_item.image_url,
+            price=base_item.price,
+            currency=base_item.currency,
+            status="available",
+            visible_to_user=True,
+            available_at=now,
+        )
+        session.add(package_item)
+        session.commit()
+
+        return {
+            "account_id": account_id,
+            "site_id": site.id,
+            "public_user_id": public_user_id,
+            "user_id": user.id,
+            "member_profile_id": member_profile.id,
+            "package_id": package.id,
+            "item_id": package_item.id,
+            "manual_pool_item_id": add_item.id,
         }
 
 
@@ -543,7 +773,7 @@ def test_h5_withdrawal_allows_only_one_success_under_postgres_concurrency(
     assert errors == []
     assert len(results) == 1
     assert len(value_errors) == 1
-    assert str(value_errors[0]) == "System balance has not reached the withdraw threshold."
+    assert "active withdrawal request" in str(value_errors[0]).lower()
 
     with postgres_session_factory() as verify_session:
         wallet = verify_session.query(WalletAccount).filter(
@@ -612,3 +842,101 @@ def test_h5_promotion_task_package_claim_creates_single_wallet_under_postgres_co
             assert payload.completed_at == package.completed_at
             assert payload.task_balance_awarded_at == package.task_balance_awarded_at
             assert payload.countdown_seconds == 0
+
+
+def test_h5_task_purchase_waits_for_manual_add_and_does_not_settle_early_under_postgres(
+    postgres_session_factory: sessionmaker[Session],
+) -> None:
+    seeded = _seed_postgres_manual_add_purchase_race_scope(postgres_session_factory)
+    manual_add_ready = Barrier(2)
+    purchase_results: list[object] = []
+    manual_add_results: list[object] = []
+    errors: list[BaseException] = []
+
+    def run_manual_add() -> None:
+        session = postgres_session_factory()
+        try:
+            service = TaskManualAddService(session=session)
+            original_commit = session.commit
+
+            def synchronized_commit() -> None:
+                if any(type(item).__name__ == "TaskManualAddItemLog" for item in session.new):
+                    manual_add_ready.wait(timeout=10)
+                return original_commit()
+
+            session.commit = synchronized_commit  # type: ignore[method-assign]
+            result = service.add_items(
+                package_id=seeded["package_id"],
+                pool_item_ids=[seeded["manual_pool_item_id"]],
+                operator_id="postgres-race-operator",
+                reason_text="race add",
+            )
+            manual_add_results.append(result)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            session.close()
+
+    def run_purchase() -> None:
+        session = postgres_session_factory()
+        try:
+            context = _build_context(
+                session,
+                account_id=seeded["account_id"],
+                site_id=seeded["site_id"],
+                public_user_id=seeded["public_user_id"],
+                member_profile_id=seeded["member_profile_id"],
+            )
+            service = H5MemberCommerceService(session=session)
+            manual_add_ready.wait(timeout=10)
+            payload = asyncio.run(
+                service.purchase_task_package_item(
+                    context=context,
+                    package_id=seeded["package_id"],
+                    item_id=seeded["item_id"],
+                )
+            )
+            purchase_results.append(payload)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            session.close()
+
+    add_thread = Thread(target=run_manual_add)
+    purchase_thread = Thread(target=run_purchase)
+    add_thread.start()
+    purchase_thread.start()
+    add_thread.join()
+    purchase_thread.join()
+
+    assert errors == []
+    assert len(manual_add_results) == 1
+    assert len(purchase_results) == 1
+    assert purchase_results[0].success is True
+
+    with postgres_session_factory() as verify_session:
+        package = verify_session.query(TaskPackageInstance).filter(
+            TaskPackageInstance.id == seeded["package_id"]
+        ).one()
+        items = verify_session.query(TaskPackageInstanceItem).filter(
+            TaskPackageInstanceItem.package_instance_id == seeded["package_id"]
+        ).order_by(TaskPackageInstanceItem.sort_order.asc()).all()
+        reward_entries = verify_session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.reference_type == "task_package_instance",
+            WalletLedgerEntry.reference_id == seeded["package_id"],
+            WalletLedgerEntry.transaction_type == "task_reward",
+        ).all()
+
+        assert package.status == "active"
+        assert package.completed_at is None
+        assert package.reward_amount_final is None
+        assert package.completed_required_item_count == 1
+        assert package.required_item_count == 2
+        assert package.manual_added_item_count == 1
+        assert package.manual_added_amount == Decimal("30")
+        assert package.effective_amount == Decimal("80")
+        assert len(items) == 2
+        assert items[0].completed_at is not None
+        assert items[1].item_origin == "manual_added"
+        assert items[1].completed_at is None
+        assert len(reward_entries) == 0

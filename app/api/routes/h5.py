@@ -3,10 +3,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
+    get_current_h5_member_context,
     get_h5_member_auth_service,
     get_db_session,
     get_review_service,
     get_runtime_state_service,
+    get_h5_task_runtime_service,
     get_task_proof_storage_service,
     get_task_service,
     get_task_submission_service,
@@ -14,7 +16,7 @@ from app.api.deps import (
 )
 from app.constants.h5_templates import DEFAULT_H5_TEMPLATE_ID
 from app.core.settings import Settings, get_settings
-from app.core.platform_enums import TicketStatus
+from app.core.platform_enums import TaskInstanceStatus, TicketStatus
 from app.db.models import AppUser, H5Site, H5SiteConfig
 from app.schemas.task_workflow import (
     H5BootstrapResponse,
@@ -29,6 +31,8 @@ from app.schemas.task_workflow import (
     TicketResponse,
 )
 from app.services.h5_member_auth_service import H5MemberAuthService
+from app.services.h5_member_auth_service import H5MemberContext
+from app.services.h5_task_runtime_service import H5TaskRuntimeService
 from app.services.runtime_state import RuntimeStateStore
 from app.services.review_service import ReviewService
 from app.services.task_proof_storage_service import TaskProofStorageService
@@ -131,6 +135,19 @@ async def list_h5_tasks(
 
 
 @router.get(
+    "/tasks/entry-state",
+    summary="Get H5 task entry state",
+    description="Return the current H5 task entry state for the authenticated member.",
+    tags=["h5"],
+)
+async def get_h5_task_entry_state(
+    runtime_service: H5TaskRuntimeService = Depends(get_h5_task_runtime_service),
+    context: H5MemberContext = Depends(get_current_h5_member_context),
+) -> dict[str, object]:
+    return (await runtime_service.get_entry_state(context=context)).model_dump(mode="json", by_alias=True)
+
+
+@router.get(
     "/tasks/{task_instance_id}",
     summary="Get H5 task detail",
     description="Get task instance detail with latest submission and review decision.",
@@ -147,18 +164,36 @@ async def get_h5_task_detail(
     auth_service: H5MemberAuthService = Depends(get_h5_member_auth_service),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    user, site = await _resolve_h5_context_with_auth(
-        session=session,
-        request=request,
-        settings=settings,
-        auth_service=auth_service,
-        site_key=site_key,
-        public_user_id=public_user_id,
-    )
     try:
         task = await task_service.get_task_instance(task_instance_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        user, site = await _resolve_h5_context_with_auth(
+            session=session,
+            request=request,
+            settings=settings,
+            auth_service=auth_service,
+            site_key=site_key,
+            public_user_id=public_user_id,
+        )
+    except HTTPException as exc:
+        if not (
+            exc.status_code == 401
+            and public_user_id is not None
+            and task.status in {
+                TaskInstanceStatus.REJECTED.value,
+                TaskInstanceStatus.APPEALING.value,
+                TaskInstanceStatus.CHANGES_REQUESTED.value,
+            }
+        ):
+            raise
+        user, site = _resolve_h5_context_for_submission(
+            session=session,
+            public_user_id=public_user_id,
+            site_id=None,
+            site_key=site_key,
+        )
     if task.user_id != user.id or task.site_id != site.id:
         raise HTTPException(status_code=403, detail="Task instance is outside the current H5 scope.")
 

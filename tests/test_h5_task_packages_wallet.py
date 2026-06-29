@@ -5,27 +5,38 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import (
+    AuditLog,
     AppUser,
     H5Site,
     InviteCode,
     MemberAuthSession,
+    MemberTaskBatch,
+    MemberTaskDayQuota,
     MemberOrder,
     MemberProfile,
+    TaskSystemConfig,
+    MemberVerificationRequest,
     PromotionTaskInstance,
     PromotionTaskTemplate,
     TaskPackageInstance,
     TaskPackageInstanceItem,
     TaskPackageTemplate,
     TaskPackageTemplateItem,
+    TaskProductPool,
+    TaskProductPoolItem,
     UserReferral,
     WalletAccount,
     WalletLedgerEntry,
     WalletRechargeOrder,
+    UserIdentity,
     utc_now,
 )
+from app.core.platform_enums import UserIdentityType
 from app.services.h5_member_auth_service import H5MemberContext
 from app.services.h5_member_commerce_service import H5MemberCommerceService
-from tests.test_h5_member_auth import _create_site, _register_member
+from app.services.task_manual_add_service import TaskManualAddService
+from app.services.wallet_ledger_service import WalletLedgerService
+from tests.test_h5_member_auth import _create_site, _operator_headers, _register_member, _seed_task_system_config
 
 
 def _seed_task_package_scope(
@@ -123,6 +134,166 @@ def _seed_task_package_scope(
             "package_id": package.id,
             "item_a_id": package_item_a.id,
             "item_b_id": package_item_b.id,
+        }
+
+
+def _seed_task_batch_scope(
+    db_session_factory: sessionmaker[Session],
+    *,
+    account_id: str,
+    site_id: str,
+    public_user_id: str,
+    system_balance: Decimal,
+    package_amounts: list[Decimal] | None = None,
+) -> dict[str, str]:
+    with db_session_factory() as session:
+        now = utc_now()
+        user = session.query(AppUser).filter(AppUser.public_user_id == public_user_id).one()
+        resolved_package_amounts = package_amounts or [Decimal("10"), Decimal("20")]
+        total_amount = sum(resolved_package_amounts, Decimal("0"))
+        package_count = len(resolved_package_amounts)
+
+        wallet = WalletAccount(
+            account_id=account_id,
+            user_id=user.id,
+            system_balance=system_balance,
+            task_balance=Decimal("0"),
+            currency="USD",
+            withdraw_threshold=Decimal("100"),
+        )
+        template = TaskPackageTemplate(
+            account_id=account_id,
+            name="Official Batch Package",
+            title="Official Batch Package",
+            description="Batch package sequencing test",
+            package_type="official",
+            reward_ratio=Decimal("0.10"),
+            completion_window_hours=24,
+            status="active",
+        )
+        session.add_all([wallet, template])
+        session.flush()
+
+        pool = TaskProductPool(
+            account_id=account_id,
+            site_id=site_id,
+            name="Official Batch Pool",
+            pool_type="general",
+            price_mode="task_price_snapshot",
+            allow_repeat_in_same_batch=False,
+            allow_repeat_in_same_package=False,
+            status="active",
+            currency="USD",
+        )
+        session.add(pool)
+        session.flush()
+
+        batch = MemberTaskBatch(
+            account_id=account_id,
+            site_id=site_id,
+            user_id=user.id,
+            day_no=1,
+            package_count=package_count,
+            current_package_index=1,
+            completed_package_count=0,
+            planned_amount=total_amount,
+            system_generated_amount=total_amount,
+            effective_day_amount=total_amount,
+            reward_ratio_snapshot=Decimal("0.10"),
+            status="pending_claim",
+            products_generated=True,
+        )
+        session.add(batch)
+        session.flush()
+
+        quota = MemberTaskDayQuota(
+            account_id=account_id,
+            site_id=site_id,
+            user_id=user.id,
+            day_no=1,
+            package_count=package_count,
+            day_total_amount=total_amount,
+            tolerance_amount=Decimal("0"),
+            amount_allocation_mode="manual",
+            package_amounts_json=[f"{amount:.2f}" for amount in resolved_package_amounts],
+            product_pool_id=pool.id,
+            product_count_mode="fixed",
+            product_count_fixed=1,
+            reward_ratio=Decimal("0.10"),
+            status="locked",
+            issued_batch_id=batch.id,
+            generated_at=now,
+            generated_by="test-seed",
+            locked_at=now,
+        )
+        session.add(quota)
+        session.flush()
+        batch.quota_id = quota.id
+        session.add(batch)
+
+        item_ids: list[str] = []
+        package_ids: list[str] = []
+        for batch_index, price in enumerate(resolved_package_amounts, start=1):
+            template_item = TaskPackageTemplateItem(
+                account_id=account_id,
+                template_id=template.id,
+                sort_order=batch_index,
+                product_name=f"Batch Product {batch_index}",
+                image_url=f"https://example.com/batch-{batch_index}.png",
+                price=price,
+                currency="USD",
+            )
+            session.add(template_item)
+            session.flush()
+
+            package = TaskPackageInstance(
+                account_id=account_id,
+                template_id=template.id,
+                user_id=user.id,
+                site_id=site_id,
+                batch_id=batch.id,
+                quota_id=quota.id,
+                batch_day_no=1,
+                batch_index=batch_index,
+                batch_total=package_count,
+                planned_amount=price,
+                system_generated_amount=price,
+                effective_amount=price,
+                status="pending_claim",
+                reward_ratio_snapshot=Decimal("0.10"),
+                current_item_index=1,
+                required_item_count=1,
+                completion_window_hours_snapshot=24,
+            )
+            session.add(package)
+            session.flush()
+
+            package_item = TaskPackageInstanceItem(
+                account_id=account_id,
+                batch_id=batch.id,
+                package_instance_id=package.id,
+                template_item_id=template_item.id,
+                sort_order=1,
+                product_name=template_item.product_name,
+                image_url=template_item.image_url,
+                price=template_item.price,
+                currency=template_item.currency,
+                status="pending",
+                visible_to_user=False,
+            )
+            session.add(package_item)
+            session.flush()
+            item_ids.append(package_item.id)
+            package_ids.append(package.id)
+
+        session.commit()
+        return {
+            "batch_id": batch.id,
+            "quota_id": quota.id,
+            "package_one_id": package_ids[0],
+            "package_two_id": package_ids[1],
+            "item_one_id": item_ids[0],
+            "item_two_id": item_ids[1],
         }
 
 
@@ -342,10 +513,21 @@ def _load_h5_member_context(
     )
     assert auth_session is not None
     site_model = db_session.query(H5Site).filter(H5Site.id == site_id).one()
+    username_identity = (
+        db_session.query(UserIdentity)
+        .filter(
+            UserIdentity.user_id == user.id,
+            UserIdentity.identity_type == UserIdentityType.USERNAME.value,
+        )
+        .order_by(UserIdentity.is_primary.desc(), UserIdentity.created_at.asc(), UserIdentity.id.asc())
+        .first()
+    )
+    assert username_identity is not None
     return H5MemberContext(
         member_profile=member_profile,
         user=user,
         site=site_model,
+        username=username_identity.identity_value,
         phone=phone,
         auth_session=auth_session,
     )
@@ -384,6 +566,21 @@ def test_h5_task_package_claim_purchase_reward_and_orders_flow(
     assert claimed["status"] == "active"
     assert claimed["claimedAt"] is not None
     assert claimed["expiresAt"] is not None
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(
+            AppUser.public_user_id == auth_payload["member"]["publicUserId"]
+        ).one()
+        audit_logs = session.query(AuditLog).filter(
+            AuditLog.account_id == "acct-h5-package",
+            AuditLog.action == "h5_task_package_claimed",
+            AuditLog.actor_type == "member",
+            AuditLog.actor_id == user.id,
+            AuditLog.target_id == seeded["package_id"],
+        ).all()
+        assert len(audit_logs) == 1
+        assert audit_logs[0].payload["generated_item_count"] == 2
+        assert audit_logs[0].payload["claimed_status"] == "active"
 
     wallet_before_purchase = client.get("/api/h5/wallet")
     assert wallet_before_purchase.status_code == 200, wallet_before_purchase.text
@@ -436,6 +633,408 @@ def test_h5_task_package_claim_purchase_reward_and_orders_flow(
     home_response = client.get("/api/h5/member/home")
     assert home_response.status_code == 200, home_response.text
     assert home_response.json()["unreadMessageCount"] == 1
+
+
+def test_h5_task_package_detail_exposes_batch_progress_and_current_item_after_claim(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-package-current", site_key="h5-package-current")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-package-current",
+        phone="+8613900044455",
+        display_name="Package Current Member",
+    )
+    seeded = _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-package-current",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("100"),
+    )
+
+    pending_detail = client.get(f"/api/h5/task-packages/{seeded['package_id']}")
+    assert pending_detail.status_code == 200, pending_detail.text
+    pending_payload = pending_detail.json()
+    assert pending_payload["batchIndex"] == 1
+    assert pending_payload["batchTotal"] == 1
+    assert pending_payload["currentItemIndex"] is None
+    assert pending_payload["currentItem"] is None
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_id']}/claim")
+    assert claim_response.status_code == 200, claim_response.text
+    claimed = claim_response.json()
+    assert claimed["batchIndex"] == 1
+    assert claimed["batchTotal"] == 1
+    assert claimed["currentItemIndex"] == 1
+    assert claimed["currentItem"]["id"] == seeded["item_a_id"]
+    assert claimed["currentItem"]["productName"] == "Starter Product A"
+
+
+def test_h5_legacy_task_package_without_batch_link_still_behaves_as_single_package(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-legacy-package", site_key="h5-legacy-package")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-legacy-package",
+        phone="+86139000444552",
+        display_name="Legacy Package Member",
+    )
+    seeded = _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-legacy-package",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("100"),
+    )
+
+    with db_session_factory() as session:
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_id"]).one()
+        package.batch_id = None
+        package.quota_id = None
+        package.batch_index = None
+        package.batch_total = None
+        session.add(package)
+        session.commit()
+
+    detail_response = client.get(f"/api/h5/task-packages/{seeded['package_id']}")
+    assert detail_response.status_code == 200, detail_response.text
+    detail_payload = detail_response.json()
+    assert detail_payload["batchIndex"] == 1
+    assert detail_payload["batchTotal"] == 1
+    assert detail_payload["currentItemIndex"] is None
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_id']}/claim")
+    assert claim_response.status_code == 200, claim_response.text
+    claim_payload = claim_response.json()
+    assert claim_payload["batchIndex"] == 1
+    assert claim_payload["batchTotal"] == 1
+    assert claim_payload["currentItemIndex"] == 1
+    assert claim_payload["currentItem"]["id"] == seeded["item_a_id"]
+
+
+def test_h5_task_package_repeated_claim_keeps_same_current_item_and_snapshot(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-package-reclaim", site_key="h5-package-reclaim")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-package-reclaim",
+        phone="+86139000444551",
+        display_name="Package Reclaim Member",
+    )
+    seeded = _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-package-reclaim",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("100"),
+    )
+
+    first_claim = client.post(f"/api/h5/task-packages/{seeded['package_id']}/claim")
+    assert first_claim.status_code == 200, first_claim.text
+    first_payload = first_claim.json()
+
+    detail_after_first_claim = client.get(f"/api/h5/task-packages/{seeded['package_id']}")
+    assert detail_after_first_claim.status_code == 200, detail_after_first_claim.text
+    detail_payload = detail_after_first_claim.json()
+
+    second_claim = client.post(f"/api/h5/task-packages/{seeded['package_id']}/claim")
+    assert second_claim.status_code == 200, second_claim.text
+    second_payload = second_claim.json()
+
+    detail_after_second_claim = client.get(f"/api/h5/task-packages/{seeded['package_id']}")
+    assert detail_after_second_claim.status_code == 200, detail_after_second_claim.text
+    second_detail_payload = detail_after_second_claim.json()
+
+    assert first_payload["status"] == "active"
+    assert second_payload["status"] == "active"
+    assert first_payload["currentItem"]["id"] == seeded["item_a_id"]
+    assert second_payload["currentItem"]["id"] == seeded["item_a_id"]
+    assert second_payload["claimedAt"] == first_payload["claimedAt"]
+    assert detail_payload["currentItem"]["id"] == seeded["item_a_id"]
+    assert second_detail_payload["currentItem"]["id"] == seeded["item_a_id"]
+    assert [item["id"] for item in detail_payload["items"]] == [item["id"] for item in second_detail_payload["items"]]
+    assert [item["productName"] for item in detail_payload["items"]] == [
+        item["productName"] for item in second_detail_payload["items"]
+    ]
+
+    with db_session_factory() as session:
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_id"]).one()
+        audit_logs = session.query(AuditLog).filter(
+            AuditLog.account_id == "acct-h5-package-reclaim",
+            AuditLog.action == "h5_task_package_claimed",
+            AuditLog.target_id == seeded["package_id"],
+        ).all()
+        assert package.status == "active"
+        assert package.visible_item_id == seeded["item_a_id"]
+        assert len(audit_logs) == 1
+
+
+def test_h5_task_package_purchase_advances_current_item_pointer(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-package-advance", site_key="h5-package-advance")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-package-advance",
+        phone="+8613900044456",
+        display_name="Package Advance Member",
+    )
+    seeded = _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-package-advance",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("100"),
+    )
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_id']}/claim")
+    assert claim_response.status_code == 200, claim_response.text
+
+    first_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_id']}/items/{seeded['item_a_id']}/purchase"
+    )
+    assert first_purchase.status_code == 200, first_purchase.text
+    purchase_payload = first_purchase.json()
+    assert purchase_payload["taskPackage"]["currentItemIndex"] == 2
+    assert purchase_payload["taskPackage"]["currentItem"]["id"] == seeded["item_b_id"]
+    assert purchase_payload["taskPackage"]["currentItem"]["productName"] == "Starter Product B"
+
+    with db_session_factory() as session:
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_id"]).one()
+        item_a = session.query(TaskPackageInstanceItem).filter(TaskPackageInstanceItem.id == seeded["item_a_id"]).one()
+        assert package.current_item_index == 2
+        assert package.visible_item_id == seeded["item_b_id"]
+        assert item_a.debit_ledger_id is not None
+        assert item_a.completed_at is not None
+
+
+def test_h5_task_package_completion_persists_reward_ledger_fields(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-package-ledger", site_key="h5-package-ledger")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-package-ledger",
+        phone="+8613900044458",
+        display_name="Package Ledger Member",
+    )
+    seeded = _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-package-ledger",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("100"),
+    )
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_id']}/claim")
+    assert claim_response.status_code == 200, claim_response.text
+
+    first_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_id']}/items/{seeded['item_a_id']}/purchase"
+    )
+    assert first_purchase.status_code == 200, first_purchase.text
+    second_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_id']}/items/{seeded['item_b_id']}/purchase"
+    )
+    assert second_purchase.status_code == 200, second_purchase.text
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(
+            AppUser.public_user_id == auth_payload["member"]["publicUserId"]
+        ).one()
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_id"]).one()
+        item_a = session.query(TaskPackageInstanceItem).filter(TaskPackageInstanceItem.id == seeded["item_a_id"]).one()
+        item_b = session.query(TaskPackageInstanceItem).filter(TaskPackageInstanceItem.id == seeded["item_b_id"]).one()
+        reward_entry = session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.id == package.reward_ledger_id
+        ).one()
+        assert item_a.debit_ledger_id is not None
+        assert item_b.debit_ledger_id is not None
+        assert package.reward_amount_final == Decimal("10.00")
+        assert package.reward_ledger_id is not None
+        assert reward_entry.transaction_type == "task_reward"
+        assert reward_entry.source_type == "task_reward"
+        assert reward_entry.task_amount == Decimal("10.00")
+        assert reward_entry.idempotency_key is not None
+
+        audit_logs = session.query(AuditLog).filter(
+            AuditLog.account_id == "acct-h5-package-ledger",
+            AuditLog.action == "h5_task_reward_credited",
+            AuditLog.actor_type == "member",
+            AuditLog.actor_id == user.id,
+            AuditLog.target_id == seeded["package_id"],
+        ).all()
+        assert len(audit_logs) == 1
+        assert audit_logs[0].payload["amount"] == 10.0
+        assert audit_logs[0].payload["currency"] == "USD"
+        assert audit_logs[0].payload["transaction_type"] == "task_reward"
+
+
+def test_h5_task_batch_blocks_claiming_next_package_before_previous_is_completed(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-batch-claim-block", site_key="h5-batch-claim-block")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-batch-claim-block",
+        phone="+8613900044457",
+        display_name="Batch Claim Block Member",
+    )
+    seeded = _seed_task_batch_scope(
+        db_session_factory,
+        account_id="acct-h5-batch-claim-block",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("100"),
+    )
+
+    first_claim = client.post(f"/api/h5/task-packages/{seeded['package_one_id']}/claim")
+    assert first_claim.status_code == 200, first_claim.text
+    assert first_claim.json()["status"] == "active"
+
+    blocked_claim = client.post(f"/api/h5/task-packages/{seeded['package_two_id']}/claim")
+    assert blocked_claim.status_code == 409, blocked_claim.text
+    assert "current batch package" in blocked_claim.json()["detail"].lower()
+
+
+def test_h5_task_batch_unlocks_next_package_after_previous_completion(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-batch-unlock", site_key="h5-batch-unlock")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-batch-unlock",
+        phone="+8613900044458",
+        display_name="Batch Unlock Member",
+    )
+    seeded = _seed_task_batch_scope(
+        db_session_factory,
+        account_id="acct-h5-batch-unlock",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("100"),
+    )
+
+    first_claim = client.post(f"/api/h5/task-packages/{seeded['package_one_id']}/claim")
+    assert first_claim.status_code == 200, first_claim.text
+
+    first_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_one_id']}/items/{seeded['item_one_id']}/purchase"
+    )
+    assert first_purchase.status_code == 200, first_purchase.text
+    first_payload = first_purchase.json()
+    assert first_payload["taskPackage"]["status"] == "completed"
+
+    second_claim = client.post(f"/api/h5/task-packages/{seeded['package_two_id']}/claim")
+    assert second_claim.status_code == 200, second_claim.text
+    second_payload = second_claim.json()
+    assert second_payload["status"] == "active"
+    assert second_payload["currentItemIndex"] == 1
+    assert second_payload["currentItem"]["id"] == seeded["item_two_id"]
+
+    with db_session_factory() as session:
+        batch = session.query(MemberTaskBatch).filter(MemberTaskBatch.id == seeded["batch_id"]).one()
+        package_two = session.query(TaskPackageInstance).filter(
+            TaskPackageInstance.id == seeded["package_two_id"]
+        ).one()
+        assert batch.completed_package_count == 1
+        assert batch.current_package_index == 2
+        assert batch.status == "active"
+        assert batch.claimed_at is not None
+        assert package_two.visible_item_id == seeded["item_two_id"]
+
+
+def test_h5_task_batch_progress_labels_advance_from_one_of_five_to_two_of_five(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-batch-five", site_key="h5-batch-five")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-batch-five",
+        phone="+86139000444581",
+        display_name="Batch Five Member",
+    )
+    seeded = _seed_task_batch_scope(
+        db_session_factory,
+        account_id="acct-h5-batch-five",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("300"),
+        package_amounts=[Decimal("10"), Decimal("20"), Decimal("30"), Decimal("40"), Decimal("50")],
+    )
+
+    first_claim = client.post(f"/api/h5/task-packages/{seeded['package_one_id']}/claim")
+    assert first_claim.status_code == 200, first_claim.text
+    first_payload = first_claim.json()
+    assert first_payload["batchIndex"] == 1
+    assert first_payload["batchTotal"] == 5
+
+    first_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_one_id']}/items/{seeded['item_one_id']}/purchase"
+    )
+    assert first_purchase.status_code == 200, first_purchase.text
+    assert first_purchase.json()["taskPackage"]["status"] == "completed"
+
+    second_claim = client.post(f"/api/h5/task-packages/{seeded['package_two_id']}/claim")
+    assert second_claim.status_code == 200, second_claim.text
+    second_payload = second_claim.json()
+    assert second_payload["batchIndex"] == 2
+    assert second_payload["batchTotal"] == 5
+    assert second_payload["currentItem"]["id"] == seeded["item_two_id"]
+
+
+def test_h5_task_batch_completion_marks_linked_quota_completed(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-batch-complete", site_key="h5-batch-complete")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-batch-complete",
+        phone="+8613900044459",
+        display_name="Batch Complete Member",
+    )
+    seeded = _seed_task_batch_scope(
+        db_session_factory,
+        account_id="acct-h5-batch-complete",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("100"),
+    )
+
+    first_claim = client.post(f"/api/h5/task-packages/{seeded['package_one_id']}/claim")
+    assert first_claim.status_code == 200, first_claim.text
+    first_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_one_id']}/items/{seeded['item_one_id']}/purchase"
+    )
+    assert first_purchase.status_code == 200, first_purchase.text
+
+    second_claim = client.post(f"/api/h5/task-packages/{seeded['package_two_id']}/claim")
+    assert second_claim.status_code == 200, second_claim.text
+    second_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_two_id']}/items/{seeded['item_two_id']}/purchase"
+    )
+    assert second_purchase.status_code == 200, second_purchase.text
+    assert second_purchase.json()["taskPackage"]["status"] == "completed"
+
+    with db_session_factory() as session:
+        batch = session.query(MemberTaskBatch).filter(MemberTaskBatch.id == seeded["batch_id"]).one()
+        quota = session.query(MemberTaskDayQuota).filter(MemberTaskDayQuota.id == seeded["quota_id"]).one()
+        assert batch.status == "completed"
+        assert batch.completed_package_count == 2
+        assert batch.completed_at is not None
+        assert quota.status == "completed"
 
 
 def test_h5_task_package_purchase_rejects_insufficient_balance(
@@ -552,6 +1151,715 @@ def test_h5_wallet_transfer_and_recharge_update_balances_and_ledgers(
         assert transfer_credit_ledger.cash_amount == Decimal("0")
         assert transfer_credit_ledger.bonus_amount == Decimal("50")
         assert transfer_credit_ledger.fund_type == "bonus"
+
+        audit_logs = session.query(AuditLog).filter(
+            AuditLog.account_id == "acct-h5-wallet",
+            AuditLog.action == "h5_task_balance_transferred",
+            AuditLog.actor_type == "member",
+            AuditLog.actor_id == user.id,
+        ).all()
+        assert len(audit_logs) == 1
+        assert audit_logs[0].payload["amount"] == 50.0
+        assert audit_logs[0].payload["currency"] == "USD"
+        assert audit_logs[0].payload["transaction_type"] == "task_to_system_transfer"
+
+
+def test_h5_recharge_auto_certifies_member_when_threshold_is_reached(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-recharge-certify", site_key="h5-recharge-certify")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-recharge-certify",
+        phone="+8613900066667",
+        display_name="Recharge Certify Member",
+    )
+    _seed_task_system_config(
+        db_session_factory,
+        account_id="acct-h5-recharge-certify",
+        site_id=site["id"],
+        certified_recharge_threshold=Decimal("50.00"),
+        auto_certify_on_recharge=True,
+    )
+    _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-recharge-certify",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("0"),
+        task_balance=Decimal("0"),
+    )
+
+    recharge_response = client.post("/api/h5/wallet/recharges", json={"amount": 50})
+    assert recharge_response.status_code == 200, recharge_response.text
+
+    verification_response = client.get("/api/h5/member/verification")
+    assert verification_response.status_code == 200, verification_response.text
+    assert verification_response.json()["currentStatus"] == "approved"
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(AppUser.public_user_id == auth_payload["member"]["publicUserId"]).one()
+        member_profile = session.query(MemberProfile).filter(MemberProfile.user_id == user.id).one()
+        request = session.query(MemberVerificationRequest).filter(
+            MemberVerificationRequest.account_id == "acct-h5-recharge-certify",
+            MemberVerificationRequest.member_profile_id == member_profile.id,
+        ).one()
+        assert request.status == "approved"
+        assert request.review_note is not None
+        assert "auto" in request.review_note.lower()
+
+
+def test_h5_recharge_auto_certification_respects_49_50_and_updated_100_thresholds(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-recharge-thresholds", site_key="h5-recharge-thresholds")
+    _seed_task_system_config(
+        db_session_factory,
+        account_id="acct-h5-recharge-thresholds",
+        site_id=site["id"],
+        certified_recharge_threshold=Decimal("50.00"),
+        auto_certify_on_recharge=True,
+    )
+
+    member_below = _register_member(
+        client,
+        site_key="h5-recharge-thresholds",
+        phone="+8613900066670",
+        display_name="Recharge Threshold 49 Member",
+    )
+    _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-recharge-thresholds",
+        site_id=site["id"],
+        public_user_id=member_below["member"]["publicUserId"],
+        system_balance=Decimal("0"),
+        task_balance=Decimal("0"),
+    )
+    recharge_49_response = client.post("/api/h5/wallet/recharges", json={"amount": 49})
+    assert recharge_49_response.status_code == 200, recharge_49_response.text
+    verification_49_response = client.get("/api/h5/member/verification")
+    assert verification_49_response.status_code == 200, verification_49_response.text
+    assert verification_49_response.json()["currentStatus"] != "approved"
+
+    member_at_threshold = _register_member(
+        client,
+        site_key="h5-recharge-thresholds",
+        phone="+8613900066671",
+        display_name="Recharge Threshold 50 Member",
+    )
+    _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-recharge-thresholds",
+        site_id=site["id"],
+        public_user_id=member_at_threshold["member"]["publicUserId"],
+        system_balance=Decimal("0"),
+        task_balance=Decimal("0"),
+    )
+    recharge_50_response = client.post("/api/h5/wallet/recharges", json={"amount": 50})
+    assert recharge_50_response.status_code == 200, recharge_50_response.text
+    verification_50_response = client.get("/api/h5/member/verification")
+    assert verification_50_response.status_code == 200, verification_50_response.text
+    assert verification_50_response.json()["currentStatus"] == "approved"
+
+    with db_session_factory() as session:
+        config = session.query(TaskSystemConfig).filter(
+            TaskSystemConfig.account_id == "acct-h5-recharge-thresholds",
+            TaskSystemConfig.site_id == site["id"],
+        ).one()
+        config.certified_recharge_threshold = Decimal("100.00")
+        session.commit()
+
+    member_after_update = _register_member(
+        client,
+        site_key="h5-recharge-thresholds",
+        phone="+8613900066672",
+        display_name="Recharge Threshold 100 Member",
+    )
+    _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-recharge-thresholds",
+        site_id=site["id"],
+        public_user_id=member_after_update["member"]["publicUserId"],
+        system_balance=Decimal("0"),
+        task_balance=Decimal("0"),
+    )
+    recharge_99_response = client.post("/api/h5/wallet/recharges", json={"amount": 99})
+    assert recharge_99_response.status_code == 200, recharge_99_response.text
+    verification_99_response = client.get("/api/h5/member/verification")
+    assert verification_99_response.status_code == 200, verification_99_response.text
+    assert verification_99_response.json()["currentStatus"] != "approved"
+
+    recharge_1_response = client.post("/api/h5/wallet/recharges", json={"amount": 1})
+    assert recharge_1_response.status_code == 200, recharge_1_response.text
+    verification_100_response = client.get("/api/h5/member/verification")
+    assert verification_100_response.status_code == 200, verification_100_response.text
+    assert verification_100_response.json()["currentStatus"] == "approved"
+
+
+def test_h5_main_flow_acceptance_progresses_from_certification_to_reward_and_transfer(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-main-flow", site_key="h5-main-flow")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-main-flow",
+        phone="+8613900066688",
+        display_name="Main Flow Member",
+    )
+    _seed_task_system_config(
+        db_session_factory,
+        account_id="acct-h5-main-flow",
+        site_id=site["id"],
+        certified_recharge_threshold=Decimal("50.00"),
+        show_task_balance_transfer_prompt=False,
+    )
+    seeded = _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-main-flow",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("30"),
+    )
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(AppUser.public_user_id == auth_payload["member"]["publicUserId"]).one()
+        user.has_whatsapp = True
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_id"]).one()
+        package.template.package_type = "official"
+        session.add(user)
+        session.add(package.template)
+        session.commit()
+
+    before_recharge_entry = client.get("/api/h5/tasks/entry-state")
+    assert before_recharge_entry.status_code == 200, before_recharge_entry.text
+    before_recharge_payload = before_recharge_entry.json()
+    assert before_recharge_payload["state"] == "need_certification"
+    assert before_recharge_payload["remainingRechargeAmount"] == 50.0
+
+    recharge_response = client.post("/api/h5/wallet/recharges", json={"amount": 50})
+    assert recharge_response.status_code == 200, recharge_response.text
+
+    after_recharge_entry = client.get("/api/h5/tasks/entry-state")
+    assert after_recharge_entry.status_code == 200, after_recharge_entry.text
+    after_recharge_payload = after_recharge_entry.json()
+    assert after_recharge_payload["state"] == "official_batch_available"
+    assert after_recharge_payload["taskPackageId"] == seeded["package_id"]
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_id']}/claim")
+    assert claim_response.status_code == 200, claim_response.text
+    assert claim_response.json()["status"] == "active"
+
+    active_entry = client.get("/api/h5/tasks/entry-state")
+    assert active_entry.status_code == 200, active_entry.text
+    active_payload = active_entry.json()
+    assert active_payload["state"] == "official_batch_active"
+    assert active_payload["taskPackageId"] == seeded["package_id"]
+
+    first_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_id']}/items/{seeded['item_a_id']}/purchase"
+    )
+    assert first_purchase.status_code == 200, first_purchase.text
+    first_purchase_payload = first_purchase.json()
+    assert first_purchase_payload["success"] is True
+    assert first_purchase_payload["taskPackage"]["status"] == "active"
+    assert first_purchase_payload["wallet"]["taskBalance"] == 0.0
+
+    detail_response = client.get(f"/api/h5/task-packages/{seeded['package_id']}")
+    assert detail_response.status_code == 200, detail_response.text
+    current_item_id = detail_response.json()["currentItem"]["id"]
+
+    second_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_id']}/items/{current_item_id}/purchase"
+    )
+    assert second_purchase.status_code == 200, second_purchase.text
+    second_purchase_payload = second_purchase.json()
+    assert second_purchase_payload["success"] is True
+    assert second_purchase_payload["taskPackage"]["status"] == "completed"
+    assert second_purchase_payload["wallet"]["taskBalance"] == 10.0
+
+    next_entry = client.get("/api/h5/tasks/entry-state")
+    assert next_entry.status_code == 200, next_entry.text
+    next_entry_payload = next_entry.json()
+    assert next_entry_payload["state"] == "no_task"
+    assert next_entry_payload["taskPackageId"] is None
+
+    transfer_response = client.post("/api/h5/wallet/transfers", json={"amount": 10})
+    assert transfer_response.status_code == 200, transfer_response.text
+    transfer_payload = transfer_response.json()
+    assert transfer_payload["taskBalance"] == 0.0
+    assert transfer_payload["systemBalance"] == 40.0
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(AppUser.public_user_id == auth_payload["member"]["publicUserId"]).one()
+        wallet = session.query(WalletAccount).filter(WalletAccount.user_id == user.id).one()
+        reward_entries = session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.account_id == "acct-h5-main-flow",
+            WalletLedgerEntry.user_id == user.id,
+            WalletLedgerEntry.transaction_type == "task_reward",
+        ).all()
+        transfer_entries = session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.account_id == "acct-h5-main-flow",
+            WalletLedgerEntry.user_id == user.id,
+            WalletLedgerEntry.transaction_type == "task_to_system_transfer",
+            WalletLedgerEntry.ledger_type == "system",
+        ).all()
+
+        assert wallet.task_balance == Decimal("0")
+        assert wallet.system_balance == Decimal("40")
+        assert wallet.system_cash_balance == Decimal("30")
+        assert wallet.system_bonus_balance == Decimal("10")
+        assert len(reward_entries) == 1
+        assert reward_entries[0].task_amount == Decimal("10")
+        assert len(transfer_entries) == 1
+        assert transfer_entries[0].bonus_amount == Decimal("10")
+
+
+def test_h5_task_package_detail_exposes_manual_added_amounts_and_current_item_origin(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-package-manual-view", site_key="h5-package-manual-view")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-package-manual-view",
+        phone="+8613900066668",
+        display_name="Package Manual View Member",
+    )
+    seeded = _seed_task_batch_scope(
+        db_session_factory,
+        account_id="acct-h5-package-manual-view",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("200"),
+    )
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_one_id']}/claim")
+    assert claim_response.status_code == 200, claim_response.text
+
+    with db_session_factory() as session:
+        service = TaskManualAddService(session=session)
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_one_id"]).one()
+        pool = TaskProductPool(
+            account_id=package.account_id,
+            site_id=package.site_id,
+            name="Manual H5 Pool",
+            pool_type="general",
+            price_mode="task_price_snapshot",
+            allow_repeat_in_same_batch=False,
+            allow_repeat_in_same_package=False,
+            status="active",
+            currency="USD",
+        )
+        session.add(pool)
+        session.flush()
+
+        extra_item = TaskProductPoolItem(
+            account_id=package.account_id,
+            pool_id=pool.id,
+            product_id="manual-h5-product-1",
+            product_name="Manual H5 Product 1",
+            image_url="https://example.com/manual-h5-1.png",
+            price=Decimal("66.00"),
+            currency="USD",
+            product_description="Manual H5 Product 1 description",
+            status="active",
+            sort_order=1,
+        )
+        session.add(extra_item)
+        session.flush()
+
+        existing_items = session.query(TaskPackageInstanceItem).filter(
+            TaskPackageInstanceItem.package_instance_id == package.id
+        ).all()
+        for item in existing_items:
+            item.product_pool_id = pool.id
+            session.add(item)
+        session.commit()
+
+        service.add_items(
+            package_id=package.id,
+            pool_item_ids=[extra_item.id],
+            operator_id="staff-h5-manual-view",
+            reason_text="客服追加任务商品",
+        )
+
+    first_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_one_id']}/items/{seeded['item_one_id']}/purchase"
+    )
+    assert first_purchase.status_code == 200, first_purchase.text
+
+    detail_response = client.get(f"/api/h5/task-packages/{seeded['package_one_id']}")
+    assert detail_response.status_code == 200, detail_response.text
+    payload = detail_response.json()
+    assert payload["manualAddedAmount"] == 66.0
+    assert payload["effectiveAmount"] == 76.0
+    assert payload["currentItem"]["origin"] == "manual_added"
+    assert payload["hasAdjustmentNotice"] is False
+    assert payload["adjustmentNotice"] is None
+
+
+def test_h5_current_item_matches_admin_detail_and_monitor_row_after_manual_add(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-current-item-sync", site_key="h5-current-item-sync")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-current-item-sync",
+        phone="+8613900066680",
+        display_name="Current Item Sync Member",
+    )
+    seeded = _seed_task_batch_scope(
+        db_session_factory,
+        account_id="acct-h5-current-item-sync",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("300"),
+    )
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_one_id']}/claim")
+    assert claim_response.status_code == 200, claim_response.text
+
+    with db_session_factory() as session:
+        service = TaskManualAddService(session=session)
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_one_id"]).one()
+        pool = session.query(TaskProductPool).filter(TaskProductPool.id == package.items[0].product_pool_id).one_or_none()
+        if pool is None:
+            pool = session.query(TaskProductPool).filter(TaskProductPool.account_id == package.account_id).one()
+            for item in package.items:
+                item.product_pool_id = pool.id
+                session.add(item)
+            session.flush()
+
+        extra_item = TaskProductPoolItem(
+            account_id=package.account_id,
+            pool_id=pool.id,
+            product_id="manual-sync-product-1",
+            product_name="Manual Sync Product",
+            image_url="https://example.com/manual-sync.png",
+            price=Decimal("66.00"),
+            currency="USD",
+            product_description="Manual sync add-on product",
+            status="active",
+            sort_order=55,
+        )
+        session.add(extra_item)
+        session.flush()
+
+        service.add_items(
+            package_id=package.id,
+            pool_item_ids=[extra_item.id],
+            operator_id="staff-current-item-sync",
+            reason_text="sync current item across h5 admin monitor",
+        )
+
+    first_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_one_id']}/items/{seeded['item_one_id']}/purchase"
+    )
+    assert first_purchase.status_code == 200, first_purchase.text
+
+    h5_detail = client.get(f"/api/h5/task-packages/{seeded['package_one_id']}")
+    assert h5_detail.status_code == 200, h5_detail.text
+    h5_payload = h5_detail.json()
+    current_item = h5_payload["currentItem"]
+    assert current_item["origin"] == "manual_added"
+
+    admin_detail = client.get(
+        f"/api/tasks/packages/{seeded['package_one_id']}",
+        headers=_operator_headers("acct-h5-current-item-sync"),
+    )
+    assert admin_detail.status_code == 200, admin_detail.text
+    admin_payload = admin_detail.json()
+    admin_current_item = admin_payload["items"][-1]
+    assert admin_current_item["origin"] == "manual_added"
+
+    monitor_response = client.get(
+        "/api/tasks/monitor/query",
+        params={"account_id": "acct-h5-current-item-sync"},
+        headers=_operator_headers("acct-h5-current-item-sync"),
+    )
+    assert monitor_response.status_code == 200, monitor_response.text
+    monitor_payload = monitor_response.json()
+    assert len(monitor_payload) == 2
+    row = next(item for item in monitor_payload if item["packageId"] == seeded["package_one_id"])
+
+    assert row["currentItemIndex"] == h5_payload["currentItemIndex"]
+    assert row["currentProductOrigin"] == current_item["origin"]
+    assert row["currentProductId"] == current_item["id"]
+    assert row["currentProductName"] == current_item["productName"]
+    assert admin_current_item["id"] == current_item["id"]
+    assert admin_current_item["productName"] == current_item["productName"]
+
+
+def test_h5_manual_added_items_delay_completion_and_recalculate_reward_from_effective_amount(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-manual-reward", site_key="h5-manual-reward")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-manual-reward",
+        phone="+8613900066669",
+        display_name="Manual Reward Member",
+    )
+    seeded = _seed_task_batch_scope(
+        db_session_factory,
+        account_id="acct-h5-manual-reward",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("300"),
+    )
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_one_id']}/claim")
+    assert claim_response.status_code == 200, claim_response.text
+
+    with db_session_factory() as session:
+        service = TaskManualAddService(session=session)
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_one_id"]).one()
+        pool = session.query(TaskProductPool).filter(TaskProductPool.id == package.items[0].product_pool_id).one_or_none()
+        if pool is None:
+            pool = session.query(TaskProductPool).filter(TaskProductPool.account_id == package.account_id).one()
+            for item in package.items:
+                item.product_pool_id = pool.id
+                session.add(item)
+            session.flush()
+
+        extra_item = TaskProductPoolItem(
+            account_id=package.account_id,
+            pool_id=pool.id,
+            product_id="manual-reward-product-1",
+            product_name="Manual Reward Product",
+            image_url="https://example.com/manual-reward.png",
+            price=Decimal("66.00"),
+            currency="USD",
+            product_description="Manual reward add-on product",
+            status="active",
+            sort_order=50,
+        )
+        session.add(extra_item)
+        session.flush()
+
+        service.add_items(
+            package_id=package.id,
+            pool_item_ids=[extra_item.id],
+            operator_id="staff-manual-reward",
+            reason_text="客服追加商品用于奖励重算",
+        )
+
+    first_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_one_id']}/items/{seeded['item_one_id']}/purchase"
+    )
+    assert first_purchase.status_code == 200, first_purchase.text
+    first_payload = first_purchase.json()
+    assert first_payload["taskPackage"]["status"] == "active"
+    assert first_payload["taskPackage"]["currentItem"]["origin"] == "manual_added"
+
+    blocked_claim = client.post(f"/api/h5/task-packages/{seeded['package_two_id']}/claim")
+    assert blocked_claim.status_code == 409, blocked_claim.text
+
+    detail_response = client.get(f"/api/h5/task-packages/{seeded['package_one_id']}")
+    assert detail_response.status_code == 200, detail_response.text
+    detail_payload = detail_response.json()
+    manual_item_id = detail_payload["currentItem"]["id"]
+
+    second_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_one_id']}/items/{manual_item_id}/purchase"
+    )
+    assert second_purchase.status_code == 200, second_purchase.text
+    second_payload = second_purchase.json()
+    assert second_payload["taskPackage"]["status"] == "completed"
+
+    with db_session_factory() as session:
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_one_id"]).one()
+        reward_entry = session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.id == package.reward_ledger_id
+        ).one()
+        assert package.manual_added_amount == Decimal("66.00")
+        assert package.effective_amount == Decimal("76.00")
+        assert package.reward_amount_final == Decimal("7.60")
+        assert reward_entry.task_amount == Decimal("7.60")
+
+
+def test_h5_last_system_item_purchase_does_not_settle_reward_before_concurrent_manual_add(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch,
+) -> None:
+    site = _create_site(client, account_id="acct-h5-manual-race", site_key="h5-manual-race")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-manual-race",
+        phone="+8613900066679",
+        display_name="Manual Race Member",
+    )
+    seeded = _seed_task_batch_scope(
+        db_session_factory,
+        account_id="acct-h5-manual-race",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("300"),
+    )
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_one_id']}/claim")
+    assert claim_response.status_code == 200, claim_response.text
+
+    with db_session_factory() as session:
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_one_id"]).one()
+        pool = session.query(TaskProductPool).filter(TaskProductPool.id == package.items[0].product_pool_id).one_or_none()
+        if pool is None:
+            pool = session.query(TaskProductPool).filter(TaskProductPool.account_id == package.account_id).one()
+            for item in package.items:
+                item.product_pool_id = pool.id
+                session.add(item)
+            session.flush()
+
+        extra_item = TaskProductPoolItem(
+            account_id=package.account_id,
+            pool_id=pool.id,
+            product_id="manual-race-product-1",
+            product_name="Manual Race Product",
+            image_url="https://example.com/manual-race.png",
+            price=Decimal("66.00"),
+            currency="USD",
+            product_description="Concurrent manual add product",
+            status="active",
+            sort_order=52,
+        )
+        session.add(extra_item)
+        session.commit()
+        extra_item_id = extra_item.id
+
+    original_debit_system_balance = WalletLedgerService.debit_system_balance
+    injected_manual_add = False
+
+    def debit_with_concurrent_manual_add(self: WalletLedgerService, **kwargs):
+        nonlocal injected_manual_add
+        split, ledger = original_debit_system_balance(self, **kwargs)
+        if not injected_manual_add:
+            injected_manual_add = True
+            with db_session_factory() as competing_session:
+                add_service = TaskManualAddService(session=competing_session)
+                add_service.add_items(
+                    package_id=seeded["package_one_id"],
+                    pool_item_ids=[extra_item_id],
+                    operator_id="staff-manual-race",
+                    reason_text="concurrent manual add before reward settlement",
+                )
+        return split, ledger
+
+    monkeypatch.setattr(WalletLedgerService, "debit_system_balance", debit_with_concurrent_manual_add)
+
+    purchase_response = client.post(
+        f"/api/h5/task-packages/{seeded['package_one_id']}/items/{seeded['item_one_id']}/purchase"
+    )
+    assert purchase_response.status_code == 200, purchase_response.text
+    payload = purchase_response.json()
+    assert payload["taskPackage"]["status"] == "active"
+    assert payload["taskPackage"]["currentItem"]["origin"] == "manual_added"
+
+    with db_session_factory() as session:
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_one_id"]).one()
+        reward_entries = session.query(WalletLedgerEntry).filter(
+            WalletLedgerEntry.account_id == "acct-h5-manual-race",
+            WalletLedgerEntry.reference_type == "task_package_instance",
+            WalletLedgerEntry.reference_id == seeded["package_one_id"],
+            WalletLedgerEntry.transaction_type == "task_reward",
+        ).all()
+        assert package.status == "active"
+        assert package.completed_at is None
+        assert package.reward_ledger_id is None
+        assert package.task_balance_awarded_at is None
+        assert len(reward_entries) == 0
+
+
+def test_h5_task_item_purchase_ledger_source_type_distinguishes_system_and_manual_items(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-ledger-origin", site_key="h5-ledger-origin")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-ledger-origin",
+        phone="+8613900066670",
+        display_name="Ledger Origin Member",
+    )
+    seeded = _seed_task_batch_scope(
+        db_session_factory,
+        account_id="acct-h5-ledger-origin",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("300"),
+    )
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_one_id']}/claim")
+    assert claim_response.status_code == 200, claim_response.text
+
+    with db_session_factory() as session:
+        service = TaskManualAddService(session=session)
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_one_id"]).one()
+        pool = session.query(TaskProductPool).filter(TaskProductPool.id == package.items[0].product_pool_id).one_or_none()
+        if pool is None:
+            pool = session.query(TaskProductPool).filter(TaskProductPool.account_id == package.account_id).one()
+            for item in package.items:
+                item.product_pool_id = pool.id
+                session.add(item)
+            session.flush()
+
+        extra_item = TaskProductPoolItem(
+            account_id=package.account_id,
+            pool_id=pool.id,
+            product_id="ledger-origin-product-1",
+            product_name="Ledger Origin Product",
+            image_url="https://example.com/ledger-origin.png",
+            price=Decimal("66.00"),
+            currency="USD",
+            product_description="Ledger origin add-on product",
+            status="active",
+            sort_order=51,
+        )
+        session.add(extra_item)
+        session.flush()
+
+        service.add_items(
+            package_id=package.id,
+            pool_item_ids=[extra_item.id],
+            operator_id="staff-ledger-origin",
+            reason_text="追加商品用于校验账务来源类型",
+        )
+
+    first_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_one_id']}/items/{seeded['item_one_id']}/purchase"
+    )
+    assert first_purchase.status_code == 200, first_purchase.text
+
+    detail_response = client.get(f"/api/h5/task-packages/{seeded['package_one_id']}")
+    assert detail_response.status_code == 200, detail_response.text
+    manual_item_id = detail_response.json()["currentItem"]["id"]
+
+    second_purchase = client.post(
+        f"/api/h5/task-packages/{seeded['package_one_id']}/items/{manual_item_id}/purchase"
+    )
+    assert second_purchase.status_code == 200, second_purchase.text
+
+    with db_session_factory() as session:
+        purchased_items = (
+            session.query(TaskPackageInstanceItem)
+            .filter(TaskPackageInstanceItem.package_instance_id == seeded["package_one_id"])
+            .order_by(TaskPackageInstanceItem.sort_order.asc())
+            .all()
+        )
+        system_item = purchased_items[0]
+        manual_item = purchased_items[1]
+        system_entry = session.query(WalletLedgerEntry).filter(WalletLedgerEntry.id == system_item.debit_ledger_id).one()
+        manual_entry = session.query(WalletLedgerEntry).filter(WalletLedgerEntry.id == manual_item.debit_ledger_id).one()
+
+        assert system_item.item_origin == "system_generated"
+        assert manual_item.item_origin == "manual_added"
+        assert system_entry.source_type == "task_item_purchase_system_generated"
+        assert manual_entry.source_type == "task_item_purchase_manual_added"
 
 
 def test_h5_member_home_includes_wallet_and_task_package_counts(
@@ -1077,6 +2385,72 @@ def test_h5_promotion_task_package_claim_requires_target_completion(
     claim_response = client.post(f"/api/h5/task-packages/{seeded['package_id']}/claim")
     assert claim_response.status_code == 409, claim_response.text
     assert claim_response.json()["detail"] == "Promotion task target has not been reached yet."
+
+
+def test_h5_task_package_claim_enforces_whatsapp_claim_gate_snapshot(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-claim-gate-whatsapp", site_key="h5-claim-gate-whatsapp")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-claim-gate-whatsapp",
+        phone="+86139000677756",
+        display_name="WhatsApp Gate Member",
+    )
+    seeded = _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-claim-gate-whatsapp",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("100"),
+    )
+
+    with db_session_factory() as session:
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_id"]).one()
+        package.claim_gate_snapshot = "whatsapp_bound"
+        session.commit()
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_id']}/claim")
+    assert claim_response.status_code == 409, claim_response.text
+    assert claim_response.json()["detail"] == "This task package requires a bound WhatsApp account before claiming."
+
+
+def test_h5_task_package_claim_enforces_certified_member_claim_gate_snapshot(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site = _create_site(client, account_id="acct-h5-claim-gate-certified", site_key="h5-claim-gate-certified")
+    auth_payload = _register_member(
+        client,
+        site_key="h5-claim-gate-certified",
+        phone="+86139000677757",
+        display_name="Certified Gate Member",
+    )
+    seeded = _seed_task_package_scope(
+        db_session_factory,
+        account_id="acct-h5-claim-gate-certified",
+        site_id=site["id"],
+        public_user_id=auth_payload["member"]["publicUserId"],
+        system_balance=Decimal("100"),
+    )
+    _seed_task_system_config(
+        db_session_factory,
+        account_id="acct-h5-claim-gate-certified",
+        site_id=site["id"],
+        certified_member_enabled=True,
+        certified_recharge_threshold=Decimal("50.00"),
+        show_task_balance_transfer_prompt=False,
+    )
+
+    with db_session_factory() as session:
+        package = session.query(TaskPackageInstance).filter(TaskPackageInstance.id == seeded["package_id"]).one()
+        package.claim_gate_snapshot = "certified_member"
+        session.commit()
+
+    claim_response = client.post(f"/api/h5/task-packages/{seeded['package_id']}/claim")
+    assert claim_response.status_code == 409, claim_response.text
+    assert claim_response.json()["detail"] == "This task package requires certification before claiming."
 
 
 def test_h5_promotion_task_package_claim_settles_reward_after_target_completion(
@@ -1727,12 +3101,29 @@ def test_h5_recharge_marks_referral_as_recharged(
         inviter = session.query(AppUser).filter(
             AppUser.public_user_id == inviter_payload["member"]["publicUserId"]
         ).one()
+        inviter_member = session.query(MemberProfile).filter(
+            MemberProfile.user_id == inviter.id
+        ).one()
+        inviter_member.current_owner_staff_user_id = "staff-wallet-inviter"
+        inviter_member.attribution_status = "owned"
+        from app.db.ownership_models import MemberOwnerAssignment
         session.add(
             InviteCode(
                 code="PROMO-WALLET-REF",
                 site_id=site["id"],
                 inviter_user_id=inviter.id,
                 status="active",
+            )
+        )
+        session.add(
+            MemberOwnerAssignment(
+                account_id=inviter_member.account_id,
+                site_id=site["id"],
+                user_id=inviter.id,
+                member_profile_id=inviter_member.id,
+                owner_staff_user_id="staff-wallet-inviter",
+                source_type="staff_entry_link",
+                is_current=True,
             )
         )
         session.commit()

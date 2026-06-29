@@ -60,8 +60,8 @@ def test_finance_recharge_and_withdrawal_lists_use_wallet_split_fields(
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Manual recharge credited",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -74,8 +74,8 @@ def test_finance_recharge_and_withdrawal_lists_use_wallet_split_fields(
             transaction_type="bonus_grant",
             source_type="admin_bonus",
             note="Bonus credited",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="bonus",
             is_bonus=True,
         )
@@ -161,8 +161,8 @@ def test_finance_summary_supports_excluding_bonus_via_query_flag(
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Manual recharge credited",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -175,8 +175,8 @@ def test_finance_summary_supports_excluding_bonus_via_query_flag(
             transaction_type="bonus_grant",
             source_type="admin_bonus",
             note="Bonus credited",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="bonus",
             is_bonus=True,
         )
@@ -253,8 +253,8 @@ def test_finance_wallet_ledger_list_uses_real_wallet_entries(
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Manual recharge credited",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -267,8 +267,8 @@ def test_finance_wallet_ledger_list_uses_real_wallet_entries(
             transaction_type="bonus_grant",
             source_type="admin_bonus",
             note="Bonus credited",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="bonus",
             is_bonus=True,
         )
@@ -340,8 +340,8 @@ def test_finance_anomaly_alerts_include_account_scope_for_member_navigation(
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Large recharge credited",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -480,8 +480,8 @@ def test_finance_report_endpoints_do_not_allow_cross_account_scope_for_non_super
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Own recharge credited",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -494,8 +494,8 @@ def test_finance_report_endpoints_do_not_allow_cross_account_scope_for_non_super
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Foreign recharge credited",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -695,8 +695,8 @@ def test_finance_anomaly_alerts_do_not_fall_back_to_global_scope_for_multi_accou
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Own large recharge",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -709,8 +709,8 @@ def test_finance_anomaly_alerts_do_not_fall_back_to_global_scope_for_multi_accou
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Foreign large recharge",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -923,8 +923,8 @@ def test_finance_recharge_and_withdrawal_lists_honor_site_id_filter(
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Primary site recharge",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -937,8 +937,8 @@ def test_finance_recharge_and_withdrawal_lists_honor_site_id_filter(
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Secondary site recharge",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -1044,8 +1044,8 @@ def test_legacy_reports_finance_uses_real_recharge_and_withdrawal_amounts(
             transaction_type="manual_recharge",
             source_type="manual_real_recharge",
             note="Legacy finance recharge",
-            reference_type=None,
-            reference_id=None,
+            reference_type="test_seed",
+            reference_id="test-seed",
             fund_type="cash",
             is_real_recharge=True,
         )
@@ -1079,3 +1079,5 @@ def test_legacy_reports_finance_uses_real_recharge_and_withdrawal_amounts(
     payload = response.json()
     assert payload["recharge_amount"] == 150.0
     assert payload["withdraw_amount"] == 90.0
+
+

@@ -149,11 +149,15 @@ def strict_client(strict_db_session_factory: sessionmaker[Session]) -> Generator
         "TEST_MODE": os.environ.get("TEST_MODE"),
         "LIVE_TRANSLATION_ENABLED": os.environ.get("LIVE_TRANSLATION_ENABLED"),
         "TRANSLATION_PROVIDER": os.environ.get("TRANSLATION_PROVIDER"),
+        "MESSAGING_PROVIDER": os.environ.get("MESSAGING_PROVIDER"),
+        "META_MANAGEMENT_PROVIDER": os.environ.get("META_MANAGEMENT_PROVIDER"),
     }
     os.environ["AUTH_REQUIRED"] = "true"
     os.environ["TEST_MODE"] = "false"
     os.environ["LIVE_TRANSLATION_ENABLED"] = "false"
     os.environ["TRANSLATION_PROVIDER"] = "fallback"
+    os.environ["MESSAGING_PROVIDER"] = "mock"
+    os.environ["META_MANAGEMENT_PROVIDER"] = ""
 
     from app.core.settings import get_settings
 
@@ -1030,13 +1034,16 @@ def test_embedded_signup_session_ready_filters_keep_visible_scope_and_blocking_r
                 headers=admin_headers,
             )
             assert create_response.status_code == 200, create_response.text
-            session_id = create_response.json()["session_id"]
+            created_session = create_response.json()
+            session_id = created_session["session_id"]
+            launch_state = created_session["launch_context"]["state"]
             session_ids[account_id] = session_id
 
             callback_response = strict_client.post(
                 f"/webhooks/meta/embedded-signup/session/{session_id}",
                 json={
                     "status": "completed",
+                    "state": launch_state,
                     "waba_id": f"waba-{callback_suffix}",
                     "meta_business_portfolio_id": f"biz-{callback_suffix}",
                     "phone_number_ids": [f"pn-{callback_suffix}-1"],

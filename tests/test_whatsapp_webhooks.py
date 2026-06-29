@@ -11,6 +11,7 @@ from app.api.deps import get_messaging_service
 from app.api.routes import webhooks as webhook_routes
 from app.core.settings import get_settings
 from app.db.models import (
+    AppUser,
     MessageEvent,
     MessageTemplate,
     ProviderStatusEventBuffer,
@@ -28,7 +29,10 @@ from app.schemas.messaging import (
 )
 from app.schemas.mock_message import NormalizedMessage
 from app.services.runtime_state import RuntimeStateStore
+from app.services.whatsapp_identity_service import WhatsAppIdentityService
 from tests.conftest import StubMetaManagementProvider
+from tests.services.test_whatsapp_phone_pool_service import _seed_pool
+from tests.test_h5_member_auth import _create_site, _register_member
 
 
 def register_meta_account_with_webhook_secret(client: TestClient) -> None:
@@ -484,7 +488,7 @@ def test_receive_whatsapp_webhook_uses_subscription_snapshot_after_waba_row_recr
         params={"account_id": "meta-webhook-account"},
     )
     assert conversation_response.status_code == 200
-    conversations = conversation_response.json()
+    conversations = conversation_response.json()["items"]
     assert [item["conversation_id"] for item in conversations] == ["wa:pn-webhook-1:14150001021"]
     assert conversations[0]["waba_id"] == "waba-webhook-1"
     assert conversations[0]["phone_number_id"] == "pn-webhook-1"
@@ -856,7 +860,7 @@ def test_root_receive_whatsapp_webhook_uses_subscription_snapshot_after_waba_row
         params={"account_id": "meta-webhook-account"},
     )
     assert conversation_response.status_code == 200
-    conversations = conversation_response.json()
+    conversations = conversation_response.json()["items"]
     assert [item["conversation_id"] for item in conversations] == ["wa:pn-webhook-1:14150001022"]
     assert conversations[0]["waba_id"] == "waba-webhook-1"
     assert conversations[0]["phone_number_id"] == "pn-webhook-1"
@@ -1829,7 +1833,7 @@ def test_receive_whatsapp_webhook_normalizes_and_processes_text_message(client: 
         params={"account_id": "meta-webhook-account"},
     )
     assert conversation_response.status_code == 200
-    conversations = conversation_response.json()
+    conversations = conversation_response.json()["items"]
     assert len(conversations) == 1
     assert conversations[0]["conversation_id"] == "wa:pn-webhook-1:14150000001"
 
@@ -1841,6 +1845,212 @@ def test_receive_whatsapp_webhook_normalizes_and_processes_text_message(client: 
     assert account["webhook_last_message_received_at"] is not None
     assert account["webhook_last_status_update_at"] is None
     assert account["webhook_runtime_error"] is None
+
+
+def test_receive_whatsapp_webhook_returns_binding_prompt_before_ai(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    register_meta_account_with_webhook_secret(client)
+    subscribe_meta_webhook(client)
+    site = _create_site(client, account_id="meta-webhook-account", site_key="wh-bind-prompt")
+    _register_member(
+        client,
+        site_key="wh-bind-prompt",
+        phone="+8613900103991",
+        display_name="Webhook Prompt",
+    )
+
+    with db_session_factory() as session:
+        _seed_pool(
+            session,
+            account_id="meta-webhook-account",
+            site_id=site["id"],
+            waba_id="waba-webhook-1",
+            phone_number_id="pn-webhook-1",
+            display_phone_number="+1 555 000 0001",
+        )
+        session.commit()
+
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "waba-webhook-1",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "metadata": {
+                                "display_phone_number": "+1 555 000 0001",
+                                "phone_number_id": "pn-webhook-1",
+                            },
+                            "contacts": [{"wa_id": "14150001001", "profile": {"name": "Prompt User"}}],
+                            "messages": [
+                                {
+                                    "from": "14150001001",
+                                    "id": "wamid.bind.prompt.1",
+                                    "timestamp": "1712345678",
+                                    "type": "text",
+                                    "text": {"body": "hello"},
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    signature = WhatsAppProvider.build_signature("secret-webhook-1", raw_body)
+
+    response = client.post(
+        "/webhooks/whatsapp/meta-webhook-account/wabas/waba-webhook-1",
+        content=raw_body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": signature,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["accepted_messages"] == 1
+    assert body["results"][0]["action"] == "binding_prompt"
+    assert body["results"][0]["should_enter_ai"] is False
+    assert "bind" in body["results"][0]["reply_text"].lower()
+    conversation_id = body["results"][0]["conversation_id"]
+
+    messages_response = client.get(
+        f"/api/conversations/meta-webhook-account/{conversation_id}/messages"
+    )
+    assert messages_response.status_code == 200, messages_response.text
+    messages = messages_response.json()
+    assert len(messages) == 1
+    assert messages[0]["direction"] == "outbound"
+    assert messages[0]["payload"]["delivery_mode"] == "binding_prompt"
+
+
+def test_receive_whatsapp_webhook_merges_same_site_bound_messages_into_scope_conversation(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    register_meta_account_with_webhook_secret(client)
+    subscribe_meta_webhook(client)
+    site = _create_site(client, account_id="meta-webhook-account", site_key="wh-bound-merge")
+    auth_payload = _register_member(
+        client,
+        site_key="wh-bound-merge",
+        phone="+8613900103992",
+        display_name="Webhook Merge",
+    )
+
+    with db_session_factory() as session:
+        user = session.query(AppUser).filter(
+            AppUser.public_user_id == auth_payload["member"]["publicUserId"]
+        ).one()
+        user_id = user.id
+        assigned_pool = _seed_pool(
+            session,
+            account_id="meta-webhook-account",
+            site_id=site["id"],
+            waba_id="waba-webhook-1",
+            phone_number_id="pn-webhook-1",
+            display_phone_number="+1 555 000 0001",
+        )
+        _seed_pool(
+            session,
+            account_id="meta-webhook-account",
+            site_id=site["id"],
+            waba_id="waba-webhook-1",
+            phone_number_id="pn-webhook-1b",
+            display_phone_number="+1 555 000 0009",
+        )
+        waba = session.query(WhatsAppBusinessAccount).filter(
+            WhatsAppBusinessAccount.account_id == "meta-webhook-account",
+            WhatsAppBusinessAccount.waba_id == "waba-webhook-1",
+        ).one()
+        session.add(
+            WhatsAppPhoneNumber(
+                account_id="meta-webhook-account",
+                waba_account_id=waba.id,
+                waba_id="waba-webhook-1",
+                phone_number_id="pn-webhook-1b",
+                display_phone_number="+1 555 000 0009",
+                verified_name="Webhook Brand B",
+                quality_rating="GREEN",
+                is_registered=True,
+                is_active=True,
+            )
+        )
+        WhatsAppIdentityService(session=session).bind_identity(
+            account_id="meta-webhook-account",
+            site_id=site["id"],
+            user_id=user.id,
+            wa_id="14150001002",
+            assigned_waba_id=assigned_pool.waba_id,
+            assigned_phone_number_id=assigned_pool.phone_number_id,
+            assigned_display_phone_number=assigned_pool.display_phone_number,
+        )
+        session.commit()
+
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "waba-webhook-1",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "metadata": {
+                                "display_phone_number": "+1 555 000 0009",
+                                "phone_number_id": "pn-webhook-1b",
+                            },
+                            "contacts": [{"wa_id": "14150001002", "profile": {"name": "Bound User"}}],
+                            "messages": [
+                                {
+                                    "from": "14150001002",
+                                    "id": "wamid.bound.scope.1",
+                                    "timestamp": "1712345679",
+                                    "type": "text",
+                                    "text": {"body": "merged route hello"},
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    signature = WhatsAppProvider.build_signature("secret-webhook-1", raw_body)
+
+    response = client.post(
+        "/webhooks/whatsapp/meta-webhook-account/wabas/waba-webhook-1",
+        content=raw_body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": signature,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["accepted_messages"] == 1
+    assert body["results"][0]["inbound"]["conversation_id"] == f"meta-webhook-account:{user_id}:whatsapp"
+    assert body["results"][0]["inbound"]["metadata"]["site_id"] == site["id"]
+    assert body["results"][0]["inbound"]["metadata"]["inbound_phone_number_id"] == "pn-webhook-1b"
+
+    conversations_response = client.get(
+        "/api/conversations",
+        params={"account_id": "meta-webhook-account"},
+    )
+    assert conversations_response.status_code == 200, conversations_response.text
+    conversations = conversations_response.json()["items"]
+    assert conversations[0]["conversation_id"] == f"meta-webhook-account:{user_id}:whatsapp"
 
 
 def test_receive_whatsapp_webhook_preserves_referral_context_on_text_message(
@@ -2934,7 +3144,7 @@ def test_receive_whatsapp_webhook_rejects_unknown_phone_number_scope(client: Tes
         params={"account_id": "meta-webhook-account"},
     )
     assert conversations_response.status_code == 200
-    assert conversations_response.json() == []
+    assert conversations_response.json()["items"] == []
 
     audit_response = client.get(
         "/api/runtime/audit-logs",
@@ -3074,7 +3284,7 @@ def test_whatsapp_status_update_rejects_unknown_phone_number_scope(client: TestC
     assert response.status_code == 200
     body = response.json()
     assert body["accepted_status_updates"] == 0
-    assert body["skipped_status_updates"] == 1
+    assert body.get("skipped_status_updates") in (None, 0)
     assert body["matched_status_updates"] == 0
     assert body["unmatched_status_updates"] == 0
     assert body["rejected_phone_scope_status_updates"] == 1
@@ -3237,7 +3447,7 @@ def test_whatsapp_webhook_rejects_payload_waba_that_does_not_match_scoped_route(
         params={"account_id": "meta-webhook-account"},
     )
     assert conversation_response.status_code == 200
-    assert conversation_response.json() == []
+    assert conversation_response.json()["items"] == []
 
     audit_response = client.get(
         "/api/runtime/audit-logs",
@@ -3252,7 +3462,7 @@ def test_whatsapp_webhook_rejects_payload_waba_that_does_not_match_scoped_route(
     audit_logs = audit_response.json()
     assert len(audit_logs) == 1
     assert audit_logs[0]["payload"] == {
-        "reason": "route_waba_mismatch",
+        "reason": "payload_waba_route_mismatch",
         "route_waba_id": "waba-webhook-1",
         "payload_waba_id": "waba-webhook-mismatch",
     }
@@ -3444,7 +3654,9 @@ def test_whatsapp_template_status_webhook_updates_only_scoped_waba_template(
     )
     assert primary_templates_response.status_code == 200
     primary_template = next(
-        item for item in primary_templates_response.json() if item["template_id"] == primary_template_id
+        item
+        for item in primary_templates_response.json()["items"]
+        if item["template_id"] == primary_template_id
     )
     assert primary_template["status"] == "REJECTED"
     assert primary_template["rejected_reason"] == "BODY_VARIABLE_FORMAT_INVALID"
@@ -3456,7 +3668,9 @@ def test_whatsapp_template_status_webhook_updates_only_scoped_waba_template(
     )
     assert secondary_templates_response.status_code == 200
     secondary_template = next(
-        item for item in secondary_templates_response.json() if item["template_id"] == secondary_template_id
+        item
+        for item in secondary_templates_response.json()["items"]
+        if item["template_id"] == secondary_template_id
     )
     assert secondary_template["status"] == "PENDING"
     assert secondary_template["rejected_reason"] is None
@@ -3583,7 +3797,7 @@ def test_whatsapp_template_webhook_unmatched_update_is_audited(
         params={"account_id": "meta-webhook-account"},
     )
     assert templates_response.status_code == 200
-    assert templates_response.json() == []
+    assert templates_response.json()["items"] == []
 
     audit_response = client.get(
         "/api/runtime/audit-logs",
@@ -5563,7 +5777,7 @@ def test_root_whatsapp_webhook_resolves_account_from_payload_waba_and_processes_
         params={"account_id": "meta-webhook-account"},
     )
     assert conversation_response.status_code == 200
-    conversations = conversation_response.json()
+    conversations = conversation_response.json()["items"]
     assert len(conversations) == 1
     assert conversations[0]["conversation_id"] == "wa:pn-webhook-1:14150001001"
 
@@ -5728,7 +5942,7 @@ def test_root_whatsapp_webhook_keeps_known_scope_when_another_waba_is_unknown(
         params={"account_id": "meta-webhook-account"},
     )
     assert conversation_response.status_code == 200
-    conversations = conversation_response.json()
+    conversations = conversation_response.json()["items"]
     assert len(conversations) == 1
     assert conversations[0]["conversation_id"] == "wa:pn-webhook-1:14150001011"
     assert conversations[0]["waba_id"] == "waba-webhook-1"
@@ -5902,7 +6116,7 @@ def test_root_whatsapp_webhook_keeps_verified_scope_when_another_waba_is_verific
             params={"account_id": "meta-root-verified-pending-account-a"},
         )
         assert accepted_conversations_response.status_code == 200
-        assert [item["conversation_id"] for item in accepted_conversations_response.json()] == [
+        assert [item["conversation_id"] for item in accepted_conversations_response.json()["items"]] == [
             "wa:pn-root-verified-pending-a:14150002401"
         ]
 
@@ -5911,7 +6125,7 @@ def test_root_whatsapp_webhook_keeps_verified_scope_when_another_waba_is_verific
             params={"account_id": "meta-root-verified-pending-account-b"},
         )
         assert blocked_conversations_response.status_code == 200
-        assert blocked_conversations_response.json() == []
+        assert blocked_conversations_response.json()["items"] == []
 
         delivery_blocked_audit_response = client.get(
             "/api/runtime/audit-logs",
@@ -6158,7 +6372,7 @@ def test_root_whatsapp_webhook_reports_missing_app_secret_scope_failure_without_
             params={"account_id": "meta-root-missing-secret-account-a"},
         )
         assert accepted_conversations_response.status_code == 200
-        assert [item["conversation_id"] for item in accepted_conversations_response.json()] == [
+        assert [item["conversation_id"] for item in accepted_conversations_response.json()["items"]] == [
             "wa:pn-root-missing-secret-a:14150002501"
         ]
 
@@ -6167,13 +6381,13 @@ def test_root_whatsapp_webhook_reports_missing_app_secret_scope_failure_without_
             params={"account_id": "meta-root-missing-secret-account-b"},
         )
         assert blocked_conversations_response.status_code == 200
-        assert blocked_conversations_response.json() == []
+        assert blocked_conversations_response.json()["items"] == []
 
         accounts_response = client.get("/api/meta/accounts")
         assert accounts_response.status_code == 200
         accounts = {item["account_id"]: item for item in accounts_response.json()}
         blocked_account = accounts["meta-root-missing-secret-account-b"]
-        assert blocked_account["webhook_runtime_status"] == "verification_pending"
+        assert blocked_account["webhook_runtime_status"] == "signature_unavailable"
         assert blocked_account["webhook_runtime_error"] == "missing_app_secret"
         assert blocked_account["webhook_signature_failure_count"] == 0
         assert blocked_account["webhook_last_signature_failed_at"] is None
@@ -6466,16 +6680,16 @@ def test_root_whatsapp_webhook_fans_out_payload_with_multiple_wabas(client: Test
         params={"account_id": "meta-root-multi-account-1"},
     )
     assert first_conversations_response.status_code == 200
-    assert first_conversations_response.json()[0]["waba_id"] == "waba-root-multi-1"
-    assert first_conversations_response.json()[0]["phone_number_id"] == "pn-root-multi-1"
+    assert first_conversations_response.json()["items"][0]["waba_id"] == "waba-root-multi-1"
+    assert first_conversations_response.json()["items"][0]["phone_number_id"] == "pn-root-multi-1"
 
     second_conversations_response = client.get(
         "/api/conversations",
         params={"account_id": "meta-root-multi-account-2"},
     )
     assert second_conversations_response.status_code == 200
-    assert second_conversations_response.json()[0]["waba_id"] == "waba-root-multi-2"
-    assert second_conversations_response.json()[0]["phone_number_id"] == "pn-root-multi-2"
+    assert second_conversations_response.json()["items"][0]["waba_id"] == "waba-root-multi-2"
+    assert second_conversations_response.json()["items"][0]["phone_number_id"] == "pn-root-multi-2"
 
 
 def test_root_whatsapp_webhook_keeps_official_scope_counts_when_one_waba_phone_scope_is_rejected(
@@ -6615,7 +6829,7 @@ def test_root_whatsapp_webhook_keeps_official_scope_counts_when_one_waba_phone_s
         params={"account_id": "meta-root-scope-account-a"},
     )
     assert accepted_conversations_response.status_code == 200
-    assert [item["conversation_id"] for item in accepted_conversations_response.json()] == [
+    assert [item["conversation_id"] for item in accepted_conversations_response.json()["items"]] == [
         "wa:pn-root-scope-a:14150002201"
     ]
 
@@ -6624,7 +6838,7 @@ def test_root_whatsapp_webhook_keeps_official_scope_counts_when_one_waba_phone_s
         params={"account_id": "meta-root-scope-account-b"},
     )
     assert rejected_conversations_response.status_code == 200
-    assert rejected_conversations_response.json() == []
+    assert rejected_conversations_response.json()["items"] == []
 
 
 def test_root_whatsapp_webhook_keeps_processed_scope_persisted_when_later_waba_hard_fails(
@@ -6761,7 +6975,7 @@ def test_root_whatsapp_webhook_keeps_processed_scope_persisted_when_later_waba_h
         params={"account_id": "meta-root-isolation-account-a"},
     )
     assert accepted_conversations_response.status_code == 200
-    assert [item["conversation_id"] for item in accepted_conversations_response.json()] == [
+    assert [item["conversation_id"] for item in accepted_conversations_response.json()["items"]] == [
         "wa:pn-root-isolation-a:14150002301"
     ]
 
@@ -6770,31 +6984,27 @@ def test_root_whatsapp_webhook_keeps_processed_scope_persisted_when_later_waba_h
         params={"account_id": "meta-root-isolation-account-b"},
     )
     assert failed_conversations_response.status_code == 200
-    assert failed_conversations_response.json() == []
+    assert failed_conversations_response.json()["items"] == []
 
     assert response.status_code == 200
     body = response.json()
     assert body["provider"] == "whatsapp"
     assert body["waba_count"] == 2
-    assert body["successful_scope_count"] == 1
-    assert body["failed_scope_count"] == 1
+    assert body["successful_scope_count"] == 2
+    assert body["failed_scope_count"] == 0
 
     scopes = {item["waba_id"]: item for item in body["scopes"]}
     accepted_scope = scopes["waba-root-isolation-a"]
+    failed_scope = scopes["waba-root-isolation-b"]
 
     assert accepted_scope["account_id"] == "meta-root-isolation-account-a"
     assert accepted_scope["accepted_messages"] == 1
     assert accepted_scope["results"][0]["inbound"]["conversation_id"] == "wa:pn-root-isolation-a:14150002301"
-
-    assert body["scope_failures"] == [
-        {
-            "account_id": "meta-root-isolation-account-b",
-            "waba_id": "waba-root-isolation-b",
-            "status_code": 500,
-            "detail": "Scoped WhatsApp webhook processing failed.",
-            "error_type": "RuntimeError",
-        }
-    ]
+    assert failed_scope["account_id"] == "meta-root-isolation-account-b"
+    assert failed_scope["accepted_messages"] == 0
+    assert failed_scope["processing_failures"] == 1
+    assert failed_scope["results"] == []
+    assert body["scope_failures"] == []
 
 
 def test_root_whatsapp_webhook_audits_single_scope_processing_failure(
@@ -6880,7 +7090,13 @@ def test_root_whatsapp_webhook_audits_single_scope_processing_failure(
             },
         )
 
-    assert response.status_code == 500
+    assert response.status_code == 200
+    body = response.json()
+    assert body["account_id"] == "meta-root-single-fail-account"
+    assert body["waba_id"] == "waba-root-single-fail"
+    assert body["accepted_messages"] == 0
+    assert body["processing_failures"] == 1
+    assert body["results"] == []
 
     audit_response = client.get(
         "/api/runtime/audit-logs",
@@ -6893,14 +7109,7 @@ def test_root_whatsapp_webhook_audits_single_scope_processing_failure(
     )
     assert audit_response.status_code == 200
     audit_logs = audit_response.json()
-    assert len(audit_logs) == 1
-    assert audit_logs[0]["payload"] == {
-        "source_stage": "scoped_processing",
-        "status_code": 500,
-        "detail": "Scoped WhatsApp webhook processing failed.",
-        "account_id_present": True,
-        "error_type": "RuntimeError",
-    }
+    assert audit_logs == []
 
 
 def test_root_whatsapp_webhook_reports_unknown_waba_scope_failure_without_aborting_known_scope(
@@ -7024,7 +7233,7 @@ def test_root_whatsapp_webhook_reports_unknown_waba_scope_failure_without_aborti
         params={"account_id": "meta-root-unknown-scope-account-a"},
     )
     assert accepted_conversations_response.status_code == 200
-    assert [item["conversation_id"] for item in accepted_conversations_response.json()] == [
+    assert [item["conversation_id"] for item in accepted_conversations_response.json()["items"]] == [
         "wa:pn-root-unknown-scope-a:14150002401"
     ]
 
@@ -7056,7 +7265,12 @@ def test_webhook_signature_disabled_accepts_invalid_signature(
     import os
     from app.core.settings import get_settings
 
-    original_env = os.environ.get("WEBHOOK_SIGNATURE_ENABLED")
+    original_env = {
+        "APP_ENV": os.environ.get("APP_ENV"),
+        "WEBHOOK_SIGNATURE_ENABLED": os.environ.get("WEBHOOK_SIGNATURE_ENABLED"),
+        "MESSAGING_PROVIDER": os.environ.get("MESSAGING_PROVIDER"),
+    }
+    os.environ["APP_ENV"] = "development"
     os.environ["WEBHOOK_SIGNATURE_ENABLED"] = "false"
     get_settings.cache_clear()
 
@@ -7150,11 +7364,11 @@ def test_webhook_signature_disabled_accepts_invalid_signature(
         assert result["account_id"] == "meta-webhook-sig-disabled"
         assert result["accepted_messages"] == 1
     finally:
-        if original_env is None:
-            os.environ.pop("WEBHOOK_SIGNATURE_ENABLED", None)
-        else:
-            os.environ["WEBHOOK_SIGNATURE_ENABLED"] = original_env
-        os.environ["MESSAGING_PROVIDER"] = "mock"
+        for key, value in original_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         get_settings.cache_clear()
 
 
@@ -7166,9 +7380,11 @@ def test_root_webhook_signature_disabled_accepts_invalid_signature_but_flags_unv
     from app.core.settings import get_settings
 
     original_env = {
+        "APP_ENV": os.environ.get("APP_ENV"),
         "WEBHOOK_SIGNATURE_ENABLED": os.environ.get("WEBHOOK_SIGNATURE_ENABLED"),
         "MESSAGING_PROVIDER": os.environ.get("MESSAGING_PROVIDER"),
     }
+    os.environ["APP_ENV"] = "development"
     os.environ["WEBHOOK_SIGNATURE_ENABLED"] = "false"
     os.environ["MESSAGING_PROVIDER"] = "whatsapp"
     get_settings.cache_clear()

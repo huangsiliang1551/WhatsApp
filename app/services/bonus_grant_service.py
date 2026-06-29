@@ -5,7 +5,9 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.auth import RequestActor
 from app.db.models import AppUser, WalletAccount, WalletBonusGrantRecord, utc_now
+from app.services.data_scope_filter_service import DataScopeFilterService
 from app.services.wallet_ledger_service import WalletLedgerService
 
 
@@ -91,13 +93,20 @@ class BonusGrantService:
         self._session.commit()
         return grant
 
-    def list_grants(self, *, account_id: str | None = None) -> list[WalletBonusGrantRecord]:
+    def list_grants(
+        self,
+        *,
+        account_id: str | None = None,
+        scope_actor: RequestActor | None = None,
+    ) -> list[WalletBonusGrantRecord]:
         query = select(WalletBonusGrantRecord).order_by(
             WalletBonusGrantRecord.created_at.desc(),
             WalletBonusGrantRecord.id.desc(),
         )
         if account_id is not None:
             query = query.where(WalletBonusGrantRecord.account_id == account_id)
+        if scope_actor is not None:
+            query = DataScopeFilterService(self._session).filter_bonus_grants(query, scope_actor, mode="current")
         return self._session.scalars(query).all()
 
     def _require_user(self, *, user_id: str, account_id: str) -> AppUser:

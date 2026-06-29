@@ -249,6 +249,7 @@ function buildCustomersParams(prefill: CustomersPrefillPayload | null): URLSearc
   setStringParam(params, "account_id", prefill.account_id, "ALL");
   setStringParam(params, "query", prefill.query);
   setStringParam(params, "selected_profile_id", prefill.selected_profile_id);
+  setStringParam(params, "detail_tab", prefill.detail_tab);
   return params;
 }
 
@@ -570,6 +571,7 @@ export function parseAdminLocationPrefill(
       account_id: params.get("account_id") ?? undefined,
       query: params.get("query") ?? undefined,
       selected_profile_id: params.get("selected_profile_id") ?? undefined,
+      detail_tab: (params.get("detail_tab") as CustomersPrefillPayload["detail_tab"] | null) ?? undefined,
     };
   }
 

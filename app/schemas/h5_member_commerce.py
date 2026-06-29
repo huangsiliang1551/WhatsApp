@@ -19,6 +19,8 @@ class H5TaskPackageItemPayload(H5MemberCamelModel):
     image_url: str | None = None
     price: float
     currency: str
+    origin: str = "system_generated"
+    status: str | None = None
     completed_at: datetime | None = None
     order_id: str | None = None
 
@@ -29,6 +31,12 @@ class H5TaskPackagePayload(H5MemberCamelModel):
     description: str | None = None
     type: str
     status: str
+    batch_index: int = 1
+    batch_total: int = 1
+    planned_amount: float | None = None
+    system_generated_amount: float | None = None
+    manual_added_amount: float | None = None
+    effective_amount: float | None = None
     reward_ratio: float
     claimed_at: datetime | None = None
     expires_at: datetime | None = None
@@ -36,7 +44,11 @@ class H5TaskPackagePayload(H5MemberCamelModel):
     dispatched_at: datetime
     completion_window_hours: int
     items: list[H5TaskPackageItemPayload] = Field(default_factory=list)
+    current_item: H5TaskPackageItemPayload | None = None
+    current_item_index: int | None = None
     promotion: H5TaskPackagePromotionPayload | None = None
+    has_adjustment_notice: bool = False
+    adjustment_notice: str | None = None
     task_balance_awarded_at: datetime | None = None
     total_commission: float
     current_commission: float

@@ -1,17 +1,45 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, require_permission
 from app.core.auth import RequestActor
+from app.core.platform_enums import UserLifecycleStatus
+from app.core.settings import Settings, get_settings
+from app.db.models import AppUser
 from app.schemas.platform import (
     BatchLifecycleRequest,
     BatchLifecycleResponse,
     CustomerTimelineResponse,
 )
+from app.services.h5_member_auth_service import H5MemberAuthService
 from app.services.customer_summary_service import CustomerSummaryService
 from app.services.customer_timeline_service import CustomerTimelineService
-from sqlalchemy.orm import Session
+from app.services.data_scope_filter_service import DataScopeFilterService
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
+
+
+def _resolve_scoped_customer_or_404(
+    db_session: Session,
+    actor: RequestActor,
+    customer_id: str,
+    account_id: str | None,
+) -> AppUser:
+    query = select(AppUser).where(
+        or_(
+            AppUser.id == customer_id,
+            AppUser.public_user_id == customer_id,
+        )
+    )
+    if account_id:
+        query = query.where(AppUser.account_id == account_id)
+    if not actor.is_super_admin:
+        query = DataScopeFilterService(db_session).filter_customers(query, actor)
+    customer = db_session.scalar(query.limit(1))
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return customer
 
 
 # ── Static paths (must be before /{customer_id}) ─────────────────────
@@ -25,12 +53,9 @@ router = APIRouter(prefix="/api/customers", tags=["customers"])
 async def batch_update_lifecycle(
     payload: BatchLifecycleRequest,
     db_session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
     actor: RequestActor = Depends(require_permission("customers.edit_lifecycle")),
 ) -> BatchLifecycleResponse:
-    from app.core.platform_enums import UserLifecycleStatus
-    from app.db.models import AppUser
-    from sqlalchemy import or_, select as sa_select
-
     actor.require_account_access(payload.account_id)
 
     try:
@@ -45,19 +70,23 @@ async def batch_update_lifecycle(
     unique_ids = list(dict.fromkeys(payload.customer_ids))
     updated: list[str] = []
 
+    auth_service = H5MemberAuthService(session=db_session, settings=settings)
     for cid in unique_ids:
-        user = db_session.scalar(
-            sa_select(AppUser).where(
-                or_(
-                    AppUser.id == cid,
-                    AppUser.public_user_id == cid,
-                ),
-                AppUser.account_id == payload.account_id,
+        try:
+            user = _resolve_scoped_customer_or_404(
+                db_session=db_session,
+                actor=actor,
+                customer_id=cid,
+                account_id=payload.account_id,
             )
-        )
-        if user is not None:
-            user.lifecycle_status = payload.lifecycle_status
-            updated.append(cid)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                continue
+            raise
+        user.lifecycle_status = payload.lifecycle_status
+        if payload.lifecycle_status in {UserLifecycleStatus.FROZEN.value, UserLifecycleStatus.BLACKLISTED.value}:
+            auth_service.revoke_user_sessions(user_id=user.id, reason=f"lifecycle:{payload.lifecycle_status}")
+        updated.append(cid)
 
     db_session.commit()
 
@@ -85,8 +114,14 @@ async def get_customer_summary(
 ) -> dict:
     if account_id:
         actor.require_account_access(account_id)
+    customer = _resolve_scoped_customer_or_404(
+        db_session=db_session,
+        actor=actor,
+        customer_id=customer_id,
+        account_id=account_id,
+    )
     service = CustomerSummaryService(db_session)
-    return await service.get_summary(customer_id=customer_id, account_id=account_id)
+    return await service.get_summary(customer_id=customer.id, account_id=customer.account_id)
 
 
 @router.get(
@@ -103,9 +138,15 @@ async def get_customer_timeline(
 ) -> CustomerTimelineResponse:
     if account_id:
         actor.require_account_access(account_id)
+    customer = _resolve_scoped_customer_or_404(
+        db_session=db_session,
+        actor=actor,
+        customer_id=customer_id,
+        account_id=account_id,
+    )
     service = CustomerTimelineService(db_session)
     return await service.get_timeline(
-        customer_id=customer_id, account_id=account_id, limit=limit
+        customer_id=customer.id, account_id=customer.account_id, limit=limit
     )
 
 
@@ -119,6 +160,7 @@ async def update_customer_lifecycle_status(
     account_id: str = Query(...),
     lifecycle_status: str = Body(..., embed=True),
     db_session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
     actor: RequestActor = Depends(require_permission("customers.edit_lifecycle")),
 ) -> dict:
     """Block or unblock a customer by updating lifecycle_status.
@@ -126,10 +168,6 @@ async def update_customer_lifecycle_status(
     Valid values: active, frozen, blacklisted
     Blacklisted users will not receive messages or be able to initiate new conversations.
     """
-    from app.core.platform_enums import UserLifecycleStatus
-    from app.db.models import AppUser
-    from sqlalchemy import or_, select as sa_select
-
     actor.require_account_access(account_id)
 
     try:
@@ -140,21 +178,19 @@ async def update_customer_lifecycle_status(
             detail=f"Invalid lifecycle_status '{lifecycle_status}'. Must be one of: {[s.value for s in UserLifecycleStatus]}",
         )
 
-    # Support lookup by internal id or public_user_id (used by conversation customer_id)
-    user = db_session.scalar(
-        sa_select(AppUser).where(
-            or_(
-                AppUser.id == customer_id,
-                AppUser.public_user_id == customer_id,
-            ),
-            AppUser.account_id == account_id,
-        )
+    user = _resolve_scoped_customer_or_404(
+        db_session=db_session,
+        actor=actor,
+        customer_id=customer_id,
+        account_id=account_id,
     )
-    if user is None:
-        raise HTTPException(status_code=404, detail=f"Customer '{customer_id}' not found in account '{account_id}'")
 
     old_status = user.lifecycle_status
     user.lifecycle_status = lifecycle_status
+    revoked_session_count = 0
+    if lifecycle_status in {UserLifecycleStatus.FROZEN.value, UserLifecycleStatus.BLACKLISTED.value}:
+        auth_service = H5MemberAuthService(session=db_session, settings=settings)
+        revoked_session_count = auth_service.revoke_user_sessions(user_id=user.id, reason=f"lifecycle:{lifecycle_status}")
     db_session.commit()
 
     return {
@@ -162,4 +198,5 @@ async def update_customer_lifecycle_status(
         "account_id": account_id,
         "lifecycle_status": lifecycle_status,
         "previous_status": old_status,
+        "revoked_session_count": revoked_session_count,
     }

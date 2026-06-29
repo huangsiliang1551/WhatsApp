@@ -38,6 +38,8 @@ from app.schemas.runtime import (
     ConversationRuntimeState,
     RuntimeStateResponse,
 )
+from app.core.auth import RequestActor
+from app.services.data_scope_filter_service import DataScopeFilterService
 from app.services.meta_scope_validation import MetaScopeValidator
 from app.services.media_asset_telemetry import MediaAssetTelemetryRecorder
 from app.services.template_stats_aggregator import TemplateStatsAggregator
@@ -1679,6 +1681,7 @@ class RuntimeStateStore:
         management_mode: str | None = None,
         is_sleeping: bool | None = None,
         agency_id: str | None = None,
+        scope_actor: RequestActor | None = None,
         *,
         sort_by: str | None = None,
         sort_desc: bool = True,
@@ -1718,6 +1721,8 @@ class RuntimeStateStore:
             query = query.where(Conversation.management_mode == management_mode)
         if is_sleeping is not None:
             query = query.where(Conversation.is_sleeping.is_(is_sleeping))
+        if scope_actor is not None:
+            query = DataScopeFilterService(self._session).filter_conversations(query, scope_actor)
         if offset:
             query = query.offset(offset)
         if limit is not None:
@@ -1734,6 +1739,7 @@ class RuntimeStateStore:
         management_mode: str | None = None,
         is_sleeping: bool | None = None,
         agency_id: str | None = None,
+        scope_actor: RequestActor | None = None,
     ) -> int:
         """Count conversations matching filters (for pagination total)."""
         from sqlalchemy import func
@@ -1770,6 +1776,8 @@ class RuntimeStateStore:
             query = query.where(Conversation.management_mode == management_mode)
         if is_sleeping is not None:
             query = query.where(Conversation.is_sleeping.is_(is_sleeping))
+        if scope_actor is not None:
+            query = DataScopeFilterService(self._session).filter_conversations(query, scope_actor)
         return self._session.scalar(query) or 0
 
     async def list_message_models(self, account_id: str, conversation_id: str, *, offset: int = 0, limit: int | None = None, include_cold: bool = False) -> list[Message]:
@@ -1808,12 +1816,26 @@ class RuntimeStateStore:
         """
         if not conv_db_ids:
             return {}
-        # DISTINCT ON gives us the first row per group after ordering
+        from sqlalchemy import func
+
+        ranked_messages = (
+            select(
+                Message.id.label("message_id"),
+                Message.conversation_id.label("conversation_id"),
+                func.row_number()
+                .over(
+                    partition_by=Message.conversation_id,
+                    order_by=(Message.created_at.desc(), Message.id.desc()),
+                )
+                .label("row_number"),
+            )
+            .where(Message.conversation_id.in_(conv_db_ids))
+            .subquery()
+        )
         stmt = (
             select(Message)
-            .where(Message.conversation_id.in_(conv_db_ids))
-            .order_by(Message.conversation_id, Message.created_at.desc(), Message.id.desc())
-            .distinct(Message.conversation_id)
+            .join(ranked_messages, ranked_messages.c.message_id == Message.id)
+            .where(ranked_messages.c.row_number == 1)
         )
         rows = self._session.scalars(stmt).all()
         result: dict[str, Message | None] = {cid: None for cid in conv_db_ids}
@@ -1828,14 +1850,29 @@ class RuntimeStateStore:
         """Get the latest inbound message for each conversation DB ID in a single query."""
         if not conv_db_ids:
             return {}
-        stmt = (
-            select(Message)
+        from sqlalchemy import func
+
+        ranked_messages = (
+            select(
+                Message.id.label("message_id"),
+                Message.conversation_id.label("conversation_id"),
+                func.row_number()
+                .over(
+                    partition_by=Message.conversation_id,
+                    order_by=(Message.created_at.desc(), Message.id.desc()),
+                )
+                .label("row_number"),
+            )
             .where(
                 Message.conversation_id.in_(conv_db_ids),
                 Message.direction == "inbound",
             )
-            .order_by(Message.conversation_id, Message.created_at.desc(), Message.id.desc())
-            .distinct(Message.conversation_id)
+            .subquery()
+        )
+        stmt = (
+            select(Message)
+            .join(ranked_messages, ranked_messages.c.message_id == Message.id)
+            .where(ranked_messages.c.row_number == 1)
         )
         rows = self._session.scalars(stmt).all()
         result: dict[str, Message | None] = {cid: None for cid in conv_db_ids}

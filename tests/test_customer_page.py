@@ -9,6 +9,7 @@ from app.db.models import (
     AppUser,
     Conversation,
     MemberProfile,
+    MemberWhatsAppBindingRequest,
     Message,
     Ticket,
     WalletAccount,
@@ -137,6 +138,73 @@ def test_cus001_search_by_phone(client: TestClient) -> None:
     else:
         items = data
     assert len(items) >= 1
+
+
+def test_cus001_search_by_registration_ip(client: TestClient, db_session_factory: sessionmaker[Session]) -> None:
+    """Search by registration IP returns matching users."""
+    acct = "acct-cus001-search-ip"
+    _create_site(client, account_id=acct, site_key="cus001-search-ip")
+
+    auth = _register_member(client, site_key="cus001-search-ip", phone="+8613900067052", display_name="IP User")
+
+    with db_session_factory() as session:
+        user = session.get(AppUser, auth["member"]["userId"])
+        assert user is not None
+        user.registration_ip = "172.18.0.1"
+        session.commit()
+
+    resp = client.get(
+        "/api/platform/users",
+        params={"search": "172.18.0.1"},
+        headers=_operator_headers(acct),
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    items = data["items"] if isinstance(data, dict) else data
+    assert len(items) >= 1
+    assert any(item["id"] == auth["member"]["userId"] for item in items)
+
+
+def test_cus001_search_by_bound_whatsapp_number(
+    client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Search by bound WhatsApp number returns matching users."""
+    acct = "acct-cus001-search-whatsapp"
+    site = _create_site(client, account_id=acct, site_key="cus001-search-whatsapp")
+
+    auth = _register_member(
+        client,
+        site_key="cus001-search-whatsapp",
+        phone="+8613900067053",
+        display_name="WhatsApp Search User",
+    )
+    user_id = auth["member"]["userId"]
+
+    with db_session_factory() as session:
+        member_profile = session.query(MemberProfile).filter(MemberProfile.user_id == user_id).one()
+        session.add(
+            MemberWhatsAppBindingRequest(
+                account_id=acct,
+                user_id=user_id,
+                member_profile_id=member_profile.id,
+                site_id=site["id"],
+                status="bound",
+                requested_phone_number="+447700900123",
+            )
+        )
+        session.commit()
+
+    resp = client.get(
+        "/api/platform/users",
+        params={"search": "7700900123"},
+        headers=_operator_headers(acct),
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    items = data["items"] if isinstance(data, dict) else data
+    assert len(items) >= 1
+    assert any(item["id"] == user_id for item in items)
 
 
 def test_cus001_filter_by_lifecycle_status(client: TestClient, db_session_factory: sessionmaker[Session]) -> None:

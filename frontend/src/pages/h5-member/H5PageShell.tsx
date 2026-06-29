@@ -8,7 +8,7 @@ import {
   WalletOutlined,
 } from "@ant-design/icons";
 
-import { maskAccountId, type H5MemberSession, type H5HomeDashboard, type H5WalletSummary, type H5TaskPackage } from "../../services/h5Member";
+import { maskAccountId, type H5MemberSession, type H5HomeDashboard, type H5WalletSummary } from "../../services/h5Member";
 import { t } from './i18n';
 import { useNetworkStatus } from './useNetworkStatus';
 import type { ParsedRoute } from "./useH5MemberApp";
@@ -42,7 +42,7 @@ export type H5PageShellProps = {
   effectiveWalletSummary: H5WalletSummary | null;
   rechargeAmount: string;
   transferAllAmount: number;
-  claimDialogPackage: H5TaskPackage | null;
+  claimDialogPackage: { id: string; title: string } | null;
   showRechargeChannels: boolean;
   showTransferAllConfirm: boolean;
   onMarkAllMessagesRead: () => void;
@@ -61,7 +61,6 @@ export function H5PageShell(props: H5PageShellProps): JSX.Element {
     route,
     navigate,
     loading,
-    toastItems,
     session,
     memberPhoneMasked,
     dashboard,
@@ -106,8 +105,8 @@ export function H5PageShell(props: H5PageShellProps): JSX.Element {
 
   const isWhatsAppRoute = route.page === "whatsapp";
   const isHomeRoute = route.page === "home";
+  const useCompactToasts = isHomeRoute || route.page === "tasks" || route.page === "recharge" || route.page === "profile";
   const contentClassName = isWhatsAppRoute ? "h5-member-content h5-member-content-chat" : "h5-member-content";
-  const useCompactToast = ["home", "tasks", "profile", "recharge"].includes(route.page);
   const homeTopbarTitle =
     dashboard?.member.displayName?.trim()
     || session?.displayName?.trim()
@@ -133,8 +132,6 @@ export function H5PageShell(props: H5PageShellProps): JSX.Element {
 
   return (
     <main className="h5-shell h5-member-app-shell" style={h5ScrollableViewportStyle}>
-      <ToastStack compact={useCompactToast} items={toastItems} />
-
       {!isOnline && (
         <div className="h5-network-banner h5-network-banner-offline">
           {t('network.offline')}
@@ -214,6 +211,8 @@ export function H5PageShell(props: H5PageShellProps): JSX.Element {
         {loading ? <article className="h5-card h5-empty-card">{t('shell.loading')}</article> : null}
 
         {!loading ? children : null}
+
+        <ToastStack compact={useCompactToasts} items={props.toastItems} />
 
         {showRechargeChannels ? (
           <div className="h5-member-claim-confirm-backdrop" role="presentation">

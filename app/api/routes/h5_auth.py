@@ -12,7 +12,7 @@ from app.api.deps import (
 )
 from app.core.settings import Settings, get_settings
 from app.schemas.h5_member_auth import H5MemberAuthResponse, H5MemberLoginRequest, H5MemberRegisterRequest
-from app.services.h5_member_auth_service import H5AuthTokens, H5MemberAuthService, H5MemberContext
+from app.services.h5_member_auth_service import H5AuthError, H5AuthTokens, H5MemberAuthService, H5MemberContext
 from app.services.h5_member_commerce_service import H5MemberCommerceService
 from app.services.h5_member_fragment_service import H5MemberFragmentService
 from app.services.h5_member_notification_service import H5MemberNotificationService
@@ -42,10 +42,10 @@ async def register_h5_member(
             client_ip=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
+    except H5AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.to_detail()) from exc
     except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail={"code": "site_not_found", "message": str(exc)}) from exc
     _set_auth_cookies(response=response, tokens=tokens, settings=settings)
     return auth_service.build_auth_response(context)
 
@@ -69,10 +69,8 @@ async def login_h5_member(
             client_ip=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
-    except LookupError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except H5AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.to_detail()) from exc
     _set_auth_cookies(response=response, tokens=tokens, settings=settings)
     return auth_service.build_auth_response(context)
 
@@ -115,10 +113,8 @@ async def refresh_h5_member_session(
             client_ip=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
-    except LookupError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except H5AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.to_detail()) from exc
     if not tokens.session_token:
         tokens.session_token = request.cookies.get(settings.h5_member_session_cookie_name) or ""
     if not tokens.refresh_token:

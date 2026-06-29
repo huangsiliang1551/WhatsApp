@@ -27,6 +27,8 @@ from app.providers.meta_management.base import (
 from app.services.queue_service import QueueService
 from tests.fake_redis import FakeRedis
 
+Path(".tmp_pytest").mkdir(exist_ok=True)
+
 
 @pytest.fixture
 def db_session_factory(tmp_path: Path) -> sessionmaker[Session]:

@@ -31,6 +31,14 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def _drop_index_if_exists(index_name: str, table_name: str) -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_indexes = {index["name"] for index in inspector.get_indexes(table_name)}
+    if index_name in existing_indexes:
+        op.drop_index(index_name, table_name=table_name)
+
+
 def upgrade() -> None:
     # ── ai_agents（先建，entry_links 引用它） ──
     op.create_table(
@@ -416,6 +424,20 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # SQLite requires indexed columns to have their indexes removed before
+    # ALTER TABLE ... DROP COLUMN can succeed during downgrade.
+    _drop_index_if_exists("ix_h5_sites_default_ai_agent_id", "h5_sites")
+    _drop_index_if_exists("ix_messages_ai_agent_id", "messages")
+    _drop_index_if_exists("ix_messages_source_entry_link_id_snapshot", "messages")
+    _drop_index_if_exists("ix_messages_owner_staff_user_id_snapshot", "messages")
+    _drop_index_if_exists("ix_messages_source_job_id", "messages")
+    _drop_index_if_exists("ix_conversations_current_ai_agent_id", "conversations")
+    _drop_index_if_exists("ix_conversations_current_entry_link_id", "conversations")
+    _drop_index_if_exists("ix_member_profiles_current_owner_staff_user_id", "member_profiles")
+    _drop_index_if_exists("ix_member_profiles_current_ai_agent_id", "member_profiles")
+    _drop_index_if_exists("ix_member_profiles_registration_entry_link_id", "member_profiles")
+    _drop_index_if_exists("ix_member_profiles_attribution_status", "member_profiles")
+
     # h5_sites
     for col in [
         "ai_failover_threshold_minutes", "ai_failover_policy", "existing_member_link_override_policy",

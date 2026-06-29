@@ -447,3 +447,39 @@ AI 自动回复的优先级规则固定如下：
 8. 所有实体默认带 `account_id`。
 9. AI 自动回复必须遵守全局、账号、会话三级控制和人工接管状态。
 10. Meta 相关实体必须保留官方 ID，不允许只保存本地别名。
+
+
+<!-- CODEX_PARALLEL_AUTORUN_V2_START -->
+
+# Codex 并行持续执行补充协议 V2
+
+## 文档读取边界
+
+- 默认只读取 `docs/README.md`、`docs/specs/active/README.md`、`docs/specs/active/IMPLEMENTATION_INDEX.md`、`docs/dev-run/**`。
+- 不要默认读取 `docs/archive/**`。
+- 不要默认读取 `docs/specs/active/full/**` 全量；只在当前 Worker 需要时读取对应一份。
+- 不要扫描 `.git/**`、`.venv/**`、`.python/**`、`frontend/dist/**`、`frontend/.vite/**`。
+
+## 断点恢复
+
+- 每个阶段必须写入 `docs/dev-run/parallel/status/Wx.md`。
+- 每次测试必须写入 `docs/dev-run/TEST_LOG.md`。
+- 额度即将用完或会话即将结束时，先写 checkpoint。
+- 新会话必须先运行 `python tools/codex/resume_preflight.py`，再继续未完成 Worker。
+- 不要因为会话恢复重新做已完成阶段。
+
+## 外部依赖缺失
+
+- 缺少真实 Meta、B 服务器、SSH、域名、CDN、支付通道、生产密钥时，不暂停开发。
+- 将缺失项写入 `docs/dev-run/parallel/env/EXTERNAL_BLOCKERS.md`。
+- 用 dry-run、mock provider、fake gateway、配置占位、接口抽象、测试替身继续推进。
+- 只有产品规则冲突、破坏性 migration、资金错账风险、无法自修的核心测试失败才停下来问用户。
+
+## 并行开发
+
+- 先完成 W0 共享基础。
+- W1-W6 并行时严格遵守 `docs/dev-run/parallel/FILE_OWNERSHIP.md`。
+- W9 负责共享文件合并和最终接线。
+- 主控线程必须维护 `docs/dev-run/parallel/MASTER_PROGRESS.md` 并输出百分比。
+
+<!-- CODEX_PARALLEL_AUTORUN_V2_END -->

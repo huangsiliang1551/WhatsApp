@@ -11,6 +11,7 @@ const hoisted = vi.hoisted(() => ({
   batchUpdateCustomerLifecycleMock: vi.fn(),
   listPlatformUserMemberStatusIndexMock: vi.fn(),
   getCustomerMemberStatusSnapshotMock: vi.fn(),
+  customerDetailDrawerMock: vi.fn(),
 }));
 
 vi.mock("../services/api", () => ({
@@ -52,10 +53,37 @@ vi.mock("../components/member/MemberIdLink", async () => {
         `member-link:${label ?? ""}:${userId ?? ""}:${publicUserId ?? ""}:${accountId ?? ""}`,
       ),
   };
+  it("passes the requested detail tab into the customer detail drawer prefill flow", async () => {
+    hoisted.storeState = {
+      customersPagePrefill: {
+        nonce: 1,
+        account_id: "acct-1",
+        query: "pub-u1",
+        selected_profile_id: "user-1",
+        detail_tab: "finance",
+      },
+      clearCustomersPagePrefill: vi.fn(),
+      openWorkspacePage: vi.fn(),
+    };
+
+    await renderPage(createElement(CustomersPage));
+
+    expect(hoisted.customerDetailDrawerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        open: true,
+        customerId: "user-1",
+        accountId: "acct-1",
+        initialTab: "finance",
+      }),
+    );
+  });
 });
 
 vi.mock("./CustomerDetailDrawer", () => ({
-  CustomerDetailDrawer: () => null,
+  CustomerDetailDrawer: (props: Record<string, unknown>) => {
+    hoisted.customerDetailDrawerMock(props);
+    return null;
+  },
 }));
 
 vi.mock("antd", async () => {
@@ -183,6 +211,7 @@ describe("CustomersPage", () => {
       verificationRequests: [],
       bindingRequests: [],
     });
+    hoisted.customerDetailDrawerMock.mockReset();
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
 
@@ -222,5 +251,11 @@ describe("CustomersPage", () => {
       publicUserId: "pub-u1",
       label: "pub-u1",
     });
+  });
+
+  it("shows expanded search placeholder for id, name, ip, and whatsapp", async () => {
+    await renderPage(createElement(CustomersPage));
+    const input = document.querySelector("input");
+    expect(input?.getAttribute("placeholder")).toBe("搜索 ID / 名称 / IP / WhatsApp");
   });
 });

@@ -14,11 +14,14 @@ from app.schemas.conversations import ForwardMessageRequest, OutboundMessageRequ
 from app.schemas.handover import ConversationAssignmentRequest, ConversationCloseRequest
 from app.schemas.media_assets import MediaAssetSendRequest, MediaAssetSendResponse
 from app.services.conversation_service import ConversationService
+from app.services.data_scope_filter_service import DataScopeFilterService
 from app.services.handover_service import HandoverService
 from app.services.media_asset_service import MediaAssetService
 from app.services.media_asset_errors import MediaProviderConfigError, MediaProviderUpstreamError
 from app.services.runtime_state import RuntimeStateStore
 from app.db.models import Conversation
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 class BatchConversationRequest(BaseModel):
     conversation_ids: list[str]
@@ -42,6 +45,24 @@ class BatchOperationResponse(BaseModel):
 
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
+
+
+def _ensure_conversation_scope(
+    db_session: Session,
+    actor: RequestActor,
+    *,
+    account_id: str,
+    conversation_id: str,
+) -> None:
+    actor.require_account_access(account_id)
+    stmt = select(Conversation.id).where(
+        Conversation.account_id == account_id,
+        Conversation.external_conversation_id == conversation_id,
+    )
+    if not actor.is_super_admin:
+        stmt = DataScopeFilterService(db_session).filter_conversations(stmt, actor)
+    if db_session.scalar(stmt.limit(1)) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
 
 
 
@@ -107,6 +128,7 @@ async def list_conversations(
             tag=tag,
             is_sleeping=is_sleeping,
             allowed_account_ids=None if actor.is_super_admin else set(actor.account_ids),
+            scope_actor=actor,
             sort_by=sort.lstrip("-") if sort else None,
             sort_desc=sort.startswith("-") if sort else True,
             page=page,
@@ -154,19 +176,17 @@ async def list_assigned_conversations(
     if account_id is not None:
         actor.require_account_access(account_id)
     resolved_agent_id = actor.resolve_agent_id(agent_id)
-    return [
-        conversation.model_dump()
-        for conversation in filter_account_scoped_items(
-            actor,
-            await conversation_service.list_conversations(
-                account_id=account_id,
-                assigned_agent_id=resolved_agent_id,
-                status=status,
-                management_mode=management_mode,
-            ),
-            lambda item: item.account_id,
-        )
-    ]
+    summaries, _total = await conversation_service.list_conversations(
+        account_id=account_id,
+        assigned_agent_id=resolved_agent_id,
+        status=status,
+        management_mode=management_mode,
+        allowed_account_ids=None if actor.is_super_admin else set(actor.account_ids),
+        scope_actor=actor,
+        page=1,
+        size=100,
+    )
+    return [conversation.model_dump() for conversation in summaries]
 
 
 @router.get(
@@ -187,17 +207,20 @@ async def list_messages(
 ) -> list[dict[str, object]]:
     actor.require_account_access(account_id)
     try:
-        return [
-            message.model_dump()
-            for message in await conversation_service.list_messages_with_options(
-                account_id=account_id,
-                conversation_id=conversation_id,
-                include_translations=include_translations,
-                include_cold=include_cold,
-                offset=offset,
-                limit=limit,
-            )
-        ]
+        items: list[dict[str, object]] = []
+        for message in await conversation_service.list_messages_with_options(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            include_translations=include_translations,
+            include_cold=include_cold,
+            offset=offset,
+            limit=limit,
+            scope_actor=actor,
+        ):
+            payload = message.model_dump()
+            payload.setdefault("id", message.message_id)
+            items.append(payload)
+        return items
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -214,7 +237,12 @@ async def wake_conversation(
     conversation_service: ConversationService = Depends(get_conversation_service),
     actor: RequestActor = Depends(require_permission("conversations.wake")),
 ) -> dict:
-    actor.require_account_access(account_id)
+    _ensure_conversation_scope(
+        conversation_service._runtime_state.session,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     try:
         summary = await conversation_service.wake_conversation(
             account_id=account_id,
@@ -246,6 +274,8 @@ async def get_conversation_stats(
     else:
         if not actor.is_super_admin and actor.account_ids:
             base = base.where(Conversation.account_id.in_(actor.account_ids))
+    if not actor.is_super_admin:
+        base = DataScopeFilterService(db_session).filter_conversations(base, actor)
 
     def _count(**filters) -> int:
         q = base
@@ -282,6 +312,7 @@ async def list_conversation_timeline(
                 account_id=account_id,
                 conversation_id=conversation_id,
                 limit=max(1, min(limit, 200)),
+                scope_actor=actor,
             )
         ]
     except LookupError as exc:
@@ -314,8 +345,11 @@ async def send_outbound_message(
                 payload=resolved_payload,
                 actor_type=actor.actor_type,
                 actor_id=actor.actor_id,
+                scope_actor=actor,
             )
         ).model_dump()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
@@ -348,8 +382,11 @@ async def translate_message(
             account_id=account_id,
             conversation_id=conversation_id,
             message_id=message_id,
+            scope_actor=actor,
         )
         return cast(dict[str, object], result)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -367,11 +404,15 @@ async def batch_translate_messages(
     actor: RequestActor = Depends(require_permission("conversations.translate")),
 ) -> dict[str, object]:
     actor.require_account_access(account_id)
-    result = await conversation_service.batch_translate_messages(
-        account_id=account_id,
-        conversation_id=conversation_id,
-    )
-    return cast(dict[str, object], result)
+    try:
+        result = await conversation_service.batch_translate_messages(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            scope_actor=actor,
+        )
+        return cast(dict[str, object], result)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post(
@@ -387,7 +428,12 @@ async def translate_outbound_preview(
     conversation_service: ConversationService = Depends(get_conversation_service),
     actor: RequestActor = Depends(require_permission("conversations.translate")),
 ) -> dict[str, object]:
-    actor.require_account_access(account_id)
+    _ensure_conversation_scope(
+        conversation_service._runtime_state.session,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     result = await conversation_service.translate_outbound_preview(
         text=payload.text,
         target_language=payload.target_language,
@@ -408,7 +454,12 @@ async def send_media_message(
     media_asset_service: MediaAssetService = Depends(get_media_asset_service),
     actor: RequestActor = Depends(require_permission("conversations.reply")),
 ) -> MediaAssetSendResponse:
-    actor.require_account_access(account_id)
+    _ensure_conversation_scope(
+        media_asset_service._runtime_state.session,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     resolved_agent_id = actor.validate_agent_id(payload.agent_id)
     if resolved_agent_id is None and actor.role in {ActorRole.OPERATOR, ActorRole.SUPPORT_AGENT}:
         resolved_agent_id = actor.actor_id
@@ -446,7 +497,12 @@ async def assign_conversation(
     runtime_state_store: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("conversations.transfer")),
 ) -> dict[str, object]:
-    actor.require_account_access(account_id)
+    _ensure_conversation_scope(
+        runtime_state_store.session,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     admin_override = actor.is_super_admin and not actor.allow_impersonation
     resolved_assigned_by_agent_id = actor.validate_agent_id(payload.assigned_by_agent_id)
     if resolved_assigned_by_agent_id is None and actor.role in {ActorRole.OPERATOR, ActorRole.SUPPORT_AGENT}:
@@ -496,7 +552,12 @@ async def close_conversation(
     runtime_state_store: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("conversations.close")),
 ) -> dict[str, object]:
-    actor.require_account_access(account_id)
+    _ensure_conversation_scope(
+        runtime_state_store.session,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     admin_override = actor.is_super_admin and not actor.allow_impersonation
     resolved_agent_id = actor.validate_agent_id(payload.agent_id)
     if resolved_agent_id is None and actor.role in {ActorRole.OPERATOR, ActorRole.SUPPORT_AGENT}:
@@ -545,7 +606,12 @@ async def reopen_conversation(
     runtime_state_store: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("conversations.reopen")),
 ) -> dict[str, object]:
-    actor.require_account_access(account_id)
+    _ensure_conversation_scope(
+        runtime_state_store.session,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     admin_override = actor.is_super_admin and not actor.allow_impersonation
     resolved_agent_id = actor.validate_agent_id(payload.agent_id)
     if resolved_agent_id is None and actor.role in {ActorRole.OPERATOR, ActorRole.SUPPORT_AGENT}:
@@ -587,7 +653,12 @@ async def get_conversation_tags(
     runtime_state_store: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("conversations.tags")),
 ) -> dict:
-    actor.require_account_access(account_id)
+    _ensure_conversation_scope(
+        runtime_state_store.session,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     model = await runtime_state_store.get_conversation_model(account_id, conversation_id)
     if model is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
@@ -613,7 +684,12 @@ async def update_conversation_tags(
     runtime_state_store: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("conversations.tags")),
 ) -> dict:
-    actor.require_account_access(account_id)
+    _ensure_conversation_scope(
+        runtime_state_store.session,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     model = await runtime_state_store.get_conversation_model(account_id, conversation_id)
     if model is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
@@ -645,10 +721,16 @@ async def batch_handover_conversations(
             acc_id = parts[0] if len(parts) > 1 else None
             conv_id = parts[-1]
             if acc_id:
-                actor.require_account_access(acc_id)
-            from app.schemas.handover import ConversationHandoverRequest
+                _ensure_conversation_scope(
+                    runtime_state_store.session,
+                    actor,
+                    account_id=acc_id,
+                    conversation_id=conv_id,
+                )
+            from app.schemas.runtime import ConversationHandoverRequest
             handover_payload = ConversationHandoverRequest(
-                target_mode="human_managed",
+                management_mode="human_managed",
+                agent_id=actor.actor_id,
                 reason=payload.reason or "batch_handover",
             )
             handover_service = HandoverService(runtime_state_store)
@@ -684,10 +766,16 @@ async def batch_restore_ai_conversations(
             acc_id = parts[0] if len(parts) > 1 else None
             conv_id = parts[-1]
             if acc_id:
-                actor.require_account_access(acc_id)
-            from app.schemas.handover import ConversationHandoverRequest
+                _ensure_conversation_scope(
+                    runtime_state_store.session,
+                    actor,
+                    account_id=acc_id,
+                    conversation_id=conv_id,
+                )
+            from app.schemas.runtime import ConversationHandoverRequest
             handover_payload = ConversationHandoverRequest(
-                target_mode="ai_managed",
+                management_mode="ai_managed",
+                agent_id=actor.actor_id,
                 reason=payload.reason or "batch_restore_ai",
             )
             handover_service = HandoverService(runtime_state_store)
@@ -723,7 +811,12 @@ async def batch_close_conversations(
             acc_id = parts[0] if len(parts) > 1 else None
             conv_id = parts[-1]
             if acc_id:
-                actor.require_account_access(acc_id)
+                _ensure_conversation_scope(
+                    runtime_state_store.session,
+                    actor,
+                    account_id=acc_id,
+                    conversation_id=conv_id,
+                )
             from app.schemas.handover import ConversationCloseRequest
             close_payload = ConversationCloseRequest(
                 agent_id=actor.actor_id,
@@ -763,7 +856,12 @@ async def batch_assign_conversations(
             acc_id = parts[0] if len(parts) > 1 else None
             conv_id = parts[-1]
             if acc_id:
-                actor.require_account_access(acc_id)
+                _ensure_conversation_scope(
+                    runtime_state_store.session,
+                    actor,
+                    account_id=acc_id,
+                    conversation_id=conv_id,
+                )
             from app.schemas.handover import ConversationAssignmentRequest
             assign_payload = ConversationAssignmentRequest(
                 agent_id=payload.agent_id,
@@ -822,6 +920,7 @@ async def search_messages(
                 q=q,
                 limit=limit,
                 offset=offset,
+                scope_actor=actor,
             )
         ]
     except LookupError as exc:
@@ -849,6 +948,7 @@ async def list_customer_conversations(
         customer_id=customer_id,
         exclude_conversation_id=exclude_conversation_id,
         limit=limit,
+        scope_actor=actor,
     )
 
 
@@ -877,6 +977,7 @@ async def forward_message(
             include_context=payload.include_context,
             actor_type=actor.actor_type,
             actor_id=actor.actor_id,
+            scope_actor=actor,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -902,6 +1003,7 @@ async def get_conversation_sentiment(
         return await conversation_service.get_sentiment(
             account_id=account_id,
             conversation_id=conversation_id,
+            scope_actor=actor,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -925,6 +1027,7 @@ async def get_conversation_sla(
         return await conversation_service.get_sla(
             account_id=account_id,
             conversation_id=conversation_id,
+            scope_actor=actor,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -944,10 +1047,17 @@ async def preview_ai_reply(
     actor: RequestActor = Depends(require_permission("conversations.ai_preview")),
 ) -> dict[str, object]:
     actor.require_account_access(account_id)
+    _ensure_conversation_scope(
+        conversation_service._runtime_state.session,
+        actor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     try:
         return await conversation_service.preview_ai_reply(
             account_id=account_id,
             conversation_id=conversation_id,
+            scope_actor=actor,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -999,6 +1109,12 @@ async def batch_get_metadata(
     for aid, cid in pairs:
         item = BatchMetadataItem(account_id=aid, conversation_id=cid)
         try:
+            _ensure_conversation_scope(
+                conversation_service._runtime_state.session,
+                actor,
+                account_id=aid,
+                conversation_id=cid,
+            )
             conv = await conversation_service._runtime_state.get_conversation_model(aid, cid)
             if conv is None:
                 item.error = "Conversation not found"
@@ -1008,7 +1124,7 @@ async def batch_get_metadata(
             item.tags = getattr(conv, "tags", None) or []
 
             try:
-                sentiment_result = await conversation_service.get_sentiment(aid, cid)
+                sentiment_result = await conversation_service.get_sentiment(aid, cid, scope_actor=actor)
                 item.sentiment = str(sentiment_result.get("sentiment", "neutral"))
                 item.sentiment_confidence = float(sentiment_result.get("confidence", 0.0))
             except Exception:
@@ -1016,7 +1132,7 @@ async def batch_get_metadata(
                 item.sentiment_confidence = 0.0
 
             try:
-                sla_result = await conversation_service.get_sla(aid, cid)
+                sla_result = await conversation_service.get_sla(aid, cid, scope_actor=actor)
                 waiting = int(sla_result.get("waiting_seconds", 0))
                 critical = int(sla_result.get("threshold_critical", 3600))
                 item.sla_waiting_seconds = waiting

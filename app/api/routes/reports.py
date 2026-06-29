@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db_session, require_permission
 from app.core.auth import RequestActor
 from app.db.models import AgencyBilling, AppUser, Conversation, MktTaskInstance, Product, ProductPackage, Ticket
+from app.services.data_scope_filter_service import DataScopeFilterService
 from app.services.finance_report_service import FinanceReportService
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -45,38 +46,61 @@ async def report_overview(
     session: Session = Depends(get_db_session),
 ) -> dict:
     """Reports overview - super admin sees all, agent sees own scope."""
-    conv_query = _apply_account_scope(
-        select(func.count(Conversation.id)),
-        actor,
-        Conversation.account_id,
-    )
+    scope_filter = DataScopeFilterService(session)
+    conv_query = _apply_account_scope(select(func.count(Conversation.id)).select_from(Conversation), actor, Conversation.account_id)
+    if not actor.is_super_admin:
+        conv_query = scope_filter.filter_conversations(conv_query, actor)
     if agency_id and actor.is_super_admin:
         pass
 
     total_conversations = session.scalar(conv_query) or 0
     open_conversations = session.scalar(
-        _apply_account_scope(
-            select(func.count(Conversation.id)).where(Conversation.status == "open"),
+        scope_filter.filter_conversations(
+            _apply_account_scope(
+                select(func.count(Conversation.id)).select_from(Conversation).where(Conversation.status == "open"),
+                actor,
+                Conversation.account_id,
+            ),
+            actor,
+        ) if not actor.is_super_admin else _apply_account_scope(
+            select(func.count(Conversation.id)).select_from(Conversation).where(Conversation.status == "open"),
             actor,
             Conversation.account_id,
         )
     ) or 0
     closed_conversations = session.scalar(
-        _apply_account_scope(
-            select(func.count(Conversation.id)).where(Conversation.status == "closed"),
+        scope_filter.filter_conversations(
+            _apply_account_scope(
+                select(func.count(Conversation.id)).select_from(Conversation).where(Conversation.status == "closed"),
+                actor,
+                Conversation.account_id,
+            ),
+            actor,
+        ) if not actor.is_super_admin else _apply_account_scope(
+            select(func.count(Conversation.id)).select_from(Conversation).where(Conversation.status == "closed"),
             actor,
             Conversation.account_id,
         )
     ) or 0
-    total_users = session.scalar(
-        _apply_account_scope(select(func.count(AppUser.id)), actor, AppUser.account_id)
-    ) or 0
-    total_tickets = session.scalar(
-        _apply_account_scope(select(func.count(Ticket.id)), actor, Ticket.account_id)
-    ) or 0
+    user_query = _apply_account_scope(select(func.count(AppUser.id)).select_from(AppUser), actor, AppUser.account_id)
+    if not actor.is_super_admin:
+        user_query = scope_filter.filter_customers(user_query, actor)
+    total_users = session.scalar(user_query) or 0
+    ticket_query = _apply_account_scope(select(func.count(Ticket.id)).select_from(Ticket), actor, Ticket.account_id)
+    if not actor.is_super_admin:
+        ticket_query = scope_filter.filter_tickets(ticket_query, actor, mode="current")
+    total_tickets = session.scalar(ticket_query) or 0
     open_tickets = session.scalar(
-        _apply_account_scope(
-            select(func.count(Ticket.id)).where(Ticket.status.in_(["open", "pending"])),
+        scope_filter.filter_tickets(
+            _apply_account_scope(
+                select(func.count(Ticket.id)).select_from(Ticket).where(Ticket.status.in_(["open", "pending"])),
+                actor,
+                Ticket.account_id,
+            ),
+            actor,
+            mode="current",
+        ) if not actor.is_super_admin else _apply_account_scope(
+            select(func.count(Ticket.id)).select_from(Ticket).where(Ticket.status.in_(["open", "pending"])),
             actor,
             Ticket.account_id,
         )
@@ -87,9 +111,14 @@ async def report_overview(
     total_packages = session.scalar(
         _apply_account_scope(select(func.count(ProductPackage.id)), actor, ProductPackage.account_id)
     ) or 0
-    total_task_instances = session.scalar(
-        _apply_account_scope(select(func.count(MktTaskInstance.id)), actor, MktTaskInstance.account_id)
-    ) or 0
+    task_instance_query = _apply_account_scope(
+        select(func.count(MktTaskInstance.id)).select_from(MktTaskInstance),
+        actor,
+        MktTaskInstance.account_id,
+    )
+    if not actor.is_super_admin:
+        task_instance_query = scope_filter.filter_task_instances(task_instance_query, actor, mode="current")
+    total_task_instances = session.scalar(task_instance_query) or 0
 
     return {
         "total_conversations": total_conversations,
@@ -136,7 +165,8 @@ async def finance_report(
         total_reward = 0.0
 
     finance_summary = FinanceReportService(session).get_finance_summary(
-        {"agency_id": effective_account_id} if effective_account_id else None
+        {"agency_id": effective_account_id} if effective_account_id else None,
+        scope_actor=None if actor.is_super_admin else actor,
     )
     details = [
         {

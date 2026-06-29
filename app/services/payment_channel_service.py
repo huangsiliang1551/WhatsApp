@@ -1,24 +1,66 @@
-"""Payment channel management service with Fernet encryption."""
+"""Payment channel management service with deterministic encryption and callback helpers."""
+import base64
+import hashlib
+import hmac
 import json
-from datetime import datetime, timezone
-from uuid import uuid4
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
 from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import PaymentChannel, AgentPaymentChannelSetting
+from app.core.settings import get_settings
+from app.db.models import AgentPaymentChannelSetting, PaymentChannel
 
-_FERNET_KEY = Fernet.generate_key()  # In production, load from settings
+
+def _get_fernet() -> Fernet:
+    settings = get_settings()
+    key = settings.secret_encryption_key.strip() or (
+        __import__("os").environ.get("PAYMENT_CONFIG_ENCRYPTION_KEY", "").strip()
+    )
+    if not key:
+        if settings.app_env.lower() == "production" and not settings.test_mode:
+            raise RuntimeError("PAYMENT_CONFIG_ENCRYPTION_KEY is required in production.")
+        seed = hashlib.sha256(f"{settings.app_name}:payment-config".encode("utf-8")).digest()
+        key = base64.urlsafe_b64encode(seed).decode("utf-8")
+    return Fernet(key.encode("utf-8"))
 
 
 def _encrypt(plain: str) -> str:
-    return Fernet(_FERNET_KEY).encrypt(plain.encode()).decode()
+    return _get_fernet().encrypt(plain.encode("utf-8")).decode("utf-8")
 
 
 def _decrypt(cipher: str) -> str:
-    return Fernet(_FERNET_KEY).decrypt(cipher.encode()).decode()
+    return _get_fernet().decrypt(cipher.encode("utf-8")).decode("utf-8")
+
+
+class GenericHmacPaymentProvider:
+    def __init__(self, *, secret: str, window_seconds: int) -> None:
+        self._secret = secret
+        self._window_seconds = window_seconds
+
+    def verify_callback_signature(self, payload: dict[str, Any], signature: str) -> bool:
+        if not self._secret or not signature:
+            return False
+        expected = hmac.new(
+            self._secret.encode("utf-8"),
+            json.dumps(payload, sort_keys=True).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, signature)
+
+    def fetch_reconciliation_bill(self, *, channel_id: str, reconcile_date: date) -> list[dict[str, Any]]:
+        if not hasattr(self, "_reconciliation_bill"):
+            return []
+        normalized_date = reconcile_date.isoformat()
+        return [
+            item
+            for item in self._reconciliation_bill
+            if not item.get("date") or str(item.get("date")) == normalized_date
+        ]
 
 
 class PaymentChannelService:
@@ -168,13 +210,23 @@ class PaymentChannelService:
 
     def verify_callback_signature(self, channel_id: str, payload: dict, signature: str) -> bool:
         ch = self._session.get(PaymentChannel, channel_id)
-        if ch is None or not ch.callback_secret:
+        if ch is None:
             return False
-        import hmac, hashlib
-        expected = hmac.new(
-            ch.callback_secret.encode(), json.dumps(payload, sort_keys=True).encode(), hashlib.sha256
-        ).hexdigest()
-        return hmac.compare_digest(expected, signature)
+        provider = self.get_provider(channel_id)
+        return provider.verify_callback_signature(payload, signature)
+
+    def get_provider(self, channel_id: str) -> GenericHmacPaymentProvider:
+        ch = self._session.get(PaymentChannel, channel_id)
+        if ch is None:
+            raise LookupError("Channel not found")
+        settings = get_settings()
+        secret = (ch.callback_secret or "").strip() or settings.generic_hmac_payment_secret.strip()
+        provider = GenericHmacPaymentProvider(
+            secret=secret,
+            window_seconds=settings.generic_hmac_payment_window_seconds,
+        )
+        provider._reconciliation_bill = list((ch.config_json or {}).get("reconciliation_bill", []))  # type: ignore[attr-defined]
+        return provider
 
     def _channel_to_dict(self, ch: PaymentChannel) -> dict:
         return {

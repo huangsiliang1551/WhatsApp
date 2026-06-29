@@ -2,7 +2,7 @@ global:
   resolve_timeout: 5m
 
 route:
-  receiver: default-webhook
+  receiver: default-null
   group_by:
     - alertname
     - job

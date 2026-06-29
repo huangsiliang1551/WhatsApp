@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.h5_member_base import H5MemberCamelModel
 from app.schemas.h5_member_commerce import H5WithdrawLeaderboardEntryResponse
@@ -9,19 +9,33 @@ from app.schemas.h5_member_messages import H5MemberMessageResponse
 
 class H5MemberRegisterRequest(H5MemberCamelModel):
     site_key: str = Field(min_length=1, max_length=64)
-    phone: str = Field(min_length=1, max_length=32)
-    password: str = Field(min_length=6, max_length=128)
-    confirm_password: str = Field(min_length=6, max_length=128)
+    username: str | None = Field(default=None, min_length=1, max_length=64)
+    phone: str | None = Field(default=None, min_length=1, max_length=32)
+    password: str = Field(min_length=6, max_length=64)
+    confirm_password: str = Field(min_length=6, max_length=64)
     display_name: str | None = Field(default=None, max_length=255)
     invite_code: str | None = Field(default=None, min_length=1, max_length=64)
     entry_code: str | None = Field(default=None, min_length=1, max_length=64)
     language_code: str = Field(default="zh-CN", min_length=2, max_length=32)
 
+    @model_validator(mode="after")
+    def _ensure_username(self) -> "H5MemberRegisterRequest":
+        if not (self.username or self.phone):
+            raise ValueError("username is required.")
+        return self
+
 
 class H5MemberLoginRequest(H5MemberCamelModel):
     site_key: str = Field(min_length=1, max_length=64)
-    phone: str = Field(min_length=1, max_length=32)
-    password: str = Field(min_length=6, max_length=128)
+    username: str | None = Field(default=None, min_length=1, max_length=64)
+    phone: str | None = Field(default=None, min_length=1, max_length=32)
+    password: str = Field(min_length=6, max_length=64)
+
+    @model_validator(mode="after")
+    def _ensure_username(self) -> "H5MemberLoginRequest":
+        if not (self.username or self.phone):
+            raise ValueError("username is required.")
+        return self
 
 
 class H5MemberSessionPayload(H5MemberCamelModel):
@@ -47,7 +61,8 @@ class H5MemberIdentityPayload(H5MemberCamelModel):
     member_no: str
     account_id_masked: str | None = None
     invite_code: str | None = None
-    phone: str
+    username: str
+    phone: str | None = None
     display_name: str | None = None
     language_code: str
     created_at: datetime

@@ -1,17 +1,35 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_platform_withdrawal_service, get_runtime_state_service, require_permission
 from app.core.auth import RequestActor
+from app.db.models import WithdrawalRequest
 from app.schemas.platform_withdrawals import (
     PlatformWithdrawalDuplicateAccountsResponse,
     PlatformWithdrawalResponse,
     PlatformWithdrawalStatus,
     PlatformWithdrawalStatusUpdateRequest,
 )
+from app.services.data_scope_filter_service import DataScopeFilterService
 from app.services.platform_withdrawal_service import PlatformWithdrawalService
 from app.services.runtime_state import RuntimeStateStore
 
 router = APIRouter(prefix="/api/platform", tags=["platform-withdrawals"])
+
+
+def _ensure_withdrawal_scope(
+    db_session: Session,
+    actor: RequestActor,
+    *,
+    withdrawal_id: str,
+) -> None:
+    if actor.is_super_admin:
+        return
+    stmt = select(WithdrawalRequest.id).where(WithdrawalRequest.id == withdrawal_id)
+    stmt = DataScopeFilterService(db_session).filter_withdrawals(stmt, actor, mode="current")
+    if db_session.scalar(stmt.limit(1)) is None:
+        raise HTTPException(status_code=404, detail="Withdrawal not found.")
 
 
 @router.get(
@@ -33,6 +51,7 @@ async def list_platform_withdrawals(
         account_id=account_id,
         allowed_account_ids=allowed_account_ids,
         status=status,
+        scope_actor=actor,
     )
 
 
@@ -55,6 +74,11 @@ async def update_platform_withdrawal_status(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     actor.require_account_access(current.account_id)
+    _ensure_withdrawal_scope(
+        runtime_state.session,
+        actor,
+        withdrawal_id=withdrawal_id,
+    )
     try:
         updated = await withdrawal_service.update_withdrawal_status(
             withdrawal_id=withdrawal_id,
@@ -95,6 +119,7 @@ async def update_platform_withdrawal_status(
 async def get_platform_withdrawal_duplicate_accounts(
     withdrawal_id: str,
     withdrawal_service: PlatformWithdrawalService = Depends(get_platform_withdrawal_service),
+    runtime_state: RuntimeStateStore = Depends(get_runtime_state_service),
     actor: RequestActor = Depends(require_permission("withdrawal.duplicate_account.view")),
 ) -> PlatformWithdrawalDuplicateAccountsResponse:
     try:
@@ -103,6 +128,11 @@ async def get_platform_withdrawal_duplicate_accounts(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     actor.require_account_access(current.account_id)
+    _ensure_withdrawal_scope(
+        runtime_state.session,
+        actor,
+        withdrawal_id=withdrawal_id,
+    )
     try:
         return await withdrawal_service.get_duplicate_accounts(withdrawal_id=withdrawal_id)
     except LookupError as exc:

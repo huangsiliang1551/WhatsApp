@@ -29,14 +29,16 @@ from app.providers.task_proof_storage.base import TaskProofStorageProvider
 from app.providers.task_proof_storage.local_provider import LocalTaskProofStorageProvider
 from app.services.conversation_service import ConversationService
 from app.services.ecommerce_service import EcommerceService
-from app.services.h5_member_auth_service import H5MemberAuthService, H5MemberContext
+from app.services.h5_member_auth_service import H5AuthError, H5MemberAuthService, H5MemberContext
 from app.services.h5_member_commerce_service import H5MemberCommerceService
 from app.services.h5_member_fragment_service import H5MemberFragmentService
 from app.services.h5_member_notification_service import H5MemberNotificationService
+from app.services.h5_task_runtime_service import H5TaskRuntimeService
 from app.services.h5_member_verification_service import H5MemberVerificationService
 from app.services.h5_member_whatsapp_binding_service import H5MemberWhatsAppBindingService
 from app.services.launch_readiness_service import LaunchReadinessService
 from app.services.media_asset_service import MediaAssetService
+from app.services.member_task_quota_service import MemberTaskQuotaService
 from app.services.meta_account_registry import MetaAccountRegistry
 from app.services.platform_member_whatsapp_binding_service import PlatformMemberWhatsAppBindingService
 from app.services.platform_member_verification_service import PlatformMemberVerificationService
@@ -164,7 +166,7 @@ def _allows_header_actor(settings: Settings) -> bool:
     return (
         settings.test_mode
         or not settings.auth_required
-        or env in {"development", "local", "dev"}
+        or env in {"development", "local", "dev", "staging"}
     )
 
 
@@ -514,6 +516,12 @@ def get_task_service(
     return TaskService(session=session)
 
 
+def get_member_task_quota_service(
+    session: Session = Depends(get_db_session),
+) -> MemberTaskQuotaService:
+    return MemberTaskQuotaService(session=session)
+
+
 def get_h5_member_auth_service(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -531,6 +539,12 @@ def get_h5_member_notification_service(
     session: Session = Depends(get_db_session),
 ) -> H5MemberNotificationService:
     return H5MemberNotificationService(session=session)
+
+
+def get_h5_task_runtime_service(
+    session: Session = Depends(get_db_session),
+) -> H5TaskRuntimeService:
+    return H5TaskRuntimeService(session=session)
 
 
 def get_h5_member_verification_service(
@@ -559,15 +573,20 @@ async def get_current_h5_member_context(
     session_token = request.cookies.get(settings.h5_member_session_cookie_name)
     try:
         return await auth_service.resolve_context(session_token=session_token)
+    except H5AuthError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.to_detail(),
+        ) from exc
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="H5 member authentication is required.",
+            detail={"code": "auth_required", "message": "H5 member authentication is required."},
         ) from exc
     except PermissionError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(exc),
+            detail={"code": "auth_required", "message": str(exc)},
         ) from exc
 
 

@@ -6,6 +6,16 @@ type JsonObject = Record<string, unknown>;
 export type H5TaskPackageStatus = "pending_claim" | "active" | "completed" | "expired";
 export type H5TaskPackageType = "rookie" | "growth" | "promotion";
 export type H5PromotionMetric = "invited_registrations" | "recharged_invitees";
+export type H5TaskEntryStateCode =
+  | "need_whatsapp_binding"
+  | "newbie_task_available"
+  | "newbie_task_active"
+  | "task_balance_transfer_prompt"
+  | "need_certification"
+  | "official_batch_available"
+  | "official_batch_active"
+  | "waiting_next_batch"
+  | "no_task";
 export type H5WithdrawStatus = "submitted" | "reviewing" | "approved" | "rejected" | "paid";
 export type H5RewardShippingStatus =
   | "pending_address"
@@ -37,7 +47,8 @@ export type H5SiteBrand = {
 
 export type H5MemberSession = {
   accountId: string;
-  phone: string;
+  username?: string;
+  phone?: string | null;
   publicUserId: string;
   displayName: string;
   inviteCode: string;
@@ -56,6 +67,8 @@ export type H5TaskPackageItem = {
   image_url: string;
   price: number;
   currency: string;
+  origin?: string;
+  status?: string | null;
   completed_at: string | null;
   order_id: string | null;
 };
@@ -73,13 +86,23 @@ export type H5TaskPackage = {
   description: string;
   type: H5TaskPackageType;
   status: H5TaskPackageStatus;
+  batchIndex?: number;
+  batchTotal?: number;
+  plannedAmount?: number | null;
+  systemGeneratedAmount?: number | null;
+  manualAddedAmount?: number | null;
+  effectiveAmount?: number | null;
   rewardRatio: number;
   claimedAt: string | null;
   expiresAt: string | null;
   dispatchedAt: string;
   completionWindowHours: number;
   items: H5TaskPackageItem[];
+  currentItem?: H5TaskPackageItem | null;
+  currentItemIndex?: number | null;
   promotion: H5PromotionProgress | null;
+  hasAdjustmentNotice?: boolean;
+  adjustmentNotice?: string | null;
   taskBalanceAwardedAt: string | null;
 };
 
@@ -206,6 +229,17 @@ export type H5HomeVerificationSummary = {
   hasActiveRequest: boolean;
 };
 
+export type H5TaskEntryState = {
+  state: H5TaskEntryStateCode;
+  redirectPath: string | null;
+  taskPackageId: string | null;
+  certificationRequiredAmount: number;
+  currentRealRechargeAmount: number;
+  remainingRechargeAmount: number;
+  systemBalance: number;
+  taskBalance: number;
+};
+
 export type H5MemberVerificationDocument = {
   id: string;
   fileName: string;
@@ -262,6 +296,7 @@ export type H5HomeDashboard = {
   site: H5SiteBrand;
   member: H5MemberProfile;
   wallet: H5WalletSummary;
+  entryState?: H5TaskEntryState | null;
   unreadCount: number;
   pendingClaimCount: number;
   activeCount: number;
@@ -348,7 +383,8 @@ type BackendMemberAuthResponse = {
     languageCode?: string | null;
     language_code?: string | null;
     memberNo?: string | null;
-    phone: string;
+    username?: string | null;
+    phone?: string | null;
     publicUserId: string;
   };
   site: {
@@ -416,6 +452,17 @@ type BackendMemberHomeResponse = {
   };
 };
 
+type BackendTaskEntryStateResponse = {
+  state: H5TaskEntryStateCode;
+  redirectPath?: string | null;
+  taskPackageId?: string | null;
+  certificationRequiredAmount?: number;
+  currentRealRechargeAmount?: number;
+  remainingRechargeAmount?: number;
+  systemBalance?: number;
+  taskBalance?: number;
+};
+
 type BackendMemberVerificationDocumentResponse = {
   id: string;
   fileName?: string;
@@ -465,6 +512,8 @@ type BackendTaskPackageItemResponse = {
   imageUrl?: string | null;
   price: number;
   currency: string;
+  origin?: string;
+  status?: string | null;
   completedAt: string | null;
   orderId: string | null;
 };
@@ -482,14 +531,24 @@ type BackendTaskPackageResponse = {
   description: string | null;
   type: H5TaskPackageType;
   status: H5TaskPackageStatus;
+  batchIndex?: number;
+  batchTotal?: number;
+  plannedAmount?: number;
+  systemGeneratedAmount?: number;
+  manualAddedAmount?: number;
+  effectiveAmount?: number;
   rewardRatio: number;
   claimedAt: string | null;
   expiresAt: string | null;
   dispatchedAt: string;
   completionWindowHours: number;
   items: BackendTaskPackageItemResponse[];
+  currentItem?: BackendTaskPackageItemResponse | null;
+  currentItemIndex?: number | null;
   promotion: BackendTaskPackagePromotionResponse | null;
   taskBalanceAwardedAt: string | null;
+  hasAdjustmentNotice?: boolean;
+  adjustmentNotice?: string | null;
   totalCommission: number;
   currentCommission: number;
   completedItems: number;
@@ -630,13 +689,15 @@ type BackendWhatsAppBindingResponse = {
 
 class ApiRequestError extends Error {
   status: number;
+  code?: string;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, code?: string) {
     super(
       detail || getServiceErrorMessage("requestFailedStatus").replace("{{status}}", String(status)),
     );
     this.name = "ApiRequestError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -651,7 +712,7 @@ export function isH5AuthRequiredError(error: unknown): boolean {
   return error instanceof H5AuthRequiredError;
 }
 
-// ─── H5 Axios 实例（带自动鉴权 & 刷新拦截器）─────────────
+// 鈹€鈹€鈹€ H5 Axios 瀹炰緥锛堝甫鑷姩閴存潈 & 鍒锋柊鎷︽埅鍣級鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 export function resolveH5ApiBaseUrl(
   envApiBaseUrl: string | undefined,
@@ -678,24 +739,24 @@ export const h5Api = axios.create({
   withCredentials: true,
 });
 
-/** 是否正在刷新 token */
+/** 鏄惁姝ｅ湪鍒锋柊 token */
 let _isRefreshing = false;
 
-/** 等待 token 刷新期间积压的请求回调 */
+/** 绛夊緟 token 鍒锋柊鏈熼棿绉帇鐨勮姹傚洖璋?*/
 let _pendingQueue: Array<(token: string | null) => void> = [];
 
-// ── Request 拦截器 ──────────────────────────────────────
+// 鈹€鈹€ Request 鎷︽埅鍣?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 h5Api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    // Token 即将过期时异步续期（不阻塞当前请求）
+    // Token 鍗冲皢杩囨湡鏃跺紓姝ョ画鏈燂紙涓嶉樆濉炲綋鍓嶈姹傦級
     if (sessionManager.shouldRefresh()) {
       sessionManager.refreshToken().catch(() => {
-        // 续期失败已在 sessionManager 中处理
+        // 缁湡澶辫触宸插湪 sessionManager 涓鐞?
       });
     }
 
-    // 附加 Authorization header
+    // 闄勫姞 Authorization header
     const authHeaders = sessionManager.authHeader();
     if (authHeaders.Authorization) {
       config.headers.Authorization = authHeaders.Authorization;
@@ -706,7 +767,7 @@ h5Api.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
-// ── Response 拦截器 ─────────────────────────────────────
+// 鈹€鈹€ Response 鎷︽埅鍣?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 h5Api.interceptors.response.use(
   (response: AxiosResponse) => response,
@@ -716,10 +777,10 @@ h5Api.interceptors.response.use(
       _retry5xx?: boolean;
     };
 
-    // 必须要有 config，否则无法重试
+    // 蹇呴』瑕佹湁 config锛屽惁鍒欐棤娉曢噸璇?
     if (!originalRequest) return Promise.reject(error);
 
-    // 1) 网络错误（无响应）→ Toast 提示
+    // 1) 缃戠粶閿欒锛堟棤鍝嶅簲锛夆啋 Toast 鎻愮ず
     if (!error.response) {
       const message = getServiceErrorMessage("networkFailed");
       if (typeof window !== "undefined") {
@@ -730,10 +791,10 @@ h5Api.interceptors.response.use(
 
     const { status } = error.response;
 
-    // 2) 401 → 自动续期（单队列）
+    // 2) 401 鈫?鑷姩缁湡锛堝崟闃熷垪锛?
     if (status === 401 && !originalRequest._retry) {
       if (_isRefreshing) {
-        // 已有刷新在进行中，将当前请求加入队列等待
+        // 宸叉湁鍒锋柊鍦ㄨ繘琛屼腑锛屽皢褰撳墠璇锋眰鍔犲叆闃熷垪绛夊緟
         return new Promise<AxiosResponse>((resolve, reject) => {
           _pendingQueue.push((token: string | null) => {
             if (token) {
@@ -746,7 +807,7 @@ h5Api.interceptors.response.use(
         });
       }
 
-      // 首个 401，启动刷新
+      // 棣栦釜 401锛屽惎鍔ㄥ埛鏂?
       originalRequest._retry = true;
       _isRefreshing = true;
 
@@ -754,14 +815,14 @@ h5Api.interceptors.response.use(
         const success = await sessionManager.refreshToken();
         if (success) {
           const newToken = sessionManager.getAccessToken();
-          // 处理队列中的等待请求
+          // 澶勭悊闃熷垪涓殑绛夊緟璇锋眰
           _pendingQueue.forEach((cb) => cb(newToken));
           _pendingQueue = [];
-          // 重试当前请求
+          // 閲嶈瘯褰撳墠璇锋眰
           originalRequest.headers.Authorization = `Bearer ${newToken}`;
           return h5Api(originalRequest);
         } else {
-          // 刷新失败 → 拒绝所有排队请求
+          // 鍒锋柊澶辫触 鈫?鎷掔粷鎵€鏈夋帓闃熻姹?
           _pendingQueue.forEach((cb) => cb(null));
           _pendingQueue = [];
           sessionManager.clearSession();
@@ -776,7 +837,7 @@ h5Api.interceptors.response.use(
       }
     }
 
-    // 3) 5xx → GET 请求自动重试一次（2s 延迟）
+    // 3) 5xx 鈫?GET 璇锋眰鑷姩閲嶈瘯涓€娆★紙2s 寤惰繜锛?
     if (
       status >= 500 &&
       status < 600 &&
@@ -792,12 +853,12 @@ h5Api.interceptors.response.use(
   },
 );
 
-// ─── API Mode (mock/real switch) ──────────────────────────
+// 鈹€鈹€鈹€ API Mode (mock/real switch) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 type ApiMode = 'mock' | 'real';
 const apiMode: ApiMode = (import.meta.env.VITE_API_MODE as string) === 'real' ? 'real' : 'mock';
 
-/** Auth API 响应类型 */
+/** Auth API 鍝嶅簲绫诲瀷 */
 export type H5LoginResponse = {
   access_token: string;
   refresh_token: string;
@@ -845,20 +906,32 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
       signal: controller.signal,
       ...init,
     });
+    if (!(response instanceof Response)) {
+      throw new TypeError("Expected a fetch Response object.");
+    }
     if (!response.ok) {
       const rawText = await response.text();
       let detail = rawText;
+      let code: string | undefined;
       if (rawText) {
         try {
           const parsed = JSON.parse(rawText) as { detail?: unknown };
           if (typeof parsed.detail === "string" && parsed.detail.trim()) {
             detail = parsed.detail;
+          } else if (parsed.detail && typeof parsed.detail === "object") {
+            const nested = parsed.detail as { message?: unknown; code?: unknown };
+            if (typeof nested.message === "string" && nested.message.trim()) {
+              detail = nested.message;
+            }
+            if (typeof nested.code === "string" && nested.code.trim()) {
+              code = nested.code;
+            }
           }
         } catch {
           detail = rawText;
         }
       }
-      throw new ApiRequestError(response.status, detail);
+      throw new ApiRequestError(response.status, detail, code);
     }
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     if (contentType.includes("text/html")) {
@@ -902,14 +975,6 @@ function getBackendUnavailableError(): Error {
   return createServiceError("authServiceUnavailable");
 }
 
-function hasBackendAuthCookies(): boolean {
-  if (typeof document === "undefined") {
-    return false;
-  }
-  const cookie = document.cookie || "";
-  return cookie.includes("h5_member_session=") || cookie.includes("h5_member_refresh=");
-}
-
 async function refreshBackendAuthSession(): Promise<boolean> {
   try {
     const response = await requestJson<BackendMemberAuthResponse>("/api/h5/auth/refresh", {
@@ -930,6 +995,7 @@ async function tryBackendAuthRequest<T>(
   request: () => Promise<T>,
   options?: {
     allowRefresh?: boolean;
+    allowLegacyFallback?: boolean;
   },
 ): Promise<BackendAuthLookupResult<T>> {
   try {
@@ -941,13 +1007,13 @@ async function tryBackendAuthRequest<T>(
         if (refreshed) {
           return await request();
         }
-        if (isLegacyFallbackEnabled()) {
+        if (options?.allowLegacyFallback !== false && isLegacyFallbackEnabled()) {
           return null;
         }
       }
       return "unauthenticated";
     }
-    if (canUseLegacyFallback(error)) {
+    if (options?.allowLegacyFallback !== false && canUseLegacyFallback(error)) {
       return null;
     }
     throw error;
@@ -957,9 +1023,13 @@ async function tryBackendAuthRequest<T>(
 async function requestBackendMemberDomain<T>(
   input: string,
   init?: RequestInit,
+  options?: {
+    allowLegacyFallback?: boolean;
+  },
 ): Promise<T | null> {
   const response = await tryBackendAuthRequest<T>(() => requestJson(input, init), {
     allowRefresh: true,
+    allowLegacyFallback: options?.allowLegacyFallback,
   });
   if (response === "unauthenticated") {
     writeSession(null);
@@ -1026,9 +1096,11 @@ function writeSession(session: H5MemberSession | null): void {
 
 function buildSessionFromAuthPayload(payload: BackendMemberAuthResponse): H5MemberSession {
   const memberNo = payload.member.memberNo?.trim() || payload.member.accountId;
+  const username = payload.member.username?.trim() || payload.member.phone?.trim() || payload.member.publicUserId;
   return {
     accountId: memberNo,
-    phone: payload.member.phone,
+    username,
+    phone: payload.member.phone ?? null,
     publicUserId: payload.member.publicUserId,
     displayName: payload.member.displayName?.trim() || payload.member.publicUserId,
     inviteCode: payload.member.inviteCode?.trim() || generateInviteCode(memberNo),
@@ -1053,7 +1125,7 @@ function syncLegacyMemberCacheFromProfile(profile: H5MemberProfile): void {
   const nextAccount: StoredMemberAccount = {
     id: existing?.id ?? createId("member"),
     accountId: profile.accountId,
-    phone: profile.phone,
+    phone: profile.phone ?? profile.username ?? profile.publicUserId,
     password: existing?.password ?? DEFAULT_MEMBER_PASSWORD,
     publicUserId: profile.publicUserId,
     displayName: profile.displayName,
@@ -1073,7 +1145,8 @@ function syncLegacyMemberCacheFromProfile(profile: H5MemberProfile): void {
 
   writeSession({
     accountId: profile.accountId,
-    phone: profile.phone,
+    username: profile.username,
+    phone: profile.phone ?? null,
     publicUserId: profile.publicUserId,
     displayName: profile.displayName,
     inviteCode: profile.inviteCode,
@@ -1100,6 +1173,8 @@ function mapTaskPackageItemFromBackend(
     image_url: item.imageUrl ?? "",
     price: item.price,
     currency: item.currency,
+    origin: item.origin,
+    status: item.status ?? null,
     completed_at: item.completedAt,
     order_id: item.orderId,
   };
@@ -1120,12 +1195,20 @@ function mapTaskPackageFromBackend(
     description: pkg.description ?? "",
     type: pkg.type,
     status: pkg.status,
+    batchIndex: pkg.batchIndex ?? 1,
+    batchTotal: pkg.batchTotal ?? 1,
+    plannedAmount: pkg.plannedAmount ?? null,
+    systemGeneratedAmount: pkg.systemGeneratedAmount ?? null,
+    manualAddedAmount: pkg.manualAddedAmount ?? null,
+    effectiveAmount: pkg.effectiveAmount ?? null,
     rewardRatio: pkg.rewardRatio,
     claimedAt: pkg.claimedAt,
     expiresAt: pkg.expiresAt,
     dispatchedAt: pkg.dispatchedAt,
     completionWindowHours: pkg.completionWindowHours,
     items: pkg.items.map((item) => mapTaskPackageItemFromBackend(item)),
+    currentItem: pkg.currentItem ? mapTaskPackageItemFromBackend(pkg.currentItem) : null,
+    currentItemIndex: pkg.currentItemIndex ?? null,
     promotion: pkg.promotion
       ? {
           metric: pkg.promotion.metric,
@@ -1134,6 +1217,8 @@ function mapTaskPackageFromBackend(
           inviteCode: pkg.promotion.inviteCode ?? "",
         }
       : null,
+    hasAdjustmentNotice: pkg.hasAdjustmentNotice ?? false,
+    adjustmentNotice: pkg.adjustmentNotice ?? null,
     taskBalanceAwardedAt: pkg.taskBalanceAwardedAt,
     totalCommission: pkg.totalCommission,
     currentCommission: pkg.currentCommission,
@@ -1425,6 +1510,112 @@ function buildHomeFragmentSummaryFromOverview(
     canExchange: totalCount > 0 && completedCount === totalCount,
     shippingOrderCount: overview.shippingOrders.length,
     latestShippingStatus: overview.shippingOrders[0]?.status ?? null,
+  };
+}
+
+function mapTaskEntryStateFromBackend(
+  payload: BackendTaskEntryStateResponse | null | undefined,
+): H5TaskEntryState | null {
+  if (!payload) {
+    return null;
+  }
+  return {
+    state: payload.state,
+    redirectPath: payload.redirectPath ?? null,
+    taskPackageId: payload.taskPackageId ?? null,
+    certificationRequiredAmount: payload.certificationRequiredAmount ?? 0,
+    currentRealRechargeAmount: payload.currentRealRechargeAmount ?? 0,
+    remainingRechargeAmount: payload.remainingRechargeAmount ?? 0,
+    systemBalance: payload.systemBalance ?? 0,
+    taskBalance: payload.taskBalance ?? 0,
+  };
+}
+
+function buildFallbackTaskEntryState(
+  packages: H5TaskPackage[],
+  wallet: H5WalletSummary,
+  verification: H5HomeVerificationSummary,
+): H5TaskEntryState {
+  const activeRookie = packages.find((pkg) => pkg.type === "rookie" && pkg.status === "active");
+  if (activeRookie) {
+    return {
+      state: "newbie_task_active",
+      redirectPath: `/h5/tasks/package/${activeRookie.id}`,
+      taskPackageId: activeRookie.id,
+      certificationRequiredAmount: 0,
+      currentRealRechargeAmount: 0,
+      remainingRechargeAmount: 0,
+      systemBalance: wallet.systemBalance,
+      taskBalance: wallet.taskBalance,
+    };
+  }
+
+  const pendingRookie = packages.find((pkg) => pkg.type === "rookie" && pkg.status === "pending_claim");
+  if (pendingRookie) {
+    return {
+      state: "newbie_task_available",
+      redirectPath: `/h5/tasks/package/${pendingRookie.id}`,
+      taskPackageId: pendingRookie.id,
+      certificationRequiredAmount: 0,
+      currentRealRechargeAmount: 0,
+      remainingRechargeAmount: 0,
+      systemBalance: wallet.systemBalance,
+      taskBalance: wallet.taskBalance,
+    };
+  }
+
+  if (wallet.taskBalance > 0) {
+    return {
+      state: "task_balance_transfer_prompt",
+      redirectPath: "/h5/wallet",
+      taskPackageId: null,
+      certificationRequiredAmount: 0,
+      currentRealRechargeAmount: 0,
+      remainingRechargeAmount: 0,
+      systemBalance: wallet.systemBalance,
+      taskBalance: wallet.taskBalance,
+    };
+  }
+
+  const activeOfficial = packages.find((pkg) => pkg.type !== "rookie" && pkg.status === "active");
+  if (activeOfficial) {
+    return {
+      state: "official_batch_active",
+      redirectPath: `/h5/tasks/package/${activeOfficial.id}`,
+      taskPackageId: activeOfficial.id,
+      certificationRequiredAmount: 0,
+      currentRealRechargeAmount: 0,
+      remainingRechargeAmount: 0,
+      systemBalance: wallet.systemBalance,
+      taskBalance: wallet.taskBalance,
+    };
+  }
+
+  const pendingOfficial = packages.find((pkg) => pkg.type !== "rookie" && pkg.status === "pending_claim");
+  if (pendingOfficial) {
+    return {
+      state: verification.currentStatus === "approved" ? "official_batch_available" : "need_certification",
+      redirectPath: verification.currentStatus === "approved"
+        ? `/h5/tasks/package/${pendingOfficial.id}`
+        : "/h5/wallet/recharge",
+      taskPackageId: verification.currentStatus === "approved" ? pendingOfficial.id : null,
+      certificationRequiredAmount: 0,
+      currentRealRechargeAmount: 0,
+      remainingRechargeAmount: 0,
+      systemBalance: wallet.systemBalance,
+      taskBalance: wallet.taskBalance,
+    };
+  }
+
+  return {
+    state: "no_task",
+    redirectPath: "/h5/tasks",
+    taskPackageId: null,
+    certificationRequiredAmount: 0,
+    currentRealRechargeAmount: 0,
+    remainingRechargeAmount: 0,
+    systemBalance: wallet.systemBalance,
+    taskBalance: wallet.taskBalance,
   };
 }
 
@@ -1928,13 +2119,6 @@ export async function getCurrentMemberSession(): Promise<H5MemberSession | null>
     }
     return null;
   }
-  if (!hasBackendAuthCookies()) {
-    if (isLegacyFallbackEnabled()) {
-      return stored;
-    }
-    writeSession(null);
-    return null;
-  }
   const authResponse = await tryBackendAuthRequest<BackendMemberAuthResponse>(() =>
     requestJson("/api/h5/auth/me"),
     {
@@ -1950,7 +2134,8 @@ export async function getCurrentMemberSession(): Promise<H5MemberSession | null>
     syncLegacyMemberCacheFromProfile(profile);
     return {
       accountId: profile.accountId,
-      phone: profile.phone,
+      username: profile.username,
+      phone: profile.phone ?? null,
       publicUserId: profile.publicUserId,
       displayName: profile.displayName,
       inviteCode: profile.inviteCode,
@@ -2028,6 +2213,7 @@ export async function updateMemberProfile(payload: {
   const nextSession: H5MemberSession = {
     ...session,
     phone: nextAccount.phone,
+    username: session.username || nextAccount.phone,
     avatarUrl: nextAccount.avatarUrl ?? null,
   };
   writeSession(nextSession);
@@ -2082,11 +2268,13 @@ export async function updateMemberPassword(payload: {
 
 export async function registerMember(payload: {
   siteKey: string;
-  phone: string;
+  username?: string;
+  phone?: string;
   password: string;
   confirmPassword?: string;
   displayName?: string;
 }): Promise<H5MemberProfile> {
+  const username = (payload.username ?? payload.phone ?? "").trim();
   try {
     const backendResponse = await tryBackendAuthRequest<BackendMemberAuthResponse>(() =>
       requestJson("/api/h5/auth/register", {
@@ -2094,7 +2282,7 @@ export async function registerMember(payload: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           siteKey: payload.siteKey,
-          phone: payload.phone.trim(),
+          username,
           password: payload.password.trim(),
           confirmPassword: payload.confirmPassword?.trim() || payload.password.trim(),
           ...(payload.displayName?.trim() ? { displayName: payload.displayName.trim() } : {}),
@@ -2102,9 +2290,9 @@ export async function registerMember(payload: {
         signal: AbortSignal.timeout(3000),      }),
     );
     if (backendResponse === "unauthenticated") {
-      // 后端未认证，尝试 localStorage 注册
+      // 鍚庣鏈璇侊紝灏濊瘯 localStorage 娉ㄥ唽
       if (isLegacyFallbackEnabled()) {
-        const legacy = tryLegacyRegister(payload);
+        const legacy = tryLegacyRegister({ ...payload, username });
         if (legacy) return legacy;
       }
       throw createServiceError("registerAuthFailed");
@@ -2115,18 +2303,18 @@ export async function registerMember(payload: {
       return profile;
     }
   } catch (error) {
-    // 409 — 后端返回了具体业务错误，透传实际消息
+    // 409 鈥?鍚庣杩斿洖浜嗗叿浣撲笟鍔￠敊璇紝閫忎紶瀹為檯娑堟伅
     if (error instanceof ApiRequestError && error.status === 409) {
       throw new Error(error.message || getServiceErrorMessage("registerFailed"));
     }
-    // 网络/超时错误 — 尝试 localStorage 回退
+    // 缃戠粶/瓒呮椂閿欒 鈥?灏濊瘯 localStorage 鍥為€€
     if (isLegacyFallbackEnabled()) {
-      const legacy = tryLegacyRegister(payload);
+      const legacy = tryLegacyRegister({ ...payload, username });
       if (legacy) return legacy;
     }
-    // 服务不可达（404 等）— 尝试 localStorage 回退
+    // 鏈嶅姟涓嶅彲杈撅紙404 绛夛級鈥?灏濊瘯 localStorage 鍥為€€
     if (error instanceof ApiRequestError && canUseLegacyFallback(error)) {
-      const legacy = tryLegacyRegister(payload);
+      const legacy = tryLegacyRegister({ ...payload, username });
       if (legacy) return legacy;
     }
     throw error;
@@ -2135,7 +2323,7 @@ export async function registerMember(payload: {
     throw getBackendUnavailableError();
   }
 
-  const legacy = tryLegacyRegister(payload);
+  const legacy = tryLegacyRegister({ ...payload, username });
   if (!legacy) {
     throw createServiceError("registerFailed");
   }
@@ -2145,13 +2333,13 @@ export async function registerMember(payload: {
 /** Try to register using legacy localStorage mock data. Returns null on failure. */
 function tryLegacyRegister(payload: {
   siteKey: string;
-  phone: string;
+  username: string;
   password: string;
   confirmPassword?: string;
   displayName?: string;
 }): H5MemberProfile | null {
   ensureSeededStorage();
-  const phone = payload.phone.trim();
+  const phone = payload.username.trim();
   const password = payload.password.trim();
   if (!phone || !password) return null;
   const accounts = readMemberAccounts();
@@ -2179,6 +2367,7 @@ function tryLegacyRegister(payload: {
   writeMemberStates(states);
   const session: H5MemberSession = {
     accountId,
+    username: phone,
     phone,
     publicUserId: account.publicUserId,
     displayName: account.displayName,
@@ -2196,17 +2385,17 @@ function tryLegacyRegister(payload: {
 
 async function loginMemberResolved(payload: {
   siteKey: string;
-  phone: string;
+  username: string;
   password: string;
 }): Promise<H5MemberProfile> {
-  // 尝试后端认证（带较短超时避免无限等待）
+  // 灏濊瘯鍚庣璁よ瘉锛堝甫杈冪煭瓒呮椂閬垮厤鏃犻檺绛夊緟锛?
   try {
     const backendResponse = await requestJson<BackendMemberAuthResponse>("/api/h5/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         siteKey: payload.siteKey,
-        phone: payload.phone.trim(),
+        username: payload.username.trim(),
         password: payload.password.trim(),
       }),
       signal: AbortSignal.timeout(3000),
@@ -2216,27 +2405,30 @@ async function loginMemberResolved(payload: {
     return profile;
   } catch (error) {
     if (error instanceof ApiRequestError && error.status === 401) {
-      // 401 — 后端认证失败，尝试 localStorage 回退
+      // 401 鈥?鍚庣璁よ瘉澶辫触锛屽皾璇?localStorage 鍥為€€
       if (isLegacyFallbackEnabled()) {
-        const legacy = tryLegacyLogin(payload.phone.trim(), payload.password.trim());
+        const legacy = tryLegacyLogin(payload.username.trim(), payload.password.trim());
         if (legacy) return legacy;
       }
       const normalizedDetail = (error.message ?? "").trim();
       if (
         normalizedDetail &&
         !/phone or password is invalid/i.test(normalizedDetail) &&
-        !/手机号或密码错误/.test(normalizedDetail)
+        !/鎵嬫満鍙锋垨瀵嗙爜閿欒/.test(normalizedDetail)
       ) {
         throw new Error(normalizedDetail);
       }
       throw createServiceError("invalidCredentials");
     }
-    // 网络/超时错误 — 尝试 localStorage 回退
+    if (error instanceof ApiRequestError && (error.status === 403 || error.status === 423 || error.status === 429)) {
+      throw new Error(error.message);
+    }
+    // 缃戠粶/瓒呮椂閿欒 鈥?灏濊瘯 localStorage 鍥為€€
     if (isLegacyFallbackEnabled()) {
-      const legacy = tryLegacyLogin(payload.phone.trim(), payload.password.trim());
+      const legacy = tryLegacyLogin(payload.username.trim(), payload.password.trim());
       if (legacy) return legacy;
     }
-    // 后端不可达
+    // 鍚庣涓嶅彲杈?
     if (!canUseLegacyFallback(error)) {
       throw createServiceError("backendUnavailable");
     }
@@ -2246,7 +2438,7 @@ async function loginMemberResolved(payload: {
   }
 
   ensureSeededStorage();
-  const legacy = tryLegacyLogin(payload.phone.trim(), payload.password.trim());
+  const legacy = tryLegacyLogin(payload.username.trim(), payload.password.trim());
   if (!legacy) {
     throw createServiceError("invalidCredentials");
   }
@@ -2261,6 +2453,7 @@ function tryLegacyLogin(phone: string, password: string): H5MemberProfile | null
   if (!account) return null;
   const session: H5MemberSession = {
     accountId: account.accountId,
+    username: account.phone,
     phone: account.phone,
     publicUserId: account.publicUserId,
     displayName: account.displayName,
@@ -2278,10 +2471,15 @@ function tryLegacyLogin(phone: string, password: string): H5MemberProfile | null
 
 export async function loginMember(payload: {
   siteKey: string;
-  phone: string;
+  username?: string;
+  phone?: string;
   password: string;
 }): Promise<H5MemberProfile> {
-  return loginMemberResolved(payload);
+  return loginMemberResolved({
+    siteKey: payload.siteKey,
+    username: payload.username ?? payload.phone ?? "",
+    password: payload.password,
+  });
 }
 
 export async function logoutMember(): Promise<void> {
@@ -2305,17 +2503,41 @@ export async function logoutMember(): Promise<void> {
 }
 
 export async function getMemberHomeDashboard(siteKey?: string): Promise<H5HomeDashboard> {
-  const homeResponse = await tryBackendAuthRequest<BackendMemberHomeResponse>(() =>
-    requestJson("/api/h5/member/home"),
-    {
-      allowRefresh: true,
-    },
-  );
+  let homeResponse: BackendAuthLookupResult<BackendMemberHomeResponse>;
+  try {
+    homeResponse = await tryBackendAuthRequest<BackendMemberHomeResponse>(() =>
+      requestJson("/api/h5/member/home"),
+      {
+        allowRefresh: true,
+        allowLegacyFallback: false,
+      },
+    );
+  } catch (error) {
+    if (error instanceof TypeError || error instanceof SyntaxError) {
+      throw getBackendUnavailableError();
+    }
+    throw error;
+  }
   if (homeResponse === "unauthenticated") {
     writeSession(null);
     throw new H5AuthRequiredError();
   }
   if (homeResponse) {
+    let entryStateResponse: BackendTaskEntryStateResponse | null;
+    try {
+      entryStateResponse = await requestBackendMemberDomain<BackendTaskEntryStateResponse>(
+        "/api/h5/tasks/entry-state",
+        undefined,
+        {
+          allowLegacyFallback: false,
+        },
+      );
+    } catch (error) {
+      if (error instanceof TypeError || error instanceof SyntaxError) {
+        throw getBackendUnavailableError();
+      }
+      throw error;
+    }
     const profile = buildProfileFromAuthPayload({
       member: homeResponse.member,
       site: homeResponse.site,
@@ -2336,6 +2558,7 @@ export async function getMemberHomeDashboard(siteKey?: string): Promise<H5HomeDa
           DEFAULT_WITHDRAW_THRESHOLD - (homeResponse.wallet.systemBalance ?? 0),
         ),
       },
+      entryState: mapTaskEntryStateFromBackend(entryStateResponse),
       unreadCount: homeResponse.unreadMessageCount,
       pendingClaimCount: homeResponse.pendingClaimCount,
       activeCount: homeResponse.activeCount,
@@ -2358,39 +2581,21 @@ export async function getMemberHomeDashboard(siteKey?: string): Promise<H5HomeDa
       fragments: mapHomeFragmentSummaryFromBackend(homeResponse.fragments),
     };
   }
-  if (!isLegacyFallbackEnabled()) {
-    throw getBackendUnavailableError();
-  }
-
-  const session = getRequiredSession();
-  const account = readMemberAccounts().find((item) => item.accountId === session.accountId)!;
-  const state = getStateForAccount(session.accountId);
-  const packages = state.taskPackages.map((pkg) => mapTaskPackage(pkg));
-  const fragmentOverview = buildFragmentOverview(state);
-  return {
-    site: getSiteBrand(siteKey),
-    member: {
-      ...session,
-      accountIdMasked: maskAccountId(session.accountId),
-      createdAt: account.createdAt,
-      avatarUrl: account.avatarUrl ?? null,
-    },
-    wallet: getWalletSummaryFromState(state),
-    unreadCount: getUnreadMessageCount(state.messages),
-    pendingClaimCount: packages.filter((pkg) => pkg.status === "pending_claim").length,
-    activeCount: packages.filter((pkg) => pkg.status === "active").length,
-    expiringCount: packages.filter((pkg) => pkg.status === "active" && pkg.countdownSeconds <= 6 * 3600).length,
-    recentMessages: [...state.messages].slice(0, 5),
-    leaderboard: (await getWithdrawLeaderboard()).slice(0, 5),
-    verification: buildHomeVerificationSummaryFromState(state),
-    fragments: buildHomeFragmentSummaryFromOverview(fragmentOverview),
-  };
+  throw getBackendUnavailableError();
 }
 
-export async function listTaskPackages(): Promise<
+export async function listTaskPackages(options?: {
+  allowLegacyFallback?: boolean;
+}): Promise<
   Array<H5TaskPackage & { totalCommission: number; currentCommission: number; completedItems: number; totalItems: number; countdownSeconds: number }>
 > {
-  const backendPackages = await requestBackendMemberDomain<BackendTaskPackageResponse[]>("/api/h5/task-packages");
+  const backendPackages = await requestBackendMemberDomain<BackendTaskPackageResponse[]>(
+    H5_API_ENDPOINTS.tasks.list,
+    undefined,
+    {
+      allowLegacyFallback: options?.allowLegacyFallback ?? false,
+    },
+  );
   if (backendPackages) {
     return backendPackages.map((pkg) => mapTaskPackageFromBackend(pkg));
   }
@@ -2401,11 +2606,18 @@ export async function listTaskPackages(): Promise<
 
 export async function getTaskPackageDetail(
   packageId: string,
+  options?: {
+    allowLegacyFallback?: boolean;
+  },
 ): Promise<
   H5TaskPackage & { totalCommission: number; currentCommission: number; completedItems: number; totalItems: number; countdownSeconds: number }
 > {
   const backendPackage = await requestBackendMemberDomain<BackendTaskPackageResponse>(
-    `/api/h5/task-packages/${encodeURIComponent(packageId)}`,
+    H5_API_ENDPOINTS.tasks.detail(encodeURIComponent(packageId)),
+    undefined,
+    {
+      allowLegacyFallback: options?.allowLegacyFallback ?? false,
+    },
   );
   if (backendPackage) {
     return mapTaskPackageFromBackend(backendPackage);
@@ -2423,9 +2635,12 @@ export async function claimTaskPackage(
   H5TaskPackage & { totalCommission: number; currentCommission: number; completedItems: number; totalItems: number; countdownSeconds: number }
 > {
   const backendPackage = await requestBackendMemberDomain<BackendTaskPackageResponse>(
-    `/api/h5/task-packages/${encodeURIComponent(packageId)}/claim`,
+    H5_API_ENDPOINTS.tasks.claim(encodeURIComponent(packageId)),
     {
       method: "POST",
+    },
+    {
+      allowLegacyFallback: false,
     },
   );
   if (backendPackage) {
@@ -2468,6 +2683,9 @@ export async function completeTaskPackagePurchase(
     `/api/h5/task-packages/${encodeURIComponent(packageId)}/items/${encodeURIComponent(itemId)}/purchase`,
     {
       method: "POST",
+    },
+    {
+      allowLegacyFallback: false,
     },
   );
   if (backendPurchase) {
@@ -2696,7 +2914,7 @@ export async function createRechargeOrder(amount: number): Promise<H5WalletSumma
 
 export async function transferTaskBalanceToSystem(amount: number): Promise<H5WalletSummary> {
   const backendWallet = await requestBackendMemberDomain<BackendWalletSummaryResponse>(
-    "/api/h5/wallet/transfers",
+    H5_API_ENDPOINTS.wallet.transferTaskBalance,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3094,31 +3312,47 @@ export async function getMemberSupportContext(): Promise<{
 
 export async function getMaskedPhone(): Promise<string> {
   const session = getRequiredSession();
-  return maskPhone(session.phone);
+  return maskPhone(session.phone ?? session.username ?? "");
 }
 
-// ─── Auth API (mock/real dual-mode) ───────────────────────
+// 鈹€鈹€鈹€ Auth API (mock/real dual-mode) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/** 登录 */
+/** 鐧诲綍 */
 export async function loginApi(
   phone: string,
   password: string,
   siteKey?: string,
 ): Promise<H5LoginResponse> {
   if (apiMode === 'real') {
-    const res = await h5Api.post<H5LoginResponse>('/api/h5/auth/login', {
-      phone,
+    const res = await h5Api.post<BackendMemberAuthResponse>('/api/h5/auth/login', {
+      username: phone,
       password,
       siteKey: siteKey || 'mall-cn',
     });
-    sessionManager.setSession(res.data.access_token, res.data.refresh_token, res.data.expires_in);
-    return res.data;
+    const profile = buildProfileFromAuthPayload(res.data);
+    syncLegacyMemberCacheFromProfile(profile);
+    return {
+      access_token: "",
+      refresh_token: "",
+      expires_in: 0,
+      user: {
+        accountId: profile.accountId,
+        username: profile.username,
+        phone: profile.phone ?? null,
+        publicUserId: profile.publicUserId,
+        displayName: profile.displayName,
+        inviteCode: profile.inviteCode,
+        avatarUrl: profile.avatarUrl ?? null,
+        languageCode: profile.languageCode,
+      },
+    };
   }
   // Mock fallback
-  const profile = await loginMember({ siteKey: siteKey || 'mall-cn', phone, password });
+  const profile = await loginMember({ siteKey: siteKey || 'mall-cn', username: phone, password });
   const user: H5MemberSession = {
     accountId: profile.accountId,
-    phone: profile.phone,
+    username: profile.username,
+    phone: profile.phone ?? profile.username,
     publicUserId: profile.publicUserId,
     displayName: profile.displayName,
     inviteCode: profile.inviteCode,
@@ -3129,7 +3363,7 @@ export async function loginApi(
   sessionManager.setSession(fakeToken, fakeRefresh, 7200);
   sessionManager.setUserInfo({
     accountId: user.accountId,
-    phone: user.phone,
+    phone: user.phone ?? user.username ?? "",
     publicUserId: user.publicUserId,
     displayName: user.displayName,
     inviteCode: user.inviteCode,
@@ -3138,7 +3372,7 @@ export async function loginApi(
   return { access_token: fakeToken, refresh_token: fakeRefresh, expires_in: 7200, user };
 }
 
-/** 注册 */
+/** 娉ㄥ唽 */
 export async function registerApi(payload: {
   siteKey: string;
   phone: string;
@@ -3147,15 +3381,31 @@ export async function registerApi(payload: {
   displayName?: string;
 }): Promise<H5LoginResponse> {
   if (apiMode === 'real') {
-    const res = await h5Api.post<H5LoginResponse>('/api/h5/auth/register', payload);
-    sessionManager.setSession(res.data.access_token, res.data.refresh_token, res.data.expires_in);
-    return res.data;
+    const res = await h5Api.post<BackendMemberAuthResponse>('/api/h5/auth/register', payload);
+    const profile = buildProfileFromAuthPayload(res.data);
+    syncLegacyMemberCacheFromProfile(profile);
+    return {
+      access_token: "",
+      refresh_token: "",
+      expires_in: 0,
+      user: {
+        accountId: profile.accountId,
+        username: profile.username,
+        phone: profile.phone ?? null,
+        publicUserId: profile.publicUserId,
+        displayName: profile.displayName,
+        inviteCode: profile.inviteCode,
+        avatarUrl: profile.avatarUrl ?? null,
+        languageCode: profile.languageCode,
+      },
+    };
   }
   // Mock fallback
-  const profile = await registerMember(payload);
+  const profile = await registerMember({ ...payload, username: payload.phone });
   const user: H5MemberSession = {
     accountId: profile.accountId,
-    phone: profile.phone,
+    username: profile.username,
+    phone: profile.phone ?? profile.username,
     publicUserId: profile.publicUserId,
     displayName: profile.displayName,
     inviteCode: profile.inviteCode,
@@ -3166,7 +3416,7 @@ export async function registerApi(payload: {
   sessionManager.setSession(fakeToken, fakeRefresh, 7200);
   sessionManager.setUserInfo({
     accountId: user.accountId,
-    phone: user.phone,
+    phone: user.phone ?? user.username ?? "",
     publicUserId: user.publicUserId,
     displayName: user.displayName,
     inviteCode: user.inviteCode,
@@ -3175,15 +3425,18 @@ export async function registerApi(payload: {
   return { access_token: fakeToken, refresh_token: fakeRefresh, expires_in: 7200, user };
 }
 
-/** 刷新 token */
+/** 鍒锋柊 token */
 export async function refreshTokenApi(): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
   if (apiMode === 'real') {
-    const refreshToken = sessionManager.getRefreshToken();
-    const res = await h5Api.post<{ access_token: string; refresh_token: string; expires_in: number }>('/api/h5/auth/refresh', {
-      refresh_token: refreshToken,
-    });
-    sessionManager.setSession(res.data.access_token, res.data.refresh_token, res.data.expires_in);
-    return res.data;
+    const success = await refreshBackendAuthSession();
+    if (!success) {
+      throw new Error('Token refresh failed');
+    }
+    return {
+      access_token: sessionManager.getAccessToken() ?? '',
+      refresh_token: sessionManager.getRefreshToken() ?? '',
+      expires_in: 7200,
+    };
   }
   // Mock fallback: use existing refreshBackendAuthSession
   const success = await refreshBackendAuthSession();
@@ -3197,7 +3450,7 @@ export async function refreshTokenApi(): Promise<{ access_token: string; refresh
   };
 }
 
-/** 登出 */
+/** 鐧诲嚭 */
 export async function logoutApi(): Promise<void> {
   if (apiMode === 'real') {
     await h5Api.post('/api/h5/auth/logout');
@@ -3209,7 +3462,7 @@ export async function logoutApi(): Promise<void> {
   sessionManager.clearSession();
 }
 
-/** 获取用户信息 */
+/** 鑾峰彇鐢ㄦ埛淇℃伅 */
 export async function getUserInfoApi(): Promise<H5MemberProfile | null> {
   if (apiMode === 'real') {
     const res = await h5Api.get<{ member: BackendMemberAuthResponse['member']; site: BackendMemberAuthResponse['site'] }>('/api/h5/auth/me');
@@ -3224,7 +3477,7 @@ export async function getUserInfoApi(): Promise<H5MemberProfile | null> {
   return getCurrentMemberProfile();
 }
 
-/** 更新个人信息 */
+/** 鏇存柊涓汉淇℃伅 */
 export async function updateProfileApi(payload: {
   phone: string;
   avatarUrl?: string | null;
@@ -3237,7 +3490,7 @@ export async function updateProfileApi(payload: {
   return updateMemberProfile(payload);
 }
 
-/** 上传头像（multipart） */
+/** 涓婁紶澶村儚锛坢ultipart锛?*/
 export async function updateAvatarApi(file: File): Promise<{ avatarUrl: string }> {
   if (apiMode === 'real') {
     const formData = new FormData();
@@ -3261,7 +3514,7 @@ export async function updateAvatarApi(file: File): Promise<{ avatarUrl: string }
   return { avatarUrl: fakeUrl };
 }
 
-/** 修改密码 */
+/** 淇敼瀵嗙爜 */
 export async function changePasswordApi(payload: {
   currentPassword: string;
   nextPassword: string;
@@ -3275,9 +3528,9 @@ export async function changePasswordApi(payload: {
   return updateMemberPassword(payload);
 }
 
-// ─── Task API (mock/real dual-mode) ──────────────────────────────
+// 鈹€鈹€鈹€ Task API (mock/real dual-mode) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/** 获取任务包列表 */
+/** 鑾峰彇浠诲姟鍖呭垪琛?*/
 export async function getTaskPackagesApi(params?: {
   page?: number;
   size?: number;
@@ -3285,31 +3538,50 @@ export async function getTaskPackagesApi(params?: {
 }): Promise<
   Array<H5TaskPackage & { totalCommission: number; currentCommission: number; completedItems: number; totalItems: number; countdownSeconds: number }>
 > {
-  if (apiMode === 'real') {
-    const res = await h5Api.get('/api/h5/tasks', { params });
-    return res.data.items ?? res.data;
+  const listPath = params?.status
+    ? `${H5_API_ENDPOINTS.tasks.list}?status=${encodeURIComponent(params.status)}`
+    : H5_API_ENDPOINTS.tasks.list;
+  const backendPackages = await requestBackendMemberDomain<BackendTaskPackageResponse[]>(
+    listPath,
+  );
+  const directPackages = backendPackages ?? await requestBackendMemberDomain<BackendTaskPackageResponse[]>(
+    "/api/h5/task-packages",
+    undefined,
+    {
+      allowLegacyFallback: false,
+    },
+  );
+  if (directPackages) {
+    const mapped = directPackages.map((pkg) => mapTaskPackageFromBackend(pkg));
+    const pageSize = params?.size ?? mapped.length;
+    const page = params?.page ?? 1;
+    const start = (page - 1) * pageSize;
+    return mapped.slice(start, start + pageSize);
   }
-  // Mock fallback - use existing listTaskPackages
-  return listTaskPackages();
+  return listTaskPackages({ allowLegacyFallback: false });
 }
 
-/** 获取任务包详情 */
+/** 鑾峰彇浠诲姟鍖呰鎯?*/
 export async function getTaskPackageDetailApi(id: string): Promise<
   (H5TaskPackage & { totalCommission: number; currentCommission: number; completedItems: number; totalItems: number; countdownSeconds: number }) | null
 > {
-  if (apiMode === 'real') {
-    const res = await h5Api.get(`/api/h5/tasks/${encodeURIComponent(id)}`);
-    return res.data;
+  const backendPackage = await requestBackendMemberDomain<BackendTaskPackageResponse>(
+    H5_API_ENDPOINTS.tasks.detail(encodeURIComponent(id)),
+  );
+  const directPackage = backendPackage ?? await requestBackendMemberDomain<BackendTaskPackageResponse>(
+    `/api/h5/task-packages/${encodeURIComponent(id)}`,
+    undefined,
+    {
+      allowLegacyFallback: false,
+    },
+  );
+  if (directPackage) {
+    return mapTaskPackageFromBackend(directPackage);
   }
-  // Mock fallback
-  try {
-    return await getTaskPackageDetail(id);
-  } catch {
-    return null;
-  }
+  return await getTaskPackageDetail(id, { allowLegacyFallback: false });
 }
 
-/** 提交任务 */
+/** 鎻愪氦浠诲姟 */
 export async function submitTaskApi(id: string, data: unknown): Promise<boolean> {
   if (apiMode === 'real') {
     await h5Api.post(`/api/h5/tasks/${encodeURIComponent(id)}/submit`, data);
@@ -3318,7 +3590,7 @@ export async function submitTaskApi(id: string, data: unknown): Promise<boolean>
   return true; // Mock: always succeed
 }
 
-/** 上传任务凭证 */
+/** 涓婁紶浠诲姟鍑瘉 */
 export async function uploadTaskProofApi(
   id: string,
   file: File,
@@ -3339,11 +3611,11 @@ export async function uploadTaskProofApi(
   return URL.createObjectURL(file);
 }
 
-// ─── Wallet / Tasks / 其他模块的 API Endpoint 预览（Phase 3-4 占位）────────
+// 鈹€鈹€鈹€ Wallet / Tasks / 鍏朵粬妯″潡鐨?API Endpoint 棰勮锛圥hase 3-4 鍗犱綅锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-// ─── Wallet / Notifications API ──────────────────────────────────
+// 鈹€鈹€鈹€ Wallet / Notifications API 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/** 获取钱包余额 */
+/** 鑾峰彇閽卞寘浣欓 */
 export async function getWalletBalanceApi(): Promise<H5WalletSummary> {
   if (apiMode === 'real') {
     const backendWallet = await requestBackendMemberDomain<BackendWalletSummaryResponse>(
@@ -3359,7 +3631,7 @@ export async function getWalletBalanceApi(): Promise<H5WalletSummary> {
   return getWalletSummaryFromState(state);
 }
 
-/** 获取钱包交易记录（分页） */
+/** 鑾峰彇閽卞寘浜ゆ槗璁板綍锛堝垎椤碉級 */
 export async function getWalletTransactionsApi(params: {
   page: number;
   size?: number;
@@ -3399,7 +3671,7 @@ export async function getWalletTransactionsApi(params: {
   };
 }
 
-/** 发起充值 */
+/** 鍙戣捣鍏呭€?*/
 export async function rechargeApi(
   amount: number,
   channel: string,
@@ -3422,7 +3694,7 @@ export async function rechargeApi(
   return { id: `mock_recharge_${Date.now()}`, status: 'completed' };
 }
 
-/** 查询充值状态 */
+/** 鏌ヨ鍏呭€肩姸鎬?*/
 export async function getRechargeStatusApi(id: string): Promise<string> {
   if (apiMode === 'real') {
     return "completed";
@@ -3430,7 +3702,7 @@ export async function getRechargeStatusApi(id: string): Promise<string> {
   return 'completed';
 }
 
-/** 获取未读通知数量 */
+/** 鑾峰彇鏈閫氱煡鏁伴噺 */
 export async function getNotificationsCountApi(): Promise<{ unreadCount: number }> {
   if (apiMode === 'real') {
     const res = await h5Api.get<{ unreadCount: number }>(H5_API_ENDPOINTS.notificationsUnreadCount);
@@ -3442,9 +3714,9 @@ export async function getNotificationsCountApi(): Promise<{ unreadCount: number 
   return { unreadCount: getUnreadMessageCount(state.messages) };
 }
 
-// ─── Withdraw API ────────────────────────────────────────────────
+// 鈹€鈹€鈹€ Withdraw API 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/** 获取提现记录（分页） */
+/** 鑾峰彇鎻愮幇璁板綍锛堝垎椤碉級 */
 export async function getWithdrawalsApi(params: {
   page?: number;
   size?: number;
@@ -3473,7 +3745,7 @@ export async function getWithdrawalsApi(params: {
   return { items: requests.slice((page - 1) * size, page * size), total: requests.length };
 }
 
-/** 提交提现申请 */
+/** 鎻愪氦鎻愮幇鐢宠 */
 export async function submitWithdrawApi(
   amount: number,
   accountInfo?: string,
@@ -3487,7 +3759,7 @@ export async function submitWithdrawApi(
   return { id: `mock-${Date.now()}`, status: 'submitted' };
 }
 
-/** 获取提现详情 */
+/** 鑾峰彇鎻愮幇璇︽儏 */
 export async function getWithdrawDetailApi(id: string): Promise<H5WithdrawRequest | null> {
   if (apiMode === 'real') {
     const res = await h5Api.get(H5_API_ENDPOINTS.withdrawals.detail(id));
@@ -3498,7 +3770,7 @@ export async function getWithdrawDetailApi(id: string): Promise<H5WithdrawReques
   return state.withdrawRequests.find((r) => r.id === id) ?? null;
 }
 
-// ─── Mock helper for verification & WhatsApp (localStorage) ──────
+// 鈹€鈹€鈹€ Mock helper for verification & WhatsApp (localStorage) 鈹€鈹€鈹€鈹€鈹€鈹€
 
 function getMockVerificationStatus(): {
   status: string;
@@ -3536,9 +3808,9 @@ function getMockWhatsAppBindingStatus(): {
   return { status: 'not_bound' };
 }
 
-// ─── Verification API (mock/real dual-mode) ─────────────────────
+// 鈹€鈹€鈹€ Verification API (mock/real dual-mode) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/** 获取认证状态 */
+/** 鑾峰彇璁よ瘉鐘舵€?*/
 export async function getVerificationStatusApi(): Promise<{
   status: string;
   name?: string;
@@ -3554,7 +3826,7 @@ export async function getVerificationStatusApi(): Promise<{
   return getMockVerificationStatus();
 }
 
-/** 提交认证 */
+/** 鎻愪氦璁よ瘉 */
 export async function submitVerificationApi(data: {
   name: string;
   idNumber?: string;
@@ -3575,7 +3847,7 @@ export async function submitVerificationApi(data: {
   return { id: mockId, status: 'pending' };
 }
 
-/** 上传认证照片 */
+/** 涓婁紶璁よ瘉鐓х墖 */
 export async function uploadVerificationPhotosApi(id: string, files: File[]): Promise<boolean> {
   if (apiMode === 'real') {
     const form = new FormData();
@@ -3588,9 +3860,9 @@ export async function uploadVerificationPhotosApi(id: string, files: File[]): Pr
   return true;
 }
 
-// ─── WhatsApp Binding API (mock/real dual-mode) ─────────────────
+// 鈹€鈹€鈹€ WhatsApp Binding API (mock/real dual-mode) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/** 获取 WhatsApp 绑定状态 */
+/** 鑾峰彇 WhatsApp 缁戝畾鐘舵€?*/
 export async function getWhatsAppBindingStatusApi(): Promise<{
   status: string;
   phone?: string;
@@ -3604,7 +3876,7 @@ export async function getWhatsAppBindingStatusApi(): Promise<{
   return getMockWhatsAppBindingStatus();
 }
 
-/** 发起 WhatsApp 绑定 */
+/** 鍙戣捣 WhatsApp 缁戝畾 */
 export async function startWhatsAppBindingApi(phone: string): Promise<{ id: string; status: string }> {
   if (apiMode === 'real') {
     const res = await h5Api.post('/api/h5/whatsapp-bindings', { phone });
@@ -3621,7 +3893,7 @@ export async function startWhatsAppBindingApi(phone: string): Promise<{ id: stri
   return { id: mockId, status: 'pending' };
 }
 
-// ─── Mock helper for notification/ticket API fallback ──────────────────
+// 鈹€鈹€鈹€ Mock helper for notification/ticket API fallback 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 function getMessages(): H5MessageItem[] {
   const session = getRequiredSession();
@@ -3666,7 +3938,7 @@ function addTicketReply(ticketId: string, message: string): boolean {
   return true;
 }
 
-// ─── H52-012: Notification + Ticket API functions ──────────────────
+// 鈹€鈹€鈹€ H52-012: Notification + Ticket API functions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 export async function getNotificationsApi(params: { page?: number; size?: number }): Promise<{ items: H5MessageItem[]; total: number }> {
   if (apiMode === 'real') {
@@ -3786,7 +4058,7 @@ export async function joinPromotionApi(id: string): Promise<{ success: boolean }
   return { success: true };
 }
 
-// ─── Mock helpers for commerce API ──────────────────────────────
+// 鈹€鈹€鈹€ Mock helpers for commerce API 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 function getMockOrders(params: { page?: number; size?: number; status?: string }): { items: H5MemberOrder[]; total: number } {
   const session = getRequiredSession();
@@ -3801,7 +4073,7 @@ function getMockOrders(params: { page?: number; size?: number; status?: string }
   return { items: sorted.slice((page - 1) * size, page * size), total: sorted.length };
 }
 
-// ─── H52-013: Commerce API functions ──────────────────────────────
+// 鈹€鈹€鈹€ H52-013: Commerce API functions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 export async function getProductsApi(): Promise<{ id: string; name: string; price: number; image_url: string; }[]> {
   if (apiMode === 'real') {
@@ -3851,7 +4123,7 @@ export async function getLogisticsApi(orderId: string): Promise<{ status: string
   return { status: 'pending', steps: [] };
 }
 
-// ─── H52-014: Fragment + Mailing API functions ──────────────────
+// 鈹€鈹€鈹€ H52-014: Fragment + Mailing API functions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 function getMockFragments(): { items: unknown[]; overview: unknown } {
   const session = getRequiredSession();
@@ -3925,14 +4197,16 @@ export const H5_API_ENDPOINTS = {
     transactions: '/api/h5/wallet/transactions',
     recharge: '/api/h5/wallet/recharges',
     rechargeStatus: (id: string) => `/api/h5/wallet/recharge/${id}/status`,
+    transferTaskBalance: '/api/h5/wallet/task-balance/transfer',
   },
   withdrawals: {
     list: '/api/h5/withdrawals',
     detail: (id: string) => `/api/h5/withdrawals/${id}`,
   },
   tasks: {
-    list: '/api/h5/tasks',
-    detail: (id: string) => `/api/h5/tasks/${id}`,
+    list: '/api/h5/tasks/packages',
+    detail: (id: string) => `/api/h5/tasks/packages/${id}`,
+    claim: (id: string) => `/api/h5/tasks/packages/${id}/claim`,
     submit: (id: string) => `/api/h5/tasks/${id}/submit`,
     proof: (id: string) => `/api/h5/tasks/${id}/proof`,
   },
@@ -3956,7 +4230,7 @@ export const H5_API_ENDPOINTS = {
   leaderboard: '/api/h5/leaderboard',
 } as const;
 
-// ─── H52-016: Chat message types ──────────────────────────────
+// 鈹€鈹€鈹€ H52-016: Chat message types 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 export type H5ChatMessage = {
   id: string;
@@ -3968,7 +4242,7 @@ export type H5ChatMessage = {
   timestamp: string;
 };
 
-// ─── H52-016: Chat API functions ──────────────────────────────
+// 鈹€鈹€鈹€ H52-016: Chat API functions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 export async function getMessagesApi(params: { page?: number; size?: number; conversation_id?: string }): Promise<{ items: H5ChatMessage[]; total: number }> {
   if (apiMode === 'real') {
@@ -4012,7 +4286,7 @@ export async function sendMessageApi(
   };
 }
 
-// ── Sign-in Types ──
+// 鈹€鈹€ Sign-in Types 鈹€鈹€
 
 export type H5SignInStatus = {
   consecutiveDays: number;
@@ -4022,7 +4296,7 @@ export type H5SignInStatus = {
   isCompleted: boolean;
 };
 
-// ── Task Instance Types ──
+// 鈹€鈹€ Task Instance Types 鈹€鈹€
 
 export type H5TaskProductStatus = "pending" | "available" | "running" | "completed" | "failed";
 
@@ -4043,7 +4317,16 @@ export type H5TaskInstance = {
   status: H5TaskPackageStatus;
   rewardRatio: number;
   rewardAmount: number;
+  plannedAmount?: number | null;
+  systemGeneratedAmount?: number | null;
+  manualAddedAmount?: number | null;
+  effectiveAmount?: number | null;
+  hasAdjustmentNotice?: boolean;
+  adjustmentNotice?: string | null;
   products: H5TaskProduct[];
+  currentProduct?: H5TaskProduct | null;
+  batchIndex?: number;
+  batchTotal?: number;
   completedCount: number;
   totalCount: number;
   systemBalance: number;
@@ -4053,7 +4336,74 @@ export type H5TaskInstance = {
   completionWindowHours?: number;
 };
 
-// ── Invite Types ──
+type H5TaskPackageRuntime = H5TaskPackage & {
+  totalCommission: number;
+  currentCommission: number;
+  completedItems: number;
+  totalItems: number;
+  countdownSeconds: number;
+};
+
+function mapTaskInstanceFromPackage(
+  pkg: H5TaskPackageRuntime,
+  systemBalance: number,
+): H5TaskInstance {
+  const products: H5TaskProduct[] = pkg.items.map((item, idx) => {
+    let status: H5TaskProductStatus = "pending";
+    if (pkg.status === "pending_claim") {
+      status = "pending";
+    } else if (item.completed_at) {
+      status = "completed";
+    } else if (item.status === "failed") {
+      status = "failed";
+    } else if (pkg.currentItem?.id === item.id) {
+      status = "available";
+    } else if (idx === 0 || pkg.items[idx - 1]?.completed_at) {
+      status = "available";
+    }
+    return {
+      id: item.id,
+      productName: item.product_name,
+      imageUrl: item.image_url,
+      price: item.price,
+      currency: item.currency,
+      status,
+    };
+  });
+  const currentProduct =
+    products.find((product) => product.id === pkg.currentItem?.id)
+    ?? products.find((product) => product.status === "available" || product.status === "failed")
+    ?? null;
+
+  return {
+    id: pkg.id,
+    title: pkg.title,
+    description: pkg.description,
+    type: pkg.type,
+    status: pkg.status,
+    rewardRatio: pkg.rewardRatio,
+    rewardAmount: pkg.totalCommission,
+    plannedAmount: pkg.plannedAmount ?? null,
+    systemGeneratedAmount: pkg.systemGeneratedAmount ?? null,
+    manualAddedAmount: pkg.manualAddedAmount ?? null,
+    effectiveAmount: pkg.effectiveAmount ?? null,
+    hasAdjustmentNotice: pkg.hasAdjustmentNotice ?? false,
+    adjustmentNotice: pkg.adjustmentNotice ?? null,
+    products,
+    currentProduct,
+    batchIndex: pkg.batchIndex ?? 1,
+    batchTotal: pkg.batchTotal ?? 1,
+    completedCount: pkg.completedItems,
+    totalCount: pkg.totalItems,
+    systemBalance,
+    totalCommission: pkg.totalCommission,
+    currentCommission: pkg.currentCommission,
+    countdownSeconds: pkg.countdownSeconds,
+    completionWindowHours: pkg.completionWindowHours,
+  };
+}
+
+// 鈹€鈹€ Invite Types 鈹€鈹€
 
 export type H5InviteRecord = {
   id: string;
@@ -4071,7 +4421,7 @@ export type H5InviteInfo = {
   remainingInvites: number;
 };
 
-// ── Mock Sign-In ──
+// 鈹€鈹€ Mock Sign-In 鈹€鈹€
 
 const SIGN_IN_GOAL_DAYS = 7;
 const SIGN_IN_GOAL_REWARD = 5;
@@ -4090,7 +4440,7 @@ function getMockSignInStatus(): H5SignInStatus {
   };
 }
 
-// ── Mock Task Instance ──
+// 鈹€鈹€ Mock Task Instance 鈹€鈹€
 
 function getMockTaskInstances(): H5TaskInstance[] {
   const session = getRequiredSession();
@@ -4098,54 +4448,7 @@ function getMockTaskInstances(): H5TaskInstance[] {
   const packages = state.taskPackages.filter(
     p => p.status === "pending_claim" || p.status === "active" || p.status === "completed" || p.status === "expired",
   );
-  return packages.map((pkg) => {
-    const completedCount = pkg.items.filter(i => i.completed_at).length;
-    const totalCount = pkg.items.length;
-    const totalCommission = pkg.items.reduce((sum, item) => sum + item.price * pkg.rewardRatio, 0);
-    const currentCommission = pkg.items
-      .filter((item) => Boolean(item.completed_at))
-      .reduce((sum, item) => sum + item.price * pkg.rewardRatio, 0);
-    const countdownSeconds = pkg.status === "pending_claim"
-      ? pkg.completionWindowHours * 3600
-      : pkg.expiresAt
-        ? Math.max(0, Math.floor((new Date(pkg.expiresAt).getTime() - Date.now()) / 1000))
-        : 0;
-    const products: H5TaskProduct[] = pkg.items.map((item, idx) => {
-      let status: H5TaskProductStatus = "pending";
-      if (pkg.status === "pending_claim") {
-        status = "pending";
-      } else if (item.completed_at) {
-        status = "completed";
-      } else if (idx === 0 || pkg.items[idx - 1]?.completed_at) {
-        status = "available";
-      }
-      return {
-        id: item.id,
-        productName: item.product_name,
-        imageUrl: item.image_url,
-        price: item.price,
-        currency: item.currency,
-        status,
-      };
-    });
-    return {
-      id: pkg.id,
-      title: pkg.title,
-      description: pkg.description,
-      type: pkg.type,
-      status: pkg.status,
-      rewardRatio: pkg.rewardRatio,
-      rewardAmount: totalCommission,
-      products,
-      completedCount,
-      totalCount,
-      systemBalance: state.wallet.systemBalance,
-      totalCommission,
-      currentCommission,
-      countdownSeconds,
-      completionWindowHours: pkg.completionWindowHours,
-    };
-  });
+  return packages.map((pkg) => mapTaskInstanceFromPackage(mapTaskPackage(pkg), state.wallet.systemBalance));
 }
 
 function getMockTaskInstanceDetail(instanceId: string): H5TaskInstance | null {
@@ -4153,7 +4456,7 @@ function getMockTaskInstanceDetail(instanceId: string): H5TaskInstance | null {
   return instances.find(i => i.id === instanceId) ?? null;
 }
 
-// ── Mock Invite ──
+// 鈹€鈹€ Mock Invite 鈹€鈹€
 
 function getMockInviteLink(): string {
   const session = getRequiredSession();
@@ -4184,7 +4487,7 @@ function getMockInviteRecords(): H5InviteRecord[] {
   ];
 }
 
-// ── Exported API Functions ──
+// 鈹€鈹€ Exported API Functions 鈹€鈹€
 
 export async function getSignInStatusApi(): Promise<H5SignInStatus> {
   if (apiMode === 'real') {
@@ -4218,25 +4521,63 @@ export async function performSignInApi(): Promise<H5SignInStatus> {
 }
 
 export async function getTaskInstancesApi(): Promise<H5TaskInstance[]> {
-  if (apiMode === 'real') {
-    const res = await h5Api.get('/api/h5/task-instances', { params: { user_id: 'me' } });
-    return res.data;
+  try {
+    const packages = await getTaskPackagesApi();
+    const wallet = await getWalletSummary();
+    return packages.map((pkg) => mapTaskInstanceFromPackage(pkg, wallet.systemBalance));
+  } catch {
+    if (!isLegacyFallbackEnabled()) {
+      throw getBackendUnavailableError();
+    }
+    return getMockTaskInstances();
   }
-  return getMockTaskInstances();
 }
 
 export async function getTaskInstanceDetailApi(id: string): Promise<H5TaskInstance | null> {
-  if (apiMode === 'real') {
-    const res = await h5Api.get(`/api/h5/task-instances/${encodeURIComponent(id)}`);
-    return res.data;
+  try {
+    const detail = await getTaskPackageDetailApi(id);
+    if (!detail) {
+      return null;
+    }
+    const wallet = await getWalletSummary();
+    return mapTaskInstanceFromPackage(detail, wallet.systemBalance);
+  } catch {
+    if (!isLegacyFallbackEnabled()) {
+      throw getBackendUnavailableError();
+    }
+    return getMockTaskInstanceDetail(id);
   }
-  return getMockTaskInstanceDetail(id);
 }
 
 export async function startProductApi(instanceId: string, productId: string): Promise<{ success: boolean; reason?: string }> {
-  if (apiMode === 'real') {
-    const res = await h5Api.post(`/api/h5/task-instances/${encodeURIComponent(instanceId)}/start-product`, { product_id: productId });
-    return res.data;
+  try {
+    await requestBackendMemberDomain<BackendTaskPackageResponse>(
+      `${H5_API_ENDPOINTS.tasks.detail(encodeURIComponent(instanceId))}/current-product/start`,
+      {
+        method: "POST",
+      },
+      {
+        allowLegacyFallback: false,
+      },
+    );
+    const purchase = await requestBackendMemberDomain<BackendTaskPackagePurchaseResponse>(
+      `${H5_API_ENDPOINTS.tasks.detail(encodeURIComponent(instanceId))}/current-product/complete`,
+      {
+        method: "POST",
+      },
+      {
+        allowLegacyFallback: false,
+      },
+    );
+    if (!purchase) {
+      throw getBackendUnavailableError();
+    }
+    return { success: purchase.success, reason: purchase.reason ?? undefined };
+  } catch (error) {
+    if (!isLegacyFallbackEnabled()) {
+      throw error;
+    }
+    // Continue to legacy mock path for local-only previews.
   }
   // Mock: deduct balance and mark product as completed
   const session = getRequiredSession();
@@ -4256,10 +4597,6 @@ export async function startProductApi(instanceId: string, productId: string): Pr
 }
 
 export async function retryProductApi(instanceId: string, productId: string): Promise<{ success: boolean; reason?: string }> {
-  if (apiMode === 'real') {
-    const res = await h5Api.post(`/api/h5/task-instances/${encodeURIComponent(instanceId)}/retry-product`, { product_id: productId });
-    return res.data;
-  }
   return startProductApi(instanceId, productId);
 }
 
@@ -4279,7 +4616,7 @@ export async function getInviteRecordsApi(): Promise<H5InviteRecord[]> {
   return getMockInviteRecords();
 }
 
-// ── Request deduplication utility ──
+// 鈹€鈹€ Request deduplication utility 鈹€鈹€
 const requestCache = new Map<string, { promise: Promise<unknown>; timestamp: number }>();
 const REQUEST_DEDUP_TTL = 5000; // 5 seconds
 
@@ -4300,3 +4637,5 @@ async function dedupRequest<T>(key: string, fetcher: () => Promise<T>): Promise<
   });
   return promise;
 }
+
+

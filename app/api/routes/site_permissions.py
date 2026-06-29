@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, require_permission
 from app.core.auth import RequestActor
+from app.services.effective_access_service import EffectiveAccessService
 from app.services.site_permission_service import SitePermissionService
 
 router = APIRouter(prefix="/api/h5", tags=["h5-permissions"])
@@ -97,3 +98,20 @@ async def update_permission_role(
         return _perm_to_dict(perm)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/sites/{site_id}/effective-access")
+async def get_site_effective_access(
+    site_id: str,
+    actor: RequestActor = Depends(require_permission("sites.view")),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    actor.require_permission("data_scope.view")
+    access = EffectiveAccessService(session)
+    scope = access.get_data_scope(actor)
+    return {
+        "site_id": site_id,
+        "in_scope": scope.all_access or site_id in scope.site_ids,
+        "effective_permissions": sorted(access.get_effective_permissions(actor)),
+        "delegatable_permissions": sorted(access.get_delegatable_permissions(actor)),
+    }

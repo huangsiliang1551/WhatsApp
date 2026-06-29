@@ -9,6 +9,7 @@
  */
 
 import { adminAuth } from "./adminAuth";
+import { resolveApiBaseUrl } from "./resolveApiBaseUrl";
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -49,9 +50,10 @@ type SseEventName = keyof SseEventMap;
 // 工具函数
 // ---------------------------------------------------------------------------
 
-const resolvedApiBaseUrl =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ||
-  (import.meta.env.DEV ? "http://localhost:8000" : "");
+const resolvedApiBaseUrl = resolveApiBaseUrl(
+  import.meta.env.VITE_API_BASE_URL as string | undefined,
+  import.meta.env.DEV,
+);
 
 /** 指数退避延迟计算，单位 ms */
 function backoffDelay(attempt: number): number {

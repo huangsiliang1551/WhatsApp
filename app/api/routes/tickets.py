@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from app.api.deps import get_runtime_state_service, get_ticket_service, require_permission
 from app.core.platform_enums import TicketStatus
@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api/tickets", tags=["tickets"])
     tags=["tickets"],
 )
 async def list_tickets(
+    request: Request,
     account_id: str | None = None,
     ticket_type: str | None = None,
     status: str | None = None,
@@ -35,7 +36,7 @@ async def list_tickets(
     search: str | None = None,
     ticket_service: TicketService = Depends(get_ticket_service),
     actor: RequestActor = Depends(require_permission("tickets.view")),
-) -> dict:
+) -> dict | list[TicketResponse]:
     if account_id is not None:
         actor.require_account_access(account_id)
     try:
@@ -64,6 +65,8 @@ async def list_tickets(
     total = len(items)
     start = (page - 1) * size
     items_on_page = items[start:start + size]
+    if not any(key in request.query_params for key in ("page", "size", "sort", "search")):
+        return items_on_page
     return {"items": items_on_page, "total": total, "page": page, "size": size}
 
 

@@ -2,14 +2,14 @@
   "test": "test_perf_message_throughput",
   "description": "100 条 mock inbound 消息处理吞吐量（顺序发送）",
   "count": 100,
-  "total_time_ms": 5097.09,
-  "throughput_msg_per_sec": 19.62,
+  "total_time_ms": 1843.0,
+  "throughput_msg_per_sec": 54.26,
   "latency_ms": {
-    "avg": 50.96,
-    "p50": 48.43,
-    "p95": 61.95,
-    "p99": 129.99,
-    "min": 44.25,
-    "max": 138.86
+    "avg": 18.42,
+    "p50": 17.47,
+    "p95": 22.51,
+    "p99": 36.53,
+    "min": 13.04,
+    "max": 42.53
   }
 }

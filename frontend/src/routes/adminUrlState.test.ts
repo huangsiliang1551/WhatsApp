@@ -33,4 +33,31 @@ describe("adminUrlState", () => {
       selected_user_id: "user-9",
     });
   });
+
+  it("builds and parses customers detail tab prefill", () => {
+    const locationKey = buildAdminLocationKey("/system/customers", "customers", {
+      customers: {
+        account_id: "account-3",
+        query: "pub-u3",
+        selected_profile_id: "user-3",
+        detail_tab: "finance",
+      },
+    });
+
+    expect(locationKey).toBe(
+      "/system/customers?account_id=account-3&query=pub-u3&selected_profile_id=user-3&detail_tab=finance"
+    );
+
+    const prefill = parseAdminLocationPrefill(
+      "customers",
+      "?account_id=account-3&query=pub-u3&selected_profile_id=user-3&detail_tab=finance"
+    );
+
+    expect(prefill).toMatchObject({
+      account_id: "account-3",
+      query: "pub-u3",
+      selected_profile_id: "user-3",
+      detail_tab: "finance",
+    });
+  });
 });

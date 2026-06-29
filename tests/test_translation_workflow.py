@@ -387,9 +387,18 @@ class TestOutboundTranslate:
     USER_ID = "user-outbound"
 
     def test_outbound_translate_preview(self, client: TestClient) -> None:
+        conv_id = "conv-outbound-preview"
+        _send_inbound(
+            client,
+            account_id=self.ACCOUNT_ID,
+            conversation_id=conv_id,
+            user_id=self.USER_ID,
+            text="Hola, necesito ayuda",
+            language_hint="es",
+        )
         """出站翻译预览：中文→西班牙语，返回 translated=true。"""
         response = client.post(
-            f"/api/conversations/{self.ACCOUNT_ID}/dummy-conv/messages/translate-outbound",
+            f"/api/conversations/{self.ACCOUNT_ID}/{conv_id}/messages/translate-outbound",
             json={"text": "您好，订单已经发货。", "target_language": "es"},
         )
         assert response.status_code == 200, response.text
@@ -400,9 +409,18 @@ class TestOutboundTranslate:
         assert "auto-translated zh-CN->es" in payload["translated_text"]
 
     def test_outbound_translate_same_language_skips(self, client: TestClient) -> None:
+        conv_id = "conv-outbound-preview-same-lang"
+        _send_inbound(
+            client,
+            account_id=self.ACCOUNT_ID,
+            conversation_id=conv_id,
+            user_id=self.USER_ID,
+            text="鎮ㄥソ",
+            language_hint="zh-CN",
+        )
         """目标语言与源语言相同时跳过翻译。"""
         response = client.post(
-            f"/api/conversations/{self.ACCOUNT_ID}/dummy-conv/messages/translate-outbound",
+            f"/api/conversations/{self.ACCOUNT_ID}/{conv_id}/messages/translate-outbound",
             json={"text": "您好", "target_language": "zh-CN"},
         )
         assert response.status_code == 200, response.text

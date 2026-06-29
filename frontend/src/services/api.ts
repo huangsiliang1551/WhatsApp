@@ -10,6 +10,9 @@ import {
 } from "./ecommerce";
 import { useAppStore } from "../stores/appStore";
 import { adminAuth } from "./adminAuth";
+import { resolveApiBaseUrl } from "./resolveApiBaseUrl";
+export type { FinanceWalletLedger, WalletLedgerFilters } from "./financeApi";
+export { listWalletLedgers } from "./financeApi";
 
 /** STUB-001: List ecommerce orders for an account */
 export async function listEcommerceOrders(accountId: string): Promise<EcommerceOrderDetail[]> {
@@ -723,6 +726,902 @@ export type TaskInstance = {
   created_at: string;
   updated_at: string;
 };
+
+export type TaskPackageAdminListItem = {
+  id: string;
+  account_id: string;
+  user_id: string;
+  public_user_id: string;
+  site_id: string | null;
+  site_key: string | null;
+  batch_id: string | null;
+  day_no: number | null;
+  batch_index: number;
+  batch_total: number;
+  progress_label: string;
+  status: string;
+  planned_amount: number;
+  system_generated_amount: number;
+  manual_added_amount: number;
+  effective_amount: number;
+  estimated_reward_amount: number;
+  has_manual_add: boolean;
+  claimed_at: string | null;
+  completed_at: string | null;
+};
+
+export type TaskPackageAdminDetailItem = {
+  id: string;
+  product_name: string;
+  image_url: string | null;
+  price: number;
+  currency: string;
+  origin: string;
+  status: string | null;
+  completed_at: string | null;
+  order_id: string | null;
+};
+
+export type TaskManualAddLog = {
+  id: string;
+  package_id: string;
+  batch_id: string | null;
+  operator_id: string;
+  reason_text: string | null;
+  notify_user: boolean;
+  user_notice_text: string | null;
+  user_notified_at: string | null;
+  added_item_count: number;
+  added_amount: number;
+  before_manual_added_amount: number;
+  after_manual_added_amount: number;
+  before_effective_amount: number;
+  after_effective_amount: number;
+  created_at: string;
+};
+
+export type TaskPackageAdminDetail = {
+  id: string;
+  batch_id: string | null;
+  day_no: number | null;
+  batch_index: number;
+  batch_total: number;
+  progress_label: string;
+  status: string;
+  day_planned_amount: number;
+  day_system_generated_amount: number;
+  day_manual_added_amount: number;
+  day_effective_amount: number;
+  planned_amount: number;
+  system_generated_amount: number;
+  manual_added_amount: number;
+  effective_amount: number;
+  reward_ratio: number;
+  estimated_reward_amount: number;
+  claimed_at: string | null;
+  completed_at: string | null;
+  items: TaskPackageAdminDetailItem[];
+  manual_add_logs: TaskManualAddLog[];
+};
+
+export type TaskManualAddCandidate = {
+  id: string;
+  product_id: string;
+  product_name: string;
+  image_url: string | null;
+  price: number;
+  currency: string;
+};
+
+export type TaskManualAddCreatePayload = {
+  pool_item_ids: string[];
+  reason_text?: string;
+};
+
+export type TaskManualAddPreviewItem = {
+  pool_item_id: string;
+  product_id: string;
+  product_name: string;
+  image_url: string | null;
+  price: number;
+  currency: string;
+};
+
+export type TaskManualAddPreviewResponse = {
+  package_id: string;
+  candidate_count: number;
+  added_item_count: number;
+  added_amount: number;
+  package_planned_amount: number;
+  package_system_generated_amount: number;
+  package_manual_added_amount_before: number;
+  package_manual_added_amount_after: number;
+  package_effective_amount_before: number;
+  package_effective_amount_after: number;
+  reward_ratio: number;
+  estimated_reward_amount_before: number;
+  estimated_reward_amount_after: number;
+  items: TaskManualAddPreviewItem[];
+};
+
+export type TaskPackageStatusActionPayload = {
+  reason_text?: string;
+};
+
+export type TaskManualAddCreateResponse = {
+  id: string;
+  package_id: string;
+  added_item_count: number;
+  added_amount: number;
+  package_manual_added_amount: number;
+  package_effective_amount: number;
+  batch_manual_added_amount: number;
+  batch_effective_day_amount: number;
+};
+
+export type TaskQuota = {
+  id: string;
+  account_id: string;
+  site_id: string | null;
+  user_id: string;
+  plan_id: string | null;
+  day_no: number;
+  package_count: number;
+  day_total_amount: string;
+  tolerance_amount: string;
+  amount_allocation_mode: string;
+  package_amounts_json: string[];
+  product_pool_id: string;
+  product_count_mode: string;
+  product_count_fixed: number | null;
+  product_count_min: number | null;
+  product_count_max: number | null;
+  reward_ratio: string;
+  status: string;
+  issued_batch_id: string | null;
+  generated_at: string | null;
+  generated_by: string | null;
+  locked_at: string | null;
+  created_by: string | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type TaskQuotaApiResponse = {
+  id: string;
+  accountId: string;
+  siteId: string | null;
+  userId: string;
+  planId: string | null;
+  dayNo: number;
+  packageCount: number;
+  dayTotalAmount: string;
+  toleranceAmount: string;
+  amountAllocationMode: string;
+  packageAmountsJson: string[];
+  productPoolId: string;
+  productCountMode: string;
+  productCountFixed: number | null;
+  productCountMin: number | null;
+  productCountMax: number | null;
+  rewardRatio: string;
+  status: string;
+  issuedBatchId: string | null;
+  generatedAt: string | null;
+  generatedBy: string | null;
+  lockedAt: string | null;
+  createdBy: string | null;
+  metadataJson: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function normalizeTaskQuotaResponse(payload: TaskQuotaApiResponse): TaskQuota {
+  return {
+    id: payload.id,
+    account_id: payload.accountId,
+    site_id: payload.siteId,
+    user_id: payload.userId,
+    plan_id: payload.planId,
+    day_no: payload.dayNo,
+    package_count: payload.packageCount,
+    day_total_amount: payload.dayTotalAmount,
+    tolerance_amount: payload.toleranceAmount,
+    amount_allocation_mode: payload.amountAllocationMode,
+    package_amounts_json: payload.packageAmountsJson,
+    product_pool_id: payload.productPoolId,
+    product_count_mode: payload.productCountMode,
+    product_count_fixed: payload.productCountFixed,
+    product_count_min: payload.productCountMin,
+    product_count_max: payload.productCountMax,
+    reward_ratio: payload.rewardRatio,
+    status: payload.status,
+    issued_batch_id: payload.issuedBatchId,
+    generated_at: payload.generatedAt,
+    generated_by: payload.generatedBy,
+    locked_at: payload.lockedAt,
+    created_by: payload.createdBy,
+    metadata_json: payload.metadataJson,
+    created_at: payload.createdAt,
+    updated_at: payload.updatedAt,
+  };
+}
+
+export type TaskQuotaCreatePayload = {
+  account_id: string;
+  user_id: string;
+  site_id?: string;
+  plan_id?: string;
+  day_no: number;
+  package_count: number;
+  day_total_amount: string;
+  tolerance_amount?: string;
+  amount_allocation_mode: string;
+  package_amounts?: string[];
+  product_pool_id: string;
+  product_count_mode?: string;
+  product_count_fixed?: number;
+  product_count_min?: number;
+  product_count_max?: number;
+  reward_ratio?: string;
+  created_by?: string;
+  metadata_json?: Record<string, unknown>;
+};
+
+export type TaskQuotaUpdatePayload = {
+  site_id?: string;
+  package_count?: number;
+  day_total_amount?: string;
+  tolerance_amount?: string;
+  amount_allocation_mode?: string;
+  package_amounts?: string[];
+  product_pool_id?: string;
+  product_count_mode?: string;
+  product_count_fixed?: number;
+  product_count_min?: number;
+  product_count_max?: number;
+  reward_ratio?: string;
+  metadata_json?: Record<string, unknown>;
+};
+
+export type TaskQuotaBatchCreatePayload = {
+  items?: TaskQuotaCreatePayload[];
+  account_id?: string;
+  user_ids?: string[];
+  site_id?: string;
+  plan_id?: string;
+  day_no?: number;
+  package_count?: number;
+  day_total_amount?: string;
+  tolerance_amount?: string;
+  amount_allocation_mode?: string;
+  package_amounts?: string[];
+  product_pool_id?: string;
+  product_count_mode?: string;
+  product_count_fixed?: number;
+  product_count_min?: number;
+  product_count_max?: number;
+  reward_ratio?: string;
+  created_by?: string;
+  metadata_json?: Record<string, unknown>;
+  owner_staff_user_id?: string;
+  certified_status?: "certified" | "uncertified";
+  min_total_real_recharge?: string;
+  max_total_real_recharge?: string;
+  tag_ids?: string[];
+  tag_keys?: string[];
+};
+
+export type TaskQuotaBatchPreviewResponse = {
+  userCount: number;
+  totalQuotaCount: number;
+  packageAmounts: string[];
+  computedTotalAmount: string;
+  totalBatchAmount: string;
+  rewardRatio?: string | null;
+  productPoolId?: string | null;
+};
+
+export type TaskQuotaCancelPayload = {
+  reason?: string;
+};
+
+export type TaskQuotaPreviewPayload = {
+  package_count: number;
+  day_total_amount: string;
+  amount_allocation_mode: string;
+  package_amounts?: string[];
+};
+
+export type TaskQuotaPreviewResponse = {
+  packageAmounts: string[];
+  computedTotalAmount: string;
+};
+
+export type TaskProductPoolItem = {
+  id: string;
+  productId: string;
+  productName: string;
+  imageUrl: string | null;
+  price: string;
+  currency: string;
+  productDescription: string | null;
+  status: string;
+  sortOrder: number;
+  weight: number | null;
+  metadataJson: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TaskProductPool = {
+  id: string;
+  accountId: string;
+  siteId: string | null;
+  name: string;
+  code: string | null;
+  poolType: string;
+  priceMode: string;
+  allowRepeatInSameBatch: boolean;
+  allowRepeatInSamePackage: boolean;
+  status: string;
+  currency: string;
+  metadataJson: Record<string, unknown> | null;
+  itemCount: number;
+  items: TaskProductPoolItem[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TaskProductPoolCreateItemPayload = {
+  productId: string;
+  productName: string;
+  imageUrl?: string;
+  price: string;
+  currency?: string;
+  productDescription?: string;
+  status?: string;
+  sortOrder?: number;
+  weight?: number;
+  metadataJson?: Record<string, unknown>;
+};
+
+export type TaskProductPoolItemUpdatePayload = {
+  productId?: string;
+  productName?: string;
+  imageUrl?: string;
+  price?: string;
+  currency?: string;
+  productDescription?: string;
+  status?: string;
+  sortOrder?: number;
+  weight?: number;
+  metadataJson?: Record<string, unknown>;
+};
+
+export type TaskProductPoolCreatePayload = {
+  accountId: string;
+  siteId?: string;
+  name: string;
+  code?: string;
+  poolType?: string;
+  priceMode?: string;
+  allowRepeatInSameBatch?: boolean;
+  allowRepeatInSamePackage?: boolean;
+  status?: string;
+  currency?: string;
+  metadataJson?: Record<string, unknown>;
+  items?: TaskProductPoolCreateItemPayload[];
+};
+
+export type TaskProductPoolUpdatePayload = {
+  siteId?: string;
+  name?: string;
+  code?: string;
+  poolType?: string;
+  priceMode?: string;
+  allowRepeatInSameBatch?: boolean;
+  allowRepeatInSamePackage?: boolean;
+  status?: string;
+  currency?: string;
+  metadataJson?: Record<string, unknown>;
+};
+
+export type TaskProductPoolItemsPayload = {
+  items: TaskProductPoolCreateItemPayload[];
+};
+
+export type TaskProductPoolImportPayload = {
+  items: TaskProductPoolCreateItemPayload[];
+  replaceExisting?: boolean;
+};
+
+export type TaskGenerationRun = {
+  id: string;
+  account_id: string;
+  site_id: string | null;
+  site_key: string | null;
+  user_id: string;
+  public_user_id: string;
+  quota_id: string;
+  batch_id: string | null;
+  product_pool_id: string;
+  selection_algorithm: string;
+  target_day_amount: number;
+  actual_day_system_amount: number;
+  tolerance_amount: number;
+  generated_package_count: number;
+  generated_item_count: number;
+  status: string;
+  failure_reason: string | null;
+  created_at: string;
+};
+
+export type TaskIssuePlanDayRule = {
+  id: string;
+  account_id: string;
+  site_id: string | null;
+  plan_id: string;
+  day_no: number;
+  package_count: number;
+  day_total_amount: string;
+  tolerance_amount: string;
+  amount_allocation_mode: string;
+  package_amounts_json: string[];
+  product_pool_id: string | null;
+  product_count_mode: string;
+  product_count_fixed: number | null;
+  product_count_min: number | null;
+  product_count_max: number | null;
+  reward_ratio: string;
+  issue_time_of_day: string | null;
+  elapsed_delay_hours: number | null;
+  status: string;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskIssuePlan = {
+  id: string;
+  account_id: string;
+  site_id: string | null;
+  name: string;
+  plan_type: string;
+  status: string;
+  claim_gate: string;
+  issue_anchor: string;
+  issue_mode: string;
+  require_previous_batch_completed: boolean;
+  max_unfinished_batches: number;
+  after_last_rule_mode: string;
+  growth_package_count_step: number;
+  growth_amount_step: string | null;
+  default_product_pool_id: string | null;
+  default_tolerance_amount: string;
+  default_reward_ratio: string;
+  metadata_json: Record<string, unknown> | null;
+  day_rules: TaskIssuePlanDayRule[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskIssuePlanCreatePayload = {
+  account_id: string;
+  site_id?: string;
+  name: string;
+  plan_type: string;
+  status: string;
+  claim_gate: string;
+  issue_anchor: string;
+  issue_mode: string;
+  require_previous_batch_completed: boolean;
+  max_unfinished_batches: number;
+  after_last_rule_mode: string;
+  growth_package_count_step: number;
+  growth_amount_step?: string;
+  default_product_pool_id?: string;
+  default_tolerance_amount: string;
+  default_reward_ratio: string;
+  metadata_json?: Record<string, unknown>;
+  day_rules: Array<{
+    day_no: number;
+    package_count: number;
+    day_total_amount: string;
+    tolerance_amount: string;
+    amount_allocation_mode: string;
+    package_amounts_json: string[];
+    product_pool_id?: string;
+    product_count_mode: string;
+    product_count_fixed?: number;
+    product_count_min?: number;
+    product_count_max?: number;
+    reward_ratio: string;
+    issue_time_of_day?: string;
+    elapsed_delay_hours?: number;
+    status: string;
+    metadata_json?: Record<string, unknown>;
+  }>;
+};
+
+export type TaskIssuePlanUpdatePayload = Partial<TaskIssuePlanCreatePayload>;
+
+export type TaskIssuePlanGenerateDaysPayload = {
+  start_day_no: number;
+  end_day_no: number;
+};
+
+export type TaskIssuePlanPreviewDayRule = Omit<TaskIssuePlanDayRule, "id" | "account_id" | "site_id" | "plan_id" | "created_at" | "updated_at">;
+
+export type TaskIssuePlanPreviewResponse = {
+  plan_id: string;
+  day_rules: TaskIssuePlanPreviewDayRule[];
+};
+
+export type TaskSystemConfig = {
+  accountId: string;
+  siteId: string | null;
+  status: string;
+  whatsappBindingRewardEnabled: boolean;
+  whatsappBindingRewardAmount: string;
+  whatsappBindingRewardWalletType: string;
+  whatsappBindingRewardCurrency: string;
+  certifiedMemberEnabled: boolean;
+  certifiedRechargeThreshold: string;
+  certifiedRechargeScope: string;
+  autoCertifyOnRecharge: boolean;
+  newbieTaskEnabled: boolean;
+  newbiePlanId: string | null;
+  newbieAutoPopup: boolean;
+  officialPlanId: string | null;
+  showTaskBalanceTransferPrompt: boolean;
+  minTaskBalanceTransferPromptAmount: string;
+  maxActiveBatchesPerUser: number;
+  maxActivePackagesPerUser: number;
+  metadataJson: Record<string, unknown> | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type TaskSystemConfigPayload = {
+  account_id: string;
+  site_id?: string;
+  status: string;
+  whatsapp_binding_reward_enabled: boolean;
+  whatsapp_binding_reward_amount: string;
+  whatsapp_binding_reward_wallet_type: string;
+  whatsapp_binding_reward_currency: string;
+  certified_member_enabled: boolean;
+  certified_recharge_threshold: string;
+  certified_recharge_scope: string;
+  auto_certify_on_recharge: boolean;
+  newbie_task_enabled: boolean;
+  newbie_plan_id?: string;
+  newbie_auto_popup: boolean;
+  official_plan_id?: string;
+  show_task_balance_transfer_prompt: boolean;
+  min_task_balance_transfer_prompt_amount: string;
+  max_active_batches_per_user: number;
+  max_active_packages_per_user: number;
+  metadata_json?: Record<string, unknown> | null;
+};
+
+export type TaskSystemConfigAuditLog = {
+  id: string;
+  account_id: string | null;
+  actor_type: string;
+  actor_id: string;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+export type TaskMonitorSavedView = {
+  id: string;
+  account_id: string;
+  owner_staff_id: string;
+  name: string;
+  filter_json: Record<string, unknown>;
+  sort_json: Array<Record<string, unknown>> | null;
+  columns_json: string[] | null;
+  refresh_seconds: number;
+  sound_enabled: boolean;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskMonitorSavedViewCreatePayload = {
+  account_id: string;
+  name: string;
+  filter_json: Record<string, unknown>;
+  sort_json?: Array<Record<string, unknown>>;
+  columns_json?: string[];
+  refresh_seconds?: number;
+  sound_enabled?: boolean;
+  is_default?: boolean;
+};
+
+export type TaskMonitorSavedViewUpdatePayload = {
+  name: string;
+  filter_json: Record<string, unknown>;
+  sort_json?: Array<Record<string, unknown>> | null;
+  columns_json?: string[] | null;
+  refresh_seconds?: number;
+  sound_enabled?: boolean;
+  is_default?: boolean;
+};
+
+export type TaskAlertRule = {
+  id: string;
+  account_id: string;
+  name: string;
+  status: string;
+  condition_json: Record<string, unknown>;
+  action_json: Record<string, unknown>;
+  sound_enabled: boolean;
+  priority: string;
+  created_by: string | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskAlertRuleCreatePayload = {
+  account_id: string;
+  name: string;
+  status: string;
+  condition_json: Record<string, unknown>;
+  action_json: Record<string, unknown>;
+  sound_enabled?: boolean;
+  priority?: string;
+  metadata_json?: Record<string, unknown>;
+};
+
+export type TaskAlertRuleUpdatePayload = {
+  name: string;
+  status: string;
+  condition_json: Record<string, unknown>;
+  action_json: Record<string, unknown>;
+  sound_enabled?: boolean;
+  priority?: string;
+  metadata_json?: Record<string, unknown> | null;
+};
+
+export type TaskMonitorRow = {
+  package_id: string;
+  account_id: string;
+  user_id: string;
+  public_user_id: string;
+  site_id: string | null;
+  site_key: string | null;
+  batch_id: string | null;
+  day_no: number | null;
+  progress_label: string;
+  status: string;
+  current_item_index: number | null;
+  day_planned_amount: number;
+  day_system_generated_amount: number;
+  day_manual_added_amount: number;
+  day_effective_amount: number;
+  planned_amount: number;
+  system_generated_amount: number;
+  manual_added_amount: number;
+  effective_amount: number;
+  has_manual_add: boolean;
+  manual_added_item_count: number;
+  latest_manual_add_operator_id: string | null;
+  latest_manual_add_at: string | null;
+  current_product_id: string | null;
+  current_product_name: string | null;
+  current_product_amount: number;
+  current_product_origin: string | null;
+  total_real_recharge_amount: number;
+  total_withdraw_amount: number;
+  estimated_reward_amount: number;
+  claimed_at: string | null;
+  completed_at: string | null;
+};
+
+type TaskMonitorRowApiResponse = {
+  packageId: string;
+  accountId: string;
+  userId: string;
+  publicUserId: string;
+  siteId: string | null;
+  siteKey: string | null;
+  batchId: string | null;
+  dayNo: number | null;
+  progressLabel: string;
+  status: string;
+  currentItemIndex: number | null;
+  dayPlannedAmount: number;
+  daySystemGeneratedAmount: number;
+  dayManualAddedAmount: number;
+  dayEffectiveAmount: number;
+  plannedAmount: number;
+  systemGeneratedAmount: number;
+  manualAddedAmount: number;
+  effectiveAmount: number;
+  hasManualAdd: boolean;
+  manualAddedItemCount: number;
+  latestManualAddOperatorId: string | null;
+  latestManualAddAt: string | null;
+  currentProductId: string | null;
+  currentProductName: string | null;
+  currentProductAmount: number;
+  currentProductOrigin: string | null;
+  totalRealRechargeAmount: number;
+  totalWithdrawAmount: number;
+  estimatedRewardAmount: number;
+  claimedAt: string | null;
+  completedAt: string | null;
+};
+
+export type TaskMonitorSummary = {
+  total_count: number;
+  manual_add_count: number;
+  total_planned_amount: number;
+  total_manual_added_amount: number;
+  total_effective_amount: number;
+  total_real_recharge_amount: number;
+  total_withdraw_amount: number;
+};
+
+export type TaskMonitorQueryParams = {
+  account_id?: string;
+  user_id?: string;
+  user_query?: string;
+  status?: string;
+  day_planned_amount_min?: string;
+  day_planned_amount_max?: string;
+  day_manual_added_amount_min?: string;
+  day_manual_added_amount_max?: string;
+  day_effective_amount_min?: string;
+  day_effective_amount_max?: string;
+  planned_amount_min?: string;
+  planned_amount_max?: string;
+  manual_added_amount_min?: string;
+  manual_added_amount_max?: string;
+  effective_amount_min?: string;
+  effective_amount_max?: string;
+  has_manual_add?: boolean;
+  latest_manual_add_operator_id?: string;
+  current_product_amount_min?: string;
+  current_product_amount_max?: string;
+  total_recharge_amount_min?: string;
+  total_recharge_amount_max?: string;
+  total_withdraw_amount_min?: string;
+  total_withdraw_amount_max?: string;
+};
+
+type TaskMonitorSummaryApiResponse = {
+  totalCount: number;
+  manualAddCount: number;
+  totalPlannedAmount: number;
+  totalManualAddedAmount: number;
+  totalEffectiveAmount: number;
+  totalRealRechargeAmount: number;
+  totalWithdrawAmount: number;
+};
+
+export type TaskMonitorAlertEvent = {
+  id: string;
+  account_id: string;
+  alert_rule_id: string;
+  package_id: string;
+  user_id: string;
+  public_user_id: string;
+  status: string;
+  priority: string;
+  rule_name: string;
+  current_value: number;
+  threshold_value: number | null;
+  sound_enabled: boolean;
+  triggered_at: string;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  resolved_at: string | null;
+  resolved_by: string | null;
+};
+
+type TaskMonitorAlertEventApiResponse = {
+  id: string;
+  accountId: string;
+  alertRuleId: string;
+  packageId: string;
+  userId: string;
+  publicUserId: string;
+  status: string;
+  priority: string;
+  ruleName: string;
+  currentValue: number;
+  thresholdValue: number | null;
+  soundEnabled: boolean;
+  triggeredAt: string;
+  acknowledgedAt: string | null;
+  acknowledgedBy: string | null;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+};
+
+export function normalizeTaskMonitorRowResponse(payload: TaskMonitorRowApiResponse): TaskMonitorRow {
+  return {
+    package_id: payload.packageId,
+    account_id: payload.accountId,
+    user_id: payload.userId,
+    public_user_id: payload.publicUserId,
+    site_id: payload.siteId,
+    site_key: payload.siteKey,
+    batch_id: payload.batchId,
+    day_no: payload.dayNo,
+    progress_label: payload.progressLabel,
+    status: payload.status,
+    current_item_index: payload.currentItemIndex,
+    day_planned_amount: payload.dayPlannedAmount,
+    day_system_generated_amount: payload.daySystemGeneratedAmount,
+    day_manual_added_amount: payload.dayManualAddedAmount,
+    day_effective_amount: payload.dayEffectiveAmount,
+    planned_amount: payload.plannedAmount,
+    system_generated_amount: payload.systemGeneratedAmount,
+    manual_added_amount: payload.manualAddedAmount,
+    effective_amount: payload.effectiveAmount,
+    has_manual_add: payload.hasManualAdd,
+    manual_added_item_count: payload.manualAddedItemCount,
+    latest_manual_add_operator_id: payload.latestManualAddOperatorId,
+    latest_manual_add_at: payload.latestManualAddAt,
+    current_product_id: payload.currentProductId,
+    current_product_name: payload.currentProductName,
+    current_product_amount: payload.currentProductAmount,
+    current_product_origin: payload.currentProductOrigin,
+    total_real_recharge_amount: payload.totalRealRechargeAmount,
+    total_withdraw_amount: payload.totalWithdrawAmount,
+    estimated_reward_amount: payload.estimatedRewardAmount,
+    claimed_at: payload.claimedAt,
+    completed_at: payload.completedAt,
+  };
+}
+
+export function normalizeTaskMonitorSummaryResponse(
+  payload: TaskMonitorSummaryApiResponse,
+): TaskMonitorSummary {
+  return {
+    total_count: payload.totalCount,
+    manual_add_count: payload.manualAddCount,
+    total_planned_amount: payload.totalPlannedAmount,
+    total_manual_added_amount: payload.totalManualAddedAmount,
+    total_effective_amount: payload.totalEffectiveAmount,
+    total_real_recharge_amount: payload.totalRealRechargeAmount,
+    total_withdraw_amount: payload.totalWithdrawAmount,
+  };
+}
+
+export function normalizeTaskMonitorAlertEventResponse(
+  payload: TaskMonitorAlertEventApiResponse,
+): TaskMonitorAlertEvent {
+  return {
+    id: payload.id,
+    account_id: payload.accountId,
+    alert_rule_id: payload.alertRuleId,
+    package_id: payload.packageId,
+    user_id: payload.userId,
+    public_user_id: payload.publicUserId,
+    status: payload.status,
+    priority: payload.priority,
+    rule_name: payload.ruleName,
+    current_value: payload.currentValue,
+    threshold_value: payload.thresholdValue,
+    sound_enabled: payload.soundEnabled,
+    triggered_at: payload.triggeredAt,
+    acknowledged_at: payload.acknowledgedAt,
+    acknowledged_by: payload.acknowledgedBy,
+    resolved_at: payload.resolvedAt,
+    resolved_by: payload.resolvedBy,
+  };
+}
 
 export type TaskInstanceCreatePayload = {
   template_id: string;
@@ -2211,9 +3110,10 @@ export async function runHealthCheck(): Promise<HealthCheckResult[]> {
   return response.data;
 }
 
-const resolvedApiBaseUrl =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ||
-  (import.meta.env.DEV ? "http://localhost:8000" : "");
+const resolvedApiBaseUrl = resolveApiBaseUrl(
+  import.meta.env.VITE_API_BASE_URL as string | undefined,
+  import.meta.env.DEV,
+);
 
 export const api = axios.create({
   baseURL: resolvedApiBaseUrl,
@@ -3020,6 +3920,461 @@ export async function listTaskInstances(params?: {
     params
   });
   return response.data;
+}
+
+export async function listTaskPackages(params?: {
+  account_id?: string;
+  status?: string;
+  user_id?: string;
+}): Promise<TaskPackageAdminListItem[]> {
+  const response = await api.get<TaskPackageAdminListItem[]>("/api/tasks/member-instances", {
+    params
+  });
+  return response.data;
+}
+
+export async function getTaskPackageDetail(packageId: string): Promise<TaskPackageAdminDetail> {
+  const response = await api.get<TaskPackageAdminDetail>(`/api/tasks/member-instances/${encodeURIComponent(packageId)}`);
+  return response.data;
+}
+
+export async function listTaskPackageManualAddCandidates(packageId: string): Promise<TaskManualAddCandidate[]> {
+  const response = await api.get<TaskManualAddCandidate[]>(
+    `/api/tasks/member-instances/${encodeURIComponent(packageId)}/available-add-items`
+  );
+  return response.data;
+}
+
+export async function createTaskPackageManualAdd(
+  packageId: string,
+  payload: TaskManualAddCreatePayload
+): Promise<TaskManualAddCreateResponse> {
+  const response = await api.post<TaskManualAddCreateResponse>(
+    `/api/tasks/member-instances/${encodeURIComponent(packageId)}/add-items`,
+    payload
+  );
+  return response.data;
+}
+
+export async function previewTaskPackageManualAdd(
+  packageId: string,
+  payload: TaskManualAddCreatePayload,
+): Promise<TaskManualAddPreviewResponse> {
+  const response = await api.post<TaskManualAddPreviewResponse>(
+    `/api/tasks/member-instances/${encodeURIComponent(packageId)}/preview-add-items`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function listTaskManualAddLogs(packageId: string): Promise<TaskManualAddLog[]> {
+  const response = await api.get<TaskManualAddLog[]>("/api/tasks/manual-add/logs", {
+    params: { package_id: packageId },
+  });
+  return response.data;
+}
+
+export async function pauseTaskPackage(
+  packageId: string,
+  payload: TaskPackageStatusActionPayload = {},
+): Promise<TaskPackageAdminDetail> {
+  const response = await api.post<TaskPackageAdminDetail>(
+    `/api/tasks/member-instances/${encodeURIComponent(packageId)}/pause`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function resumeTaskPackage(
+  packageId: string,
+  payload: TaskPackageStatusActionPayload = {},
+): Promise<TaskPackageAdminDetail> {
+  const response = await api.post<TaskPackageAdminDetail>(
+    `/api/tasks/member-instances/${encodeURIComponent(packageId)}/resume`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function cancelTaskPackage(
+  packageId: string,
+  payload: TaskPackageStatusActionPayload = {},
+): Promise<TaskPackageAdminDetail> {
+  const response = await api.post<TaskPackageAdminDetail>(
+    `/api/tasks/member-instances/${encodeURIComponent(packageId)}/cancel`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function pauseNextTaskPackageQuota(
+  packageId: string,
+  payload: TaskQuotaCancelPayload = {},
+): Promise<TaskQuota> {
+  const response = await api.post<TaskQuota>(
+    `/api/tasks/member-instances/${encodeURIComponent(packageId)}/pause-next-batch`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function listTaskQuotas(params?: {
+  account_id?: string;
+  user_id?: string;
+  plan_id?: string;
+  day_no?: number;
+}): Promise<TaskQuota[]> {
+  const response = await api.get<TaskQuotaApiResponse[]>("/api/tasks/quotas", {
+    params,
+  });
+  return response.data.map(normalizeTaskQuotaResponse);
+}
+
+export async function createTaskQuota(payload: TaskQuotaCreatePayload): Promise<TaskQuota> {
+  const response = await api.post<TaskQuotaApiResponse>("/api/tasks/quotas", payload);
+  return normalizeTaskQuotaResponse(response.data);
+}
+
+export async function getTaskQuota(quotaId: string): Promise<TaskQuota> {
+  const response = await api.get<TaskQuotaApiResponse>(
+    `/api/tasks/member-day-quotas/${encodeURIComponent(quotaId)}`,
+  );
+  return normalizeTaskQuotaResponse(response.data);
+}
+
+export async function updateTaskQuota(
+  quotaId: string,
+  payload: TaskQuotaUpdatePayload,
+): Promise<TaskQuota> {
+  const response = await api.patch<TaskQuotaApiResponse>(
+    `/api/tasks/member-day-quotas/${encodeURIComponent(quotaId)}`,
+    payload,
+  );
+  return normalizeTaskQuotaResponse(response.data);
+}
+
+export async function batchCreateTaskQuotas(
+  payload: TaskQuotaBatchCreatePayload,
+): Promise<TaskQuota[]> {
+  const response = await api.post<TaskQuotaApiResponse[]>("/api/tasks/member-day-quotas/batch-create", payload);
+  return response.data.map(normalizeTaskQuotaResponse);
+}
+
+export async function previewBatchTaskQuotas(
+  payload: TaskQuotaBatchCreatePayload,
+): Promise<TaskQuotaBatchPreviewResponse> {
+  const response = await api.post<TaskQuotaBatchPreviewResponse>("/api/tasks/member-day-quotas/batch-preview", payload);
+  return response.data;
+}
+
+export async function cancelTaskQuota(
+  quotaId: string,
+  payload: TaskQuotaCancelPayload = {},
+): Promise<TaskQuota> {
+  const response = await api.post<TaskQuotaApiResponse>(
+    `/api/tasks/member-day-quotas/${encodeURIComponent(quotaId)}/cancel`,
+    payload,
+  );
+  return normalizeTaskQuotaResponse(response.data);
+}
+
+export async function previewTaskQuotaAllocation(
+  payload: TaskQuotaPreviewPayload
+): Promise<TaskQuotaPreviewResponse> {
+  const response = await api.post<TaskQuotaPreviewResponse>("/api/tasks/quotas/preview", payload);
+  return response.data;
+}
+
+export async function listTaskProductPools(params?: {
+  account_id?: string;
+  site_id?: string;
+  status?: string;
+}): Promise<TaskProductPool[]> {
+  const response = await api.get<TaskProductPool[]>("/api/tasks/product-pools", {
+    params,
+  });
+  return response.data;
+}
+
+export async function createTaskProductPool(
+  payload: TaskProductPoolCreatePayload
+): Promise<TaskProductPool> {
+  const response = await api.post<TaskProductPool>("/api/tasks/product-pools", payload);
+  return response.data;
+}
+
+export async function getTaskProductPool(poolId: string): Promise<TaskProductPool> {
+  const response = await api.get<TaskProductPool>(`/api/tasks/product-pools/${encodeURIComponent(poolId)}`);
+  return response.data;
+}
+
+export async function updateTaskProductPool(
+  poolId: string,
+  payload: TaskProductPoolUpdatePayload,
+): Promise<TaskProductPool> {
+  const response = await api.patch<TaskProductPool>(
+    `/api/tasks/product-pools/${encodeURIComponent(poolId)}`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function addTaskProductPoolItems(
+  poolId: string,
+  payload: TaskProductPoolItemsPayload,
+): Promise<TaskProductPool> {
+  const response = await api.post<TaskProductPool>(
+    `/api/tasks/product-pools/${encodeURIComponent(poolId)}/items`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function importTaskProductPoolItems(
+  poolId: string,
+  payload: TaskProductPoolImportPayload,
+): Promise<TaskProductPool> {
+  const response = await api.post<TaskProductPool>(
+    `/api/tasks/product-pools/${encodeURIComponent(poolId)}/import`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function updateTaskProductPoolItem(
+  itemId: string,
+  payload: TaskProductPoolItemUpdatePayload,
+): Promise<TaskProductPoolItem> {
+  const response = await api.patch<TaskProductPoolItem>(
+    `/api/tasks/product-pool-items/${encodeURIComponent(itemId)}`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteTaskProductPoolItem(itemId: string): Promise<void> {
+  await api.delete(`/api/tasks/product-pool-items/${encodeURIComponent(itemId)}`);
+}
+
+export async function listTaskGenerationRuns(params?: {
+  account_id?: string;
+  user_id?: string;
+  status?: string;
+}): Promise<TaskGenerationRun[]> {
+  const response = await api.get<TaskGenerationRun[]>("/api/tasks/generation-runs", {
+    params,
+  });
+  return response.data;
+}
+
+export async function generateTaskQuotaBatch(quotaId: string): Promise<TaskGenerationRun> {
+  const response = await api.post<TaskGenerationRun>(
+    `/api/tasks/member-day-quotas/${encodeURIComponent(quotaId)}/generate-batch`,
+  );
+  return response.data;
+}
+
+export async function retryTaskGenerationRun(runId: string): Promise<TaskGenerationRun> {
+  const response = await api.post<TaskGenerationRun>(
+    `/api/tasks/generation-runs/${encodeURIComponent(runId)}/retry`,
+  );
+  return response.data;
+}
+
+export async function listTaskIssuePlans(params?: {
+  account_id?: string;
+  site_id?: string;
+  status?: string;
+}): Promise<TaskIssuePlan[]> {
+  const response = await api.get<TaskIssuePlan[]>("/api/tasks/issue-plans", {
+    params,
+  });
+  return response.data;
+}
+
+export async function createTaskIssuePlan(
+  payload: TaskIssuePlanCreatePayload
+): Promise<TaskIssuePlan> {
+  const response = await api.post<TaskIssuePlan>("/api/tasks/issue-plans", payload);
+  return response.data;
+}
+
+export async function getTaskIssuePlan(planId: string): Promise<TaskIssuePlan> {
+  const response = await api.get<TaskIssuePlan>(`/api/tasks/issue-plans/${encodeURIComponent(planId)}`);
+  return response.data;
+}
+
+export async function updateTaskIssuePlan(
+  planId: string,
+  payload: TaskIssuePlanUpdatePayload,
+): Promise<TaskIssuePlan> {
+  const response = await api.patch<TaskIssuePlan>(
+    `/api/tasks/issue-plans/${encodeURIComponent(planId)}`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function enableTaskIssuePlan(planId: string): Promise<TaskIssuePlan> {
+  const response = await api.post<TaskIssuePlan>(`/api/tasks/issue-plans/${encodeURIComponent(planId)}/enable`);
+  return response.data;
+}
+
+export async function disableTaskIssuePlan(planId: string): Promise<TaskIssuePlan> {
+  const response = await api.post<TaskIssuePlan>(`/api/tasks/issue-plans/${encodeURIComponent(planId)}/disable`);
+  return response.data;
+}
+
+export async function previewTaskIssuePlanDays(
+  planId: string,
+  payload: TaskIssuePlanGenerateDaysPayload,
+): Promise<TaskIssuePlanPreviewResponse> {
+  const response = await api.post<TaskIssuePlanPreviewResponse>(
+    `/api/tasks/issue-plans/${encodeURIComponent(planId)}/preview`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function generateTaskIssuePlanDays(
+  planId: string,
+  payload: TaskIssuePlanGenerateDaysPayload,
+): Promise<TaskIssuePlan> {
+  const response = await api.post<TaskIssuePlan>(
+    `/api/tasks/issue-plans/${encodeURIComponent(planId)}/generate-days`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function getTaskSystemConfig(params: {
+  account_id: string;
+  site_id?: string;
+}): Promise<TaskSystemConfig> {
+  const response = await api.get<TaskSystemConfig>("/api/tasks/system-config", {
+    params,
+  });
+  return response.data;
+}
+
+export async function upsertTaskSystemConfig(
+  payload: TaskSystemConfigPayload
+): Promise<TaskSystemConfig> {
+  const response = await api.put<TaskSystemConfig>("/api/tasks/system-config", payload);
+  return response.data;
+}
+
+export async function patchTaskSystemConfig(
+  payload: TaskSystemConfigPayload
+): Promise<TaskSystemConfig> {
+  const response = await api.patch<TaskSystemConfig>("/api/tasks/system-config", payload);
+  return response.data;
+}
+
+export async function listTaskSystemConfigAuditLogs(params: {
+  account_id: string;
+  site_id?: string;
+}): Promise<TaskSystemConfigAuditLog[]> {
+  const response = await api.get<TaskSystemConfigAuditLog[]>("/api/tasks/system-config/audit-logs", {
+    params,
+  });
+  return response.data;
+}
+
+export async function listTaskMonitorSavedViews(params?: {
+  account_id?: string;
+}): Promise<TaskMonitorSavedView[]> {
+  const response = await api.get<TaskMonitorSavedView[]>("/api/tasks/monitor-saved-views", {
+    params,
+  });
+  return response.data;
+}
+
+export async function createTaskMonitorSavedView(
+  payload: TaskMonitorSavedViewCreatePayload
+): Promise<TaskMonitorSavedView> {
+  const response = await api.post<TaskMonitorSavedView>("/api/tasks/monitor-saved-views", payload);
+  return response.data;
+}
+
+export async function updateTaskMonitorSavedView(
+  savedViewId: string,
+  payload: TaskMonitorSavedViewUpdatePayload
+): Promise<TaskMonitorSavedView> {
+  const response = await api.patch<TaskMonitorSavedView>(`/api/tasks/monitor-saved-views/${savedViewId}`, payload);
+  return response.data;
+}
+
+export async function deleteTaskMonitorSavedView(savedViewId: string): Promise<void> {
+  await api.delete(`/api/tasks/monitor-saved-views/${savedViewId}`);
+}
+
+export async function listTaskAlertRules(params?: {
+  account_id?: string;
+}): Promise<TaskAlertRule[]> {
+  const response = await api.get<TaskAlertRule[]>("/api/tasks/alert-rules", {
+    params,
+  });
+  return response.data;
+}
+
+export async function createTaskAlertRule(
+  payload: TaskAlertRuleCreatePayload
+): Promise<TaskAlertRule> {
+  const response = await api.post<TaskAlertRule>("/api/tasks/alert-rules", payload);
+  return response.data;
+}
+
+export async function updateTaskAlertRule(
+  alertRuleId: string,
+  payload: TaskAlertRuleUpdatePayload
+): Promise<TaskAlertRule> {
+  const response = await api.patch<TaskAlertRule>(`/api/tasks/alert-rules/${alertRuleId}`, payload);
+  return response.data;
+}
+
+export async function deleteTaskAlertRule(alertRuleId: string): Promise<void> {
+  await api.delete(`/api/tasks/alert-rules/${alertRuleId}`);
+}
+
+export async function listTaskMonitorRows(params?: TaskMonitorQueryParams): Promise<TaskMonitorRow[]> {
+  const response = await api.get<TaskMonitorRowApiResponse[]>("/api/tasks/monitor/query", {
+    params,
+  });
+  return response.data.map(normalizeTaskMonitorRowResponse);
+}
+
+export async function getTaskMonitorSummary(params?: TaskMonitorQueryParams): Promise<TaskMonitorSummary> {
+  const response = await api.get<TaskMonitorSummaryApiResponse>("/api/tasks/monitor/summary", {
+    params,
+  });
+  return normalizeTaskMonitorSummaryResponse(response.data);
+}
+
+export async function listTaskMonitorAlertEvents(params?: {
+  account_id?: string;
+  status?: string;
+}): Promise<TaskMonitorAlertEvent[]> {
+  const response = await api.get<TaskMonitorAlertEventApiResponse[]>("/api/tasks/monitor/alerts", {
+    params,
+  });
+  return response.data.map(normalizeTaskMonitorAlertEventResponse);
+}
+
+export async function acknowledgeTaskMonitorAlertEvent(alertEventId: string): Promise<TaskMonitorAlertEvent> {
+  const response = await api.post<TaskMonitorAlertEventApiResponse>(
+    `/api/tasks/monitor/alerts/${alertEventId}/ack`,
+    {},
+  );
+  return normalizeTaskMonitorAlertEventResponse(response.data);
+}
+
+export async function resolveTaskMonitorAlertEvent(alertEventId: string): Promise<TaskMonitorAlertEvent> {
+  const response = await api.post<TaskMonitorAlertEventApiResponse>(
+    `/api/tasks/monitor/alerts/${alertEventId}/resolve`,
+    {},
+  );
+  return normalizeTaskMonitorAlertEventResponse(response.data);
 }
 
 export async function createTaskInstance(
@@ -4263,8 +5618,27 @@ export async function unblockCustomer(customerId: string, accountId: string): Pr
 }
 
 export interface CustomerSummaryResponse {
-  customer: { id: string; public_user_id: string; display_name: string | null; language: string; created_at: string | null; lifecycle_status: string; registration_ip: string | null; registration_ips: string[]; multi_ip: boolean };
-  wallet: { balance: number; total_recharged: number; total_withdrawn: number; recent_transactions: Array<{ type: string; amount: number; direction: string; created_at: string | null }> };
+  customer: {
+    id: string;
+    public_user_id: string;
+    display_name: string | null;
+    language: string;
+    created_at: string | null;
+    lifecycle_status: string;
+    registration_ip: string | null;
+    registration_ips: string[];
+    registration_location?: string;
+    same_ip_user_count?: number;
+    multi_ip: boolean;
+  };
+  wallet: {
+    balance: number;
+    system_balance: number;
+    task_balance: number;
+    total_recharged: number;
+    total_withdrawn: number;
+    recent_transactions: Array<{ type: string; amount: number; direction: string; created_at: string | null }>;
+  };
   member_status: { verification: { status: string; request_type?: string; updated_at?: string }; whatsapp_binding: { status: string; phone_number?: string; updated_at?: string } };
   member_profile: CustomerMemberProfileSummary | null;
   conversations: { total: number; open: number; items: Array<Record<string, unknown>> };

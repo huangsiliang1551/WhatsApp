@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, get_strict_request_actor
-from app.core.auth import RequestActor
+from app.core.auth import ActorRole, RequestActor
 from app.core.permission_defs import (
     DEFAULT_TEMPLATES,
     PERMISSION_DEFINITIONS,
@@ -37,7 +37,29 @@ from app.core.permission_defs import (
     get_permissions_by_module,
 )
 from app.core.settings import get_settings
-from app.db.models import Agency, AgencyMember, AgencyPermissionGrant, RolePermission
+from app.db.models import (
+    Agency,
+    AgencyMember,
+    AgencyPermissionGrant,
+    AppUser,
+    Conversation,
+    CustomerOwnershipAssignment,
+    DataScopeGrant,
+    PermissionGrant,
+    RolePermission,
+    WithdrawalRequest,
+    utc_now,
+)
+from app.schemas.permissions_funnel import (
+    ConversationHandoverRequest,
+    CustomerOwnershipTransferRequest,
+    DataScopeGrantCreateRequest,
+    PermissionGrantCreateRequest,
+)
+from app.services.conversation_handover_service import ConversationHandoverService
+from app.services.customer_ownership_service import CustomerOwnershipService
+from app.services.data_scope_filter_service import DataScopeFilterService
+from app.services.effective_access_service import EffectiveAccessService
 
 logger = structlog.get_logger()
 router = APIRouter(tags=["permissions"])
@@ -104,6 +126,14 @@ class CreateCustomRoleRequest(BaseModel):
     permissions: list[str]
 
 
+class BatchPermissionGrantCreateRequest(BaseModel):
+    items: list[PermissionGrantCreateRequest]
+
+
+class BatchDataScopeGrantCreateRequest(BaseModel):
+    items: list[DataScopeGrantCreateRequest]
+
+
 class CreatePermissionTemplateRequest(BaseModel):
     agency_id: str | None = None
     template_name: str
@@ -117,6 +147,386 @@ class UpdatePermissionTemplateRequest(BaseModel):
 
 
 CREATABLE_PERMISSION_CENTER_ROLE_NAMES = {"agent", "support", "manager", "finance"}
+
+
+def _serialize_data_scope(scope: object) -> dict[str, object]:
+    return {
+        "all_access": bool(getattr(scope, "all_access", False)),
+        "agency_ids": sorted(getattr(scope, "agency_ids", set())),
+        "account_ids": sorted(getattr(scope, "account_ids", set())),
+        "site_ids": sorted(getattr(scope, "site_ids", set())),
+        "team_ids": sorted(getattr(scope, "team_ids", set())),
+        "supervisor_ids": sorted(getattr(scope, "supervisor_ids", set())),
+        "staff_ids": sorted(getattr(scope, "staff_ids", set())),
+        "customer_ids": sorted(getattr(scope, "customer_ids", set())),
+    }
+
+
+def _grantor_subject_from_actor(actor: RequestActor) -> tuple[str, str]:
+    if actor.role == ActorRole.SUPER_ADMIN:
+        return ("super_admin", actor.actor_id)
+    return ("actor", actor.actor_id)
+
+
+def _serialize_customer_preview(user: AppUser) -> dict[str, object]:
+    return {
+        "id": user.id,
+        "account_id": user.account_id,
+        "public_user_id": user.public_user_id,
+        "display_name": user.display_name,
+        "registration_site_id": user.registration_site_id,
+        "lifecycle_status": user.lifecycle_status,
+    }
+
+
+def _serialize_conversation_preview(conversation: Conversation) -> dict[str, object]:
+    return {
+        "id": conversation.id,
+        "account_id": conversation.account_id,
+        "customer_id": conversation.customer_id,
+        "external_conversation_id": conversation.external_conversation_id,
+        "status": conversation.status,
+        "management_mode": conversation.management_mode,
+        "assigned_agent_id": conversation.assigned_agent_id,
+    }
+
+
+def _serialize_withdrawal_preview(withdrawal: WithdrawalRequest) -> dict[str, object]:
+    return {
+        "id": withdrawal.id,
+        "account_id": withdrawal.account_id,
+        "user_id": withdrawal.user_id,
+        "request_no": withdrawal.request_no,
+        "status": withdrawal.status,
+        "amount": str(withdrawal.amount),
+        "owner_staff_id_snapshot": withdrawal.owner_staff_id_snapshot,
+        "team_id_snapshot": withdrawal.team_id_snapshot,
+        "supervisor_id_snapshot": withdrawal.supervisor_id_snapshot,
+    }
+
+
+@router.get("/api/permissions/effective-access")
+async def get_effective_access_summary(
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("data_scope.view")
+    access = EffectiveAccessService(session)
+    effective_permissions = access.get_effective_permissions(actor)
+    delegatable_permissions = access.get_delegatable_permissions(actor)
+    data_scope = access.get_data_scope(actor)
+    return {
+        "actor_id": actor.actor_id,
+        "agency_id": actor.agency_id,
+        "effective_permissions": sorted(effective_permissions),
+        "delegatable_permissions": sorted(delegatable_permissions),
+        "data_scope": _serialize_data_scope(data_scope),
+    }
+
+
+@router.get("/api/permissions/data-scope-preview/customers")
+async def preview_scoped_customers(
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("data_scope.view")
+    actor.require_permission("customers.view")
+    service = DataScopeFilterService(session)
+    query = service.filter_customers(select(AppUser).order_by(AppUser.created_at.asc(), AppUser.id.asc()), actor)
+    items = session.scalars(query).all()
+    return {"items": [_serialize_customer_preview(item) for item in items], "total": len(items)}
+
+
+@router.get("/api/permissions/data-scope-preview/conversations")
+async def preview_scoped_conversations(
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("data_scope.view")
+    actor.require_permission("conversations.view")
+    service = DataScopeFilterService(session)
+    query = service.filter_conversations(
+        select(Conversation).order_by(Conversation.created_at.asc(), Conversation.id.asc()),
+        actor,
+    )
+    items = session.scalars(query).all()
+    return {"items": [_serialize_conversation_preview(item) for item in items], "total": len(items)}
+
+
+@router.get("/api/permissions/data-scope-preview/withdrawals")
+async def preview_scoped_withdrawals(
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("data_scope.view")
+    actor.require_permission("finance.view_withdrawal")
+    service = DataScopeFilterService(session)
+    query = service.filter_withdrawals(
+        select(WithdrawalRequest).order_by(WithdrawalRequest.created_at.asc(), WithdrawalRequest.id.asc()),
+        actor,
+        mode="snapshot",
+    )
+    items = session.scalars(query).all()
+    return {"items": [_serialize_withdrawal_preview(item) for item in items], "total": len(items)}
+
+
+@router.post("/api/permissions/grants", status_code=status.HTTP_201_CREATED)
+async def create_permission_grant(
+    payload: PermissionGrantCreateRequest,
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("roles.edit_perms")
+    access = EffectiveAccessService(session)
+    try:
+        access.assert_can_delegate(actor, {payload.permission_code})
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    grantor_subject_type, grantor_subject_id = _grantor_subject_from_actor(actor)
+    grant = PermissionGrant(
+        grantor_subject_type=grantor_subject_type,
+        grantor_subject_id=grantor_subject_id,
+        grantee_subject_type=payload.grantee_subject_type,
+        grantee_subject_id=payload.grantee_subject_id,
+        permission_code=payload.permission_code,
+        can_delegate=payload.can_delegate,
+        scope_type=payload.scope_type,
+        created_by=actor.actor_id,
+    )
+    session.add(grant)
+    session.flush()
+    return {
+        "id": grant.id,
+        "grantee_subject_type": grant.grantee_subject_type,
+        "grantee_subject_id": grant.grantee_subject_id,
+        "permission_code": grant.permission_code,
+        "can_delegate": grant.can_delegate,
+        "scope_type": grant.scope_type,
+        "status": grant.status,
+    }
+
+
+@router.post("/api/permissions/grants/batch", status_code=status.HTTP_201_CREATED)
+async def create_permission_grants_batch(
+    payload: BatchPermissionGrantCreateRequest,
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("roles.edit_perms")
+    access = EffectiveAccessService(session)
+    permission_codes = {item.permission_code for item in payload.items}
+    try:
+        access.assert_can_delegate(actor, permission_codes)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    grantor_subject_type, grantor_subject_id = _grantor_subject_from_actor(actor)
+    created_items: list[dict[str, object]] = []
+    for item in payload.items:
+        grant = PermissionGrant(
+            grantor_subject_type=grantor_subject_type,
+            grantor_subject_id=grantor_subject_id,
+            grantee_subject_type=item.grantee_subject_type,
+            grantee_subject_id=item.grantee_subject_id,
+            permission_code=item.permission_code,
+            can_delegate=item.can_delegate,
+            scope_type=item.scope_type,
+            created_by=actor.actor_id,
+        )
+        session.add(grant)
+        session.flush()
+        created_items.append(
+            {
+                "id": grant.id,
+                "grantee_subject_type": grant.grantee_subject_type,
+                "grantee_subject_id": grant.grantee_subject_id,
+                "permission_code": grant.permission_code,
+                "can_delegate": grant.can_delegate,
+                "scope_type": grant.scope_type,
+                "status": grant.status,
+            }
+        )
+    return {"created_count": len(created_items), "items": created_items}
+
+
+@router.delete("/api/permissions/grants/{grant_id}")
+async def revoke_permission_grant(
+    grant_id: str,
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("roles.edit_perms")
+    grant = session.get(PermissionGrant, grant_id)
+    if grant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Permission grant not found.")
+    grant.status = "revoked"
+    grant.revoked_by = actor.actor_id
+    grant.revoked_at = utc_now()
+    session.add(grant)
+    session.flush()
+    return {"id": grant.id, "status": grant.status, "revoked_by": grant.revoked_by}
+
+
+@router.post("/api/permissions/data-scopes", status_code=status.HTTP_201_CREATED)
+async def create_data_scope_grant(
+    payload: DataScopeGrantCreateRequest,
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("data_scope.manage")
+    granted_by_subject_type, granted_by_subject_id = _grantor_subject_from_actor(actor)
+    grant = DataScopeGrant(
+        subject_type=payload.subject_type,
+        subject_id=payload.subject_id,
+        scope_type=payload.scope_type,
+        scope_id=payload.scope_id,
+        granted_by_subject_type=granted_by_subject_type,
+        granted_by_subject_id=granted_by_subject_id,
+    )
+    session.add(grant)
+    session.flush()
+    return {
+        "id": grant.id,
+        "subject_type": grant.subject_type,
+        "subject_id": grant.subject_id,
+        "scope_type": grant.scope_type,
+        "scope_id": grant.scope_id,
+        "status": grant.status,
+    }
+
+
+@router.post("/api/permissions/data-scopes/batch", status_code=status.HTTP_201_CREATED)
+async def create_data_scope_grants_batch(
+    payload: BatchDataScopeGrantCreateRequest,
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("data_scope.manage")
+    granted_by_subject_type, granted_by_subject_id = _grantor_subject_from_actor(actor)
+    created_items: list[dict[str, object]] = []
+    for item in payload.items:
+        grant = DataScopeGrant(
+            subject_type=item.subject_type,
+            subject_id=item.subject_id,
+            scope_type=item.scope_type,
+            scope_id=item.scope_id,
+            granted_by_subject_type=granted_by_subject_type,
+            granted_by_subject_id=granted_by_subject_id,
+        )
+        session.add(grant)
+        session.flush()
+        created_items.append(
+            {
+                "id": grant.id,
+                "subject_type": grant.subject_type,
+                "subject_id": grant.subject_id,
+                "scope_type": grant.scope_type,
+                "scope_id": grant.scope_id,
+                "status": grant.status,
+            }
+        )
+    return {"created_count": len(created_items), "items": created_items}
+
+
+@router.delete("/api/permissions/data-scopes/{grant_id}")
+async def revoke_data_scope_grant(
+    grant_id: str,
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("data_scope.manage")
+    grant = session.get(DataScopeGrant, grant_id)
+    if grant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data scope grant not found.")
+    grant.status = "revoked"
+    grant.revoked_at = utc_now()
+    session.add(grant)
+    session.flush()
+    return {"id": grant.id, "status": grant.status}
+
+
+@router.post("/api/permissions/customer-ownership/transfer", status_code=status.HTTP_201_CREATED)
+async def transfer_customer_ownership(
+    payload: CustomerOwnershipTransferRequest,
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("data_scope.manage")
+    assignment = CustomerOwnershipService(session).transfer_customer_ownership(
+        customer_id=payload.customer_id,
+        agency_id=payload.agency_id,
+        account_id=payload.account_id,
+        site_id=payload.site_id,
+        new_owner_staff_id=payload.new_owner_staff_id,
+        new_supervisor_id=payload.new_supervisor_id,
+        new_team_id=payload.new_team_id,
+        assigned_by=actor.actor_id,
+        reason=payload.reason,
+        assignment_type=payload.assignment_type,
+    )
+    return {
+        "id": assignment.id,
+        "customer_id": assignment.customer_id,
+        "owner_staff_id": assignment.owner_staff_id,
+        "supervisor_id": assignment.supervisor_id,
+        "team_id": assignment.team_id,
+        "assignment_type": assignment.assignment_type,
+        "status": assignment.status,
+    }
+
+
+@router.post("/api/permissions/conversation-handover", status_code=status.HTTP_201_CREATED)
+async def create_conversation_handover(
+    payload: ConversationHandoverRequest,
+    actor: RequestActor = Depends(get_strict_request_actor),
+    session: Session = Depends(get_db_session),
+) -> dict[str, object]:
+    actor.require_permission("handover.manage")
+    conversation = session.get(Conversation, payload.conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
+
+    current_owner = session.scalar(
+        select(CustomerOwnershipAssignment).where(
+            CustomerOwnershipAssignment.customer_id == conversation.customer_id,
+            CustomerOwnershipAssignment.status == "active",
+        )
+    )
+    agency_id = (
+        current_owner.agency_id
+        if current_owner is not None
+        else (actor.agency_id or "")
+    )
+    if not agency_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot determine agency scope for conversation handover.",
+        )
+
+    assignment = ConversationHandoverService(session).assign_conversation(
+        conversation_id=conversation.id,
+        customer_id=conversation.customer_id,
+        agency_id=agency_id,
+        assigned_staff_id=payload.assigned_staff_id,
+        team_id=payload.team_id,
+        supervisor_id=payload.supervisor_id,
+        assignment_type=payload.assignment_type,
+        assigned_by=actor.actor_id,
+        reason=payload.reason,
+        is_temporary=payload.is_temporary,
+        assigned_queue_id=payload.assigned_queue_id,
+    )
+    return {
+        "id": assignment.id,
+        "conversation_id": assignment.conversation_id,
+        "customer_id": assignment.customer_id,
+        "assigned_staff_id": assignment.assigned_staff_id,
+        "team_id": assignment.team_id,
+        "supervisor_id": assignment.supervisor_id,
+        "is_temporary": assignment.is_temporary,
+        "status": assignment.status,
+    }
 
 
 def _normalize_permission_codes(

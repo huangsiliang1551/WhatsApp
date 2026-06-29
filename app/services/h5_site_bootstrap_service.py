@@ -38,7 +38,6 @@ DEFAULT_H5_SITE_DEFINITIONS: tuple[DefaultH5SiteDefinition, ...] = (
         site_key="flash-sale",
         domain="flash-sale.example.com",
         brand_name="Brand flash-sale",
-        default_language="en-US",
     ),
 )
 

@@ -197,7 +197,6 @@ class MetaAccountRegistry:
                 verify_token=effective_verify_token,
                 current_account_id=account.account_id,
                 current_waba_id=payload.waba_id,
-                allow_reuse=True,
             )
         if waba_account is None:
             waba_account = WhatsAppBusinessAccount(
@@ -2697,6 +2696,17 @@ class MetaAccountRegistry:
             payload.raw_payload,
             direct_keys=("state",),
         )
+        if supplied_state is None:
+            self._record_embedded_signup_callback_rejected(
+                session=session,
+                payload=payload,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                reason="missing_state",
+            )
+            raise MetaAccountConflictError(
+                f"Embedded signup callback state is required for session '{session.session_id}'."
+            )
         if supplied_state is not None and supplied_state != launch_context.state:
             self._record_embedded_signup_callback_rejected(
                 session=session,

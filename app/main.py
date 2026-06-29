@@ -1,3 +1,4 @@
+import importlib
 from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -276,6 +277,25 @@ _upload_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/templates", StaticFiles(directory=str(_static_dir)), name="templates")
 
 
+def _include_optional_router(
+    app_instance: FastAPI,
+    module_path: str,
+    *,
+    attr_name: str = "router",
+) -> None:
+    try:
+        module = importlib.import_module(module_path)
+    except ModuleNotFoundError:
+        logger.info("optional_router_module_missing", module_path=module_path)
+        return
+
+    router = getattr(module, attr_name, None)
+    if router is None:
+        logger.info("optional_router_attr_missing", module_path=module_path, attr_name=attr_name)
+        return
+    app_instance.include_router(router)
+
+
 @app.middleware("http")
 async def request_context_middleware(request: Request, call_next):
     request_id = build_request_id(request.headers.get(REQUEST_ID_HEADER))
@@ -460,6 +480,14 @@ app.include_router(conversation_ai_router)
 app.include_router(ownership_audit_router)
 app.include_router(ownership_report_router)
 app.include_router(ai_outbound_jobs_router)
+
+for _optional_router in (
+    "app.api.routes.whatsapp_auth_admin",
+    "app.api.routes.whatsapp_auth_h5",
+    "app.api.routes.h5_gateway_admin",
+    "app.api.routes.h5_gateway_agent",
+):
+    _include_optional_router(app, _optional_router)
 
 
 # ── Client error reporting ──

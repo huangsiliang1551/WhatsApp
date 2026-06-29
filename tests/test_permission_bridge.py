@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import get_db_session
 from app.api.routes.agent_auth import _encode_agent_jwt
+from app.core.permission_defs import PERMISSION_REGISTRY
+from app.core.permission_resolution import BUILTIN_ROLE_PERMISSION_CODES
 from app.core.settings import get_settings
 from app.db.models import Account, Agency, AgencyMember, AgencyPermissionGrant, Agent, H5Site, RolePermission
 from app.main import app
@@ -563,3 +565,80 @@ def test_update_agency_permissions_rejects_unknown_permission_codes(
         "message": f"Unknown permission codes in agency.{agency_id}.agent.",
         "unknown_permissions": ["member_access"],
     }
+
+
+def test_update_agency_permissions_accepts_task_v3_canonical_permission_codes(
+    strict_client: TestClient,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    agency_id = "agency-perm-task-v3-canonical"
+    with db_session_factory() as session:
+        _seed_agency_scope(session, agency_id=agency_id)
+        session.commit()
+
+    response = strict_client.put(
+        f"/api/permissions/agency/{agency_id}",
+        headers={
+            "Authorization": f"Bearer {_issue_agent_token(user_id='super-admin-1', agency_id='system', user_type='super_admin', role='super_admin')}",
+        },
+        json={
+            "role_name": "agent",
+            "permissions": [
+                "tasks.quota.view",
+                "tasks.product_pool.manage",
+                "tasks.issue_plan.enable",
+                "tasks.monitor.execute_action",
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["role_name"] == "agent"
+    assert sorted(payload["permissions"]) == sorted(
+        [
+            "tasks.issue_plan.enable",
+            "tasks.monitor.execute_action",
+            "tasks.product_pool.manage",
+            "tasks.quota.view",
+        ]
+    )
+
+
+def test_task_v3_spec_permission_codes_are_registered_and_resolved() -> None:
+    spec_task_permission_codes = {
+        "tasks.config.view",
+        "tasks.config.manage",
+        "tasks.quota.view",
+        "tasks.quota.create",
+        "tasks.quota.update",
+        "tasks.quota.batch_create",
+        "tasks.quota.cancel",
+        "tasks.product_pool.view",
+        "tasks.product_pool.manage",
+        "tasks.issue_plan.view",
+        "tasks.issue_plan.manage",
+        "tasks.issue_plan.enable",
+        "tasks.instance.view",
+        "tasks.instance.pause",
+        "tasks.instance.resume",
+        "tasks.instance.cancel",
+        "tasks.manual_add.view",
+        "tasks.manual_add.create",
+        "tasks.manual_add.approve",
+        "tasks.monitor.view",
+        "tasks.monitor.manage_saved_view",
+        "tasks.monitor.manage_alert_rule",
+        "tasks.monitor.execute_action",
+        "tasks.sensitive_metrics.view",
+    }
+
+    registered_task_permissions = {
+        code for code, definition in PERMISSION_REGISTRY.items() if definition.get("module") == "tasks"
+    }
+    missing_from_registry = spec_task_permission_codes - registered_task_permissions
+    assert not missing_from_registry
+
+    resolved_task_permissions = set().union(*BUILTIN_ROLE_PERMISSION_CODES.values())
+    missing_from_resolution = spec_task_permission_codes - resolved_task_permissions
+    assert not missing_from_resolution
