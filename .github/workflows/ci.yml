@@ -86,6 +86,39 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .[dev]
 
+      - name: Warm PostgreSQL admin connection
+        run: |
+          python - <<'PY'
+          import os
+          import time
+          from uuid import uuid4
+          import psycopg
+
+          dsn = os.environ["H5_POSTGRES_TEST_DSN"]
+          last_error = None
+          for attempt in range(1, 16):
+              scratch_db = f"codex_probe_{uuid4().hex[:8]}"
+              try:
+                  with psycopg.connect(dsn, connect_timeout=2, autocommit=True) as conn:
+                      with conn.cursor() as cur:
+                          cur.execute("SELECT 1")
+                          cur.execute(f'CREATE DATABASE "{scratch_db}"')
+                          cur.execute(
+                              "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                              "WHERE datname = %s AND pid <> pg_backend_pid()",
+                              (scratch_db,),
+                          )
+                          cur.execute(f'DROP DATABASE IF EXISTS "{scratch_db}"')
+                  print(f"postgres warmup passed on attempt {attempt}")
+                  break
+              except Exception as exc:
+                  last_error = exc
+                  print(f"postgres warmup attempt {attempt} failed: {exc}")
+                  time.sleep(2)
+          else:
+              raise SystemExit(f"postgres warmup failed: {last_error}")
+          PY
+
       - name: Run PostgreSQL concurrency tests
         run: python -m pytest tests/test_h5_task_packages_wallet_postgres.py -q
 

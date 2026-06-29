@@ -267,3 +267,11 @@
 2026-06-30 03:09 SGT | W9 | python -m pytest tests tests/api tests/services -q --timeout=60 | PASS | 183 passed, 1 warning | final acceptance sequential verification
 2026-06-30 03:10 SGT | W9 | python scripts/run_p0_e2e_smoke.py | PASS | smoke passed | final acceptance sequential verification
 2026-06-30 03:11 SGT | W9 | cd frontend; npm run typecheck; npm run build | PASS | typecheck/build passed | final acceptance sequential verification
+[2026-06-30 03:07:42 +08:00] START final acceptance verification serial run
+[2026-06-30 03:07:52 +08:00] PASS python scripts/ci_collect_core_tests.py -> collected core groups present
+[2026-06-30 03:10:00 +08:00] PASS python -m pytest tests tests/api tests/services -q --timeout=60 -> 183 passed, 1 warning
+[2026-06-30 03:10:49 +08:00] PASS python scripts/run_p0_e2e_smoke.py -> W6 smoke passed
+[2026-06-30 03:11:09 +08:00] PASS frontend npm run typecheck
+[2026-06-30 03:11:38 +08:00] PASS frontend npm run build
+[2026-06-30 03:12:06 +08:00] PASS python scripts/check_production_readiness.py -> no blocking issues
+[2026-06-30 03:12:06 +08:00] PASS PowerShell parser validation for backup/restore/check-launch/backup-redis scripts

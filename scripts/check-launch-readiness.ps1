@@ -225,7 +225,11 @@ try {
         Write-CheckResult "10" "Meta account configured" "pass" $metaAccountsCheck.message
     } else {
         $warnCount++
-        Write-CheckResult "10" "Meta account configured" "warning" ($metaAccountsCheck.message if $metaAccountsCheck else "No Meta accounts found")
+        $metaAccountWarning = "No Meta accounts found"
+        if ($metaAccountsCheck) {
+            $metaAccountWarning = $metaAccountsCheck.message
+        }
+        Write-CheckResult "10" "Meta account configured" "warning" $metaAccountWarning
     }
 
     # [11/15] AI provider available
