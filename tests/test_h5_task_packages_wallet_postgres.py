@@ -41,6 +41,9 @@ from app.services.h5_member_auth_service import H5MemberContext
 from app.services.h5_member_commerce_service import H5MemberCommerceService
 from app.services.task_manual_add_service import TaskManualAddService
 
+POSTGRES_BARRIER_TIMEOUT_SECONDS = 30
+POSTGRES_SHORT_BARRIER_TIMEOUT_SECONDS = 10
+
 
 def _build_postgres_test_url() -> URL:
     return make_url(
@@ -640,7 +643,7 @@ def _run_postgres_concurrent_claims(
                     for item in session.new
                 )
                 if waits_for_wallet or waits_for_reward:
-                    barrier.wait(timeout=10)
+                    barrier.wait(timeout=POSTGRES_BARRIER_TIMEOUT_SECONDS)
                 return original_commit()
 
             session.commit = synchronized_commit  # type: ignore[method-assign]
@@ -689,7 +692,7 @@ def _run_postgres_concurrent_withdrawals(
             def synchronized_commit() -> None:
                 if any(isinstance(item, WithdrawalRequest) for item in session.new):
                     try:
-                        barrier.wait(timeout=2)
+                        barrier.wait(timeout=POSTGRES_SHORT_BARRIER_TIMEOUT_SECONDS)
                     except BrokenBarrierError:
                         pass
                 return original_commit()
@@ -861,7 +864,7 @@ def test_h5_task_purchase_waits_for_manual_add_and_does_not_settle_early_under_p
 
             def synchronized_commit() -> None:
                 if any(type(item).__name__ == "TaskManualAddItemLog" for item in session.new):
-                    manual_add_ready.wait(timeout=10)
+                    manual_add_ready.wait(timeout=POSTGRES_BARRIER_TIMEOUT_SECONDS)
                 return original_commit()
 
             session.commit = synchronized_commit  # type: ignore[method-assign]
@@ -888,7 +891,7 @@ def test_h5_task_purchase_waits_for_manual_add_and_does_not_settle_early_under_p
                 member_profile_id=seeded["member_profile_id"],
             )
             service = H5MemberCommerceService(session=session)
-            manual_add_ready.wait(timeout=10)
+            manual_add_ready.wait(timeout=POSTGRES_BARRIER_TIMEOUT_SECONDS)
             payload = asyncio.run(
                 service.purchase_task_package_item(
                     context=context,

@@ -261,3 +261,9 @@
 2026-06-30 02:43 SGT | W9 | python -m pytest tests tests/api tests/services -q --timeout=60 | PASS | 183 passed, 1 warning | final acceptance verification
 2026-06-30 02:43 SGT | W9 | python scripts/run_p0_e2e_smoke.py | PASS | smoke passed | final acceptance verification
 2026-06-30 02:43 SGT | W9 | cd frontend; npm run typecheck; npm run build | PASS | typecheck/build passed | final acceptance verification
+2026-06-30 03:02 SGT | W9 | docker compose config + docker compose up -d app (without tracked .env) | PASS | compose-config-ok; compose-up-code=0 | final acceptance compose regression
+2026-06-30 03:03 SGT | W9 | python -m pytest tests/test_h5_task_packages_wallet_postgres.py -q against postgres:17 | PASS | 4 passed, 1 warning | final acceptance postgres17 stability
+2026-06-30 03:07 SGT | W9 | python scripts/ci_collect_core_tests.py | PASS | collected_count=183, missing_groups=[] | final acceptance sequential verification
+2026-06-30 03:09 SGT | W9 | python -m pytest tests tests/api tests/services -q --timeout=60 | PASS | 183 passed, 1 warning | final acceptance sequential verification
+2026-06-30 03:10 SGT | W9 | python scripts/run_p0_e2e_smoke.py | PASS | smoke passed | final acceptance sequential verification
+2026-06-30 03:11 SGT | W9 | cd frontend; npm run typecheck; npm run build | PASS | typecheck/build passed | final acceptance sequential verification

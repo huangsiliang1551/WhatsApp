@@ -70,7 +70,8 @@ services:
     container_name: whatsapp_app
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-whatsapp_user}:${POSTGRES_PASSWORD:-secure_password}@postgres:5432/${POSTGRES_DB:-whatsapp_bot}
       REDIS_URL: redis://redis:6379/0
@@ -129,7 +130,8 @@ services:
     container_name: whatsapp_worker
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-whatsapp_user}:${POSTGRES_PASSWORD:-secure_password}@postgres:5432/${POSTGRES_DB:-whatsapp_bot}
       REDIS_URL: redis://redis:6379/0
