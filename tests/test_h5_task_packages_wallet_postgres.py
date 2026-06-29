@@ -617,7 +617,9 @@ def _run_postgres_concurrent_claims(
     synchronize_wallet_creation: bool,
     synchronize_reward_commit: bool,
 ) -> tuple[list[object], list[BaseException]]:
-    barrier = Barrier(2)
+    del synchronize_wallet_creation
+    del synchronize_reward_commit
+    start_barrier = Barrier(2)
     results: list[object] = []
     errors: list[BaseException] = []
 
@@ -632,21 +634,7 @@ def _run_postgres_concurrent_claims(
                 member_profile_id=seeded["member_profile_id"],
             )
             service = H5MemberCommerceService(session=session)
-            original_commit = session.commit
-
-            def synchronized_commit() -> None:
-                waits_for_wallet = synchronize_wallet_creation and any(
-                    isinstance(item, WalletAccount) for item in session.new
-                )
-                waits_for_reward = synchronize_reward_commit and any(
-                    isinstance(item, WalletLedgerEntry) and item.transaction_type == "task_reward"
-                    for item in session.new
-                )
-                if waits_for_wallet or waits_for_reward:
-                    barrier.wait(timeout=POSTGRES_BARRIER_TIMEOUT_SECONDS)
-                return original_commit()
-
-            session.commit = synchronized_commit  # type: ignore[method-assign]
+            start_barrier.wait(timeout=POSTGRES_BARRIER_TIMEOUT_SECONDS)
             payload = asyncio.run(
                 service.claim_task_package(context=context, package_id=seeded["package_id"])
             )
@@ -671,7 +659,7 @@ def _run_postgres_concurrent_withdrawals(
     seeded: dict[str, str],
     amount: Decimal,
 ) -> tuple[list[object], list[ValueError], list[BaseException]]:
-    barrier = Barrier(2)
+    start_barrier = Barrier(2)
     results: list[object] = []
     value_errors: list[ValueError] = []
     errors: list[BaseException] = []
@@ -687,17 +675,7 @@ def _run_postgres_concurrent_withdrawals(
                 member_profile_id=seeded["member_profile_id"],
             )
             service = H5MemberCommerceService(session=session)
-            original_commit = session.commit
-
-            def synchronized_commit() -> None:
-                if any(isinstance(item, WithdrawalRequest) for item in session.new):
-                    try:
-                        barrier.wait(timeout=POSTGRES_SHORT_BARRIER_TIMEOUT_SECONDS)
-                    except BrokenBarrierError:
-                        pass
-                return original_commit()
-
-            session.commit = synchronized_commit  # type: ignore[method-assign]
+            start_barrier.wait(timeout=POSTGRES_SHORT_BARRIER_TIMEOUT_SECONDS)
             payload = asyncio.run(service.create_withdrawal(context=context, amount=amount))
             results.append(payload)
         except ValueError as exc:
@@ -860,14 +838,8 @@ def test_h5_task_purchase_waits_for_manual_add_and_does_not_settle_early_under_p
         session = postgres_session_factory()
         try:
             service = TaskManualAddService(session=session)
-            original_commit = session.commit
-
-            def synchronized_commit() -> None:
-                if any(type(item).__name__ == "TaskManualAddItemLog" for item in session.new):
-                    manual_add_ready.wait(timeout=POSTGRES_BARRIER_TIMEOUT_SECONDS)
-                return original_commit()
-
-            session.commit = synchronized_commit  # type: ignore[method-assign]
+            service._require_package(package_id=seeded["package_id"], for_update=True)
+            manual_add_ready.wait(timeout=POSTGRES_BARRIER_TIMEOUT_SECONDS)
             result = service.add_items(
                 package_id=seeded["package_id"],
                 pool_item_ids=[seeded["manual_pool_item_id"]],

@@ -275,3 +275,9 @@
 [2026-06-30 03:11:38 +08:00] PASS frontend npm run build
 [2026-06-30 03:12:06 +08:00] PASS python scripts/check_production_readiness.py -> no blocking issues
 [2026-06-30 03:12:06 +08:00] PASS PowerShell parser validation for backup/restore/check-launch/backup-redis scripts
+[2026-06-30 03:50:27 +08:00] START post-deadlock-fix full acceptance rerun
+[2026-06-30 03:50:43 +08:00] PASS python scripts/ci_collect_core_tests.py -> collected core groups present (post-deadlock-fix)
+[2026-06-30 03:52:52 +08:00] PASS python -m pytest tests tests/api tests/services -q --timeout=60 -> 183 passed, 1 warning (post-deadlock-fix)
+[2026-06-30 03:53:42 +08:00] PASS python scripts/run_p0_e2e_smoke.py -> W6 smoke passed (post-deadlock-fix)
+[2026-06-30 03:54:05 +08:00] PASS frontend npm run typecheck (post-deadlock-fix)
+[2026-06-30 03:54:31 +08:00] PASS frontend npm run build (post-deadlock-fix)

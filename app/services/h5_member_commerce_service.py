@@ -133,7 +133,9 @@ class H5MemberCommerceService:
                 self._session.refresh(package)
                 payload, _ = self._serialize_task_package(package=package, context=context)
             return payload
-        payload = self._serialize_task_package_with_refresh(package=package, context=context)
+        payload, changed = self._serialize_task_package(package=package, context=context)
+        if changed:
+            self._session.add(package)
         if package.status == "pending_claim" and package.template.package_type == "promotion":
             self._ensure_promotion_claim_ready(payload.promotion)
         if package.status == "pending_claim":
@@ -143,6 +145,7 @@ class H5MemberCommerceService:
             package.claimed_at = now
             if package.template.package_type == "promotion":
                 wallet = self._require_wallet(context=context, create_if_missing=True)
+                wallet = self._require_wallet_row_for_update(wallet_id=wallet.id)
                 package.status = "completed"
                 package.completed_at = now
                 package.expires_at = now
@@ -276,6 +279,7 @@ class H5MemberCommerceService:
         package = self._require_package(context=context, package_id=package_id, for_update=True)
         item = self._require_package_item(package=package, item_id=item_id)
         wallet = self._require_wallet(context=context, create_if_missing=True)
+        wallet = self._require_wallet_row_for_update(wallet_id=wallet.id)
 
         if package.template.package_type == "promotion":
             return H5TaskPackagePurchaseResponse(
@@ -431,6 +435,10 @@ class H5MemberCommerceService:
             if current_item.available_at is None:
                 current_item.available_at = now
             self._session.add(current_item)
+            self._session.commit()
+            self._session.refresh(package)
+            return self._serialize_task_package_with_refresh(package=package, context=context)
+        if changed:
             self._session.commit()
             self._session.refresh(package)
         return self._serialize_task_package_with_refresh(package=package, context=context)
