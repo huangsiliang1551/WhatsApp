@@ -26,3 +26,8 @@ backend-restart.*.log
 .tmp_pytest/
 .workbuddy/
 tmp_*
+tmp_*.json
+tmp_*.db
+fix_*.py
+debug_test.py
+_test_*.py

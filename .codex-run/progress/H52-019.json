@@ -1,1 +1,0 @@
-{"task":"H52-019","phase":6,"name":"ErrorBoundary","status":"completed","files":["frontend/src/pages/h5-member/ErrorBoundary.tsx","frontend/src/pages/H5App.tsx"],"description":"React class-based ErrorBoundary, error reporting to backend, refresh button","completedAt":"2026-06-12T15:33:00Z"}

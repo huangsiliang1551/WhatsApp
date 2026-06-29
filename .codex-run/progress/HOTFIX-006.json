@@ -1,9 +1,0 @@
-{
-  "id": "HOTFIX-006",
-  "status": "COMPLETE",
-  "description": "ConversationList 空状态检查",
-  "files": ["frontend/src/pages/admin-chat/ConversationList.tsx"],
-  "lines": "181-182",
-  "details": "空状态显示友好文案 '暂无会话'，无乱码残留。",
-  "validated": "人工审查通过"
-}

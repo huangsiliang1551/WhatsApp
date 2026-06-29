@@ -1,1 +1,0 @@
-{"task":"AF4-005","phase":2,"status":"complete","summary":"告警中心 Tab 容器 (2Tab)","changes":[{"file":"frontend/src/pages/AlertsPage.tsx","action":"modified","detail":"AlertsPage 改为 Tab 容器, 2 个 Tab: 告警规则/通知渠道; 原内容提取为 AlertsContent"}]}

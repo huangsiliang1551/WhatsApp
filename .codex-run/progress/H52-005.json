@@ -1,1 +1,0 @@
-{"task":"H52-005","phase":2,"name":"Auth API Replacement","status":"completed","files":["frontend/src/services/h5Member.ts"],"description":"loginApi, registerApi, refreshTokenApi, logoutApi, getUserInfoApi - dual-mode (real/mock)","completedAt":"2026-06-12T15:33:00Z"}

@@ -1,1 +1,0 @@
-{"task":"AF4-003","phase":2,"status":"complete","summary":"安全中心 Tab 容器 (5Tab)","changes":[{"file":"frontend/src/pages/SecuritySettingsPage.tsx","action":"modified","detail":"SecuritySettingsPage 改为 Tab 容器, 5 个 Tab: 安全策略/身份同步/成员授权/访问控制/风控名单; 原内容提取为 SecuritySettingsContent"}]}

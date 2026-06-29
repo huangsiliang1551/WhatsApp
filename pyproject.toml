@@ -28,7 +28,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.4,<9.0",
-  "pytest-asyncio>=1.4,<2.0"
+  "pytest-asyncio>=1.4,<2.0",
+  "pytest-timeout>=2.4,<3.0"
 ]
 
 [tool.setuptools.packages.find]
@@ -41,8 +42,6 @@ testpaths = [
     "tests",
 ]
 norecursedirs = [
-    "tests/api",
-    "tests/services",
 ]
 markers = [
     "postgres: Tests that require PostgreSQL (skipped automatically when no Postgres available)",

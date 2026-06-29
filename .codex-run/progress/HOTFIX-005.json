@@ -1,9 +1,0 @@
-{
-  "id": "HOTFIX-005",
-  "status": "COMPLETE",
-  "description": "ContextPanel Tab 文案检查",
-  "files": ["frontend/src/pages/admin-chat/ContextPanel.tsx"],
-  "lines": "102-107",
-  "details": "4 个 Tab 文案正确：🎯 操作 / 📋 详情 / 👤 客户 / 📜 历史。无乱码残余。",
-  "validated": "人工审查通过"
-}

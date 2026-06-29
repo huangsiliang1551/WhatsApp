@@ -1,1 +1,0 @@
-{"task":"H52-017","phase":5,"name":"MediaUploader Component","status":"completed","files":["frontend/src/pages/h5-member/MediaUploader.tsx"],"description":"File type/size validation, image compression (Canvas API), progress, drag & drop","completedAt":"2026-06-12T15:33:00Z"}

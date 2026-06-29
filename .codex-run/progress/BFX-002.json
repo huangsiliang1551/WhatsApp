@@ -1,9 +1,0 @@
-{
-  "task": "BFX-002: 客户360聚合API",
-  "status": "COMPLETE",
-  "changes": [
-    "app/services/customer_summary_service.py: 新增 CustomerSummaryService (并行查询5模块)",
-    "app/api/routes/customers.py: 新增 GET /api/customers/{customer_id}/summary 端点"
-  ],
-  "verification": "tests/test_customer_summary.py: 10 tests passed"
-}

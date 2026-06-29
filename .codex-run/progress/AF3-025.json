@@ -1,1 +1,0 @@
-{"task":"AF3-025","title":"全量验证","phase":7,"status":"completed","files":[],"verified":true,"test_count":52,"build":"passed","fixes":["未认证用户自动跳转/login - 使用window.location.replace避免popstate循环"]}

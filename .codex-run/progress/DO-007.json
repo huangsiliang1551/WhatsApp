@@ -1,1 +1,0 @@
-﻿{"task":"DO-007","status":"COMPLETE","description":"Redis 备份脚本","deliverables":["新增 scripts/backup-redis.ps1（BGSAVE → 等待 → docker cp → manifest）"],"completed_at":"2026-06-12T12:25:00Z"}

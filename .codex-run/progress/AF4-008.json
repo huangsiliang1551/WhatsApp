@@ -1,1 +1,0 @@
-{"task":"AF4-008","phase":3,"status":"complete","summary":"角色权限 Tab 容器 (3Tab)","changes":[{"file":"frontend/src/pages/RolesPage.tsx","action":"modified","detail":"RolesPage 改为 Tab 容器, 3 个 Tab: 角色定义/成员授权/访问策略; 原内容提取为 RolesContent; 与安全中心共享 LazyMemberAccessContent/LazyAccessControlContent"}]}

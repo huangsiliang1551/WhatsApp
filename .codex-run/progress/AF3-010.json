@@ -1,1 +1,0 @@
-{"task":"AF3-010","title":"会话/客户页面 API 对接","phase":3,"status":"completed","files":["frontend/src/pages/ConversationsPage.tsx","frontend/src/pages/CustomersPage.tsx","frontend/src/pages/MembersPage.tsx"],"verified":true}

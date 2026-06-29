@@ -1,1 +1,0 @@
-﻿{"task":"DO-002","status":"COMPLETE","description":"Alertmanager 通知配置","deliverables":["alertmanager.yml 含 default-webhook 和 critical-webhook 两级路由","含 inhibit_rules 抑制规则","Webhook URL 使用模板变量"],"completed_at":"2026-06-12T12:15:00Z"}
